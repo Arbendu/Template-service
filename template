@@ -1,0 +1,2662 @@
+// F:\FinCore1.1\v1.1\Backend\CommonRequestService
+
+// com.tcs.fincore.CommonRequestService.controller
+// RequestController
+
+package com.tcs.fincore.CommonRequestService.controller;
+
+import java.util.List;
+
+import com.tcs.fincore.CommonRequestService.dto.CancelRequestDto;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fincore.commonutilities.jwt.JwtUtil;
+import com.tcs.fincore.CommonRequestService.dto.CreateRequestDto;
+import com.tcs.fincore.CommonRequestService.dto.MyRequestFilterDto;
+import com.tcs.fincore.CommonRequestService.dto.ProcessRequestDto;
+import com.tcs.fincore.CommonRequestService.model.CommonReq;
+import com.tcs.fincore.CommonRequestService.service.RequestService;
+
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * RequestController :-
+ *
+ * This controller handles API requests related to creating, retrieving, and processing common requests within the FinCore Application.
+ * It provides endpoints for users to manage their requests, view pending items, and for approvers to update request statuses.
+ *
+ * @author Shubhankar [v1018405]
+ * @version 1.0
+ * @since 2025-10-01
+ */
+@RestController
+@RequiredArgsConstructor
+@Slf4j
+@RequestMapping("/api")
+public class RequestController {
+
+	private final RequestService requestService;
+    private final JwtUtil jwtUtil;
+
+
+    /**
+     * Creates a new request initiated by a user (maker).
+     *
+     * @param createRequestDto The data transfer object containing the details of the new request.
+     * @param token The authorization token used to identify the user making the request.
+     * @return The created CommonReq entity.
+     * @throws JsonProcessingException If there is an issue processing the request data.
+     */
+	@PostMapping("/create-request")
+	@ResponseStatus(HttpStatus.CREATED)
+	public CommonReq createRequest(
+			@Valid @RequestBody CreateRequestDto createRequestDto,
+			@RequestHeader("Authorization") String token
+	) throws JsonProcessingException {
+		String userId = jwtUtil.getUserIdFromToken(token);
+		log.info("Received request creation call from user: {}", userId);
+		return requestService.createRequest(createRequestDto, userId, token);
+	}
+
+    /**
+     * Fetches requests created by the current user (maker). Requests can be filtered by `requestType`.
+     *
+     * @param token The authorization token of the user.
+     * @param filterDto An object that may contain a `requestType` for filtering (e.g., `{"requestType": "SEGMENT_CODE"}`).
+     * @return A list of CommonReq entities matching the criteria.
+     */
+	// tab2 master screen
+	@PostMapping("/my-requests")
+	public List<CommonReq> getMyRequests(
+			@RequestHeader("Authorization") String token,
+			@RequestBody MyRequestFilterDto filterDto
+	) {
+		String userId = jwtUtil.getUserIdFromToken(token);
+		log.info(
+				"Received request for fetch data for the user: {} and request type: {}", userId,
+				filterDto.getRequestType()
+		);
+		return requestService.getMyRequests(userId, filterDto.getRequestType());
+	}
+
+    /**
+     * Retrieves a list of requests that are pending approval for the current user (excluding the own requests).
+     *
+     * @param authorizationHeader The authorization token of the user.
+     * @param filterDto An object that contain a `requestType` for filtering pending requests.
+     * @return A list of pending CommonReq entities excluding the own requests.
+     */
+	// accept
+	@PostMapping("/pending-requests")
+	public List<CommonReq> getPendingRequests(
+			@RequestHeader("Authorization") String authorizationHeader,
+			@RequestBody MyRequestFilterDto filterDto
+	) {
+		String userId = jwtUtil.getUserIdFromToken(authorizationHeader);
+		log.info("Received request for pending data for the request type: {}", filterDto.getRequestType());
+		return requestService.getPendingRequests(userId, filterDto.getRequestType());
+	}
+
+    /**
+     * Retrieves all requests present in the system (intended for admin/supervisory roles).
+     *
+     * @param authorizationHeader The authorization token.
+     * @return A list of all CommonReq entities.
+     */
+	@GetMapping("/all-requests")
+	public List<CommonReq> getAllRequests(@RequestHeader("Authorization") String authorizationHeader) {
+		return requestService.getAllRequests();
+	}
+
+
+    /**
+     * Updates the status of a request (Accepts/Rejects) by a checker (approver role).
+     *
+     * @param token The authorization token of the executor (checker).
+     * @param processRequestDto The DTO containing the request ID, new status, and any remarks.
+     * @return The updated CommonReq entity.
+     * @throws JsonProcessingException If there is an issue processing the request data.
+     */
+	@PatchMapping("/update-request")
+	public CommonReq updateRequestStatus(
+			@RequestHeader("Authorization") String token,
+			@RequestBody ProcessRequestDto processRequestDto
+	) throws JsonProcessingException {
+		String executorId = jwtUtil.getUserIdFromToken(token);
+		// The service layer throws a ResourceNotFoundException if the optional is
+		// empty,
+		// which is caught by the GlobalExceptionHandler.
+		return requestService.updateRequestStatus(processRequestDto, executorId).get();
+	}
+
+
+    /**
+     * Cancels a pending request initiated by the user.
+     *
+     * @param token The authorization token of the user (must be the creator).
+     * @param cancelRequestDto The DTO containing the request ID and optional remarks.
+     * @return The updated CommonReq entity with status CANCELLED.
+     */
+    @PatchMapping("/cancel-request")
+    public CommonReq cancelRequest(
+            @RequestHeader("Authorization") String token,
+            @Valid @RequestBody CancelRequestDto cancelRequestDto
+    ) {
+        String userId = jwtUtil.getUserIdFromToken(token);
+        log.info("Received cancellation request for request ID: {} from user: {}", cancelRequestDto.getRequestId(), userId);
+        return requestService.cancelRequest(cancelRequestDto, userId);
+    }
+}
+
+
+
+
+
+// ----------------------------------------------------------------------------------------
+// com.tcs.fincore.CommonRequestService.dto
+// ----------------------------------------------------------------------------------------
+// Allowed Collumns
+
+package com.tcs.fincore.CommonRequestService.dto;
+
+
+import com.tcs.fincore.CommonRequestService.model.AllowedColumns;
+import lombok.*;
+
+@Data
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+public class AllowedColumnsDTO {
+
+    private Long columnId;
+    private String columnName;
+    private String label;
+    private String dataType;
+    private String selectable;
+    private String filterable;
+    private String aggFuncs;
+
+
+    public AllowedColumnsDTO(AllowedColumns entity) {
+        this.columnId = entity.getId();
+        this.columnName = entity.getColumnName();
+        this.label = entity.getLabel();
+        this.dataType=entity.getDataType();
+        this.selectable = entity.getSelectable();
+        this.filterable = entity.getFilterable();
+        this.aggFuncs = entity.getAggFuncs();
+    }
+
+}
+
+
+
+
+// AllowedTables
+
+package com.tcs.fincore.CommonRequestService.dto;
+
+
+import com.tcs.fincore.CommonRequestService.model.AllowedTables;
+import lombok.*;
+
+import java.util.List;
+import java.util.stream.Collectors;
+
+@Data
+@Getter
+@Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class AllowedTablesDTO {
+
+    private Long tableId;
+    private String tableName;
+    private String label;
+    private List<AllowedColumnsDTO> columns;
+
+    public AllowedTablesDTO(AllowedTables table) {
+        this.tableId = table.getId();
+        this.tableName = table.getTableName();
+        this.label = table.getLabel();
+        this.columns = table.getColumns().stream().filter(c -> "Y".equalsIgnoreCase(c.getActive())).map(AllowedColumnsDTO::new).collect(Collectors.toList());
+    }
+
+}
+
+
+
+
+// Report Template Dto
+
+package com.tcs.fincore.CommonRequestService.dto;
+
+import jakarta.validation.constraints.NotNull;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonTypeName;
+import com.tcs.fincore.CommonRequestService.dto.payload.KeyablePayload;
+import jakarta.validation.constraints.NotNull;
+import lombok.*;
+
+import javax.swing.*;
+import java.util.List;
+import java.util.Map;
+
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class ReportTemplateDto implements KeyablePayload {
+
+    @NotNull
+    private Template template;
+
+    @NotNull
+    private List<ReportTemplateVariantDto> variants;
+
+//    @Override
+//    public String getKey() {
+//        if (template != null && template.getTemplateMeta() != null){
+//            return template.getTemplateMeta().getTemplateId();
+//        }
+//        return null;
+//    }
+
+    /**
+     * Provides a unique key for this DTO, based on the currency code.
+     * This method is ignored during JSON serialization.
+     *
+     * @return The {@code currencyCode} as the key.
+     */
+    @Override
+    @JsonIgnore
+    public String getKey(
+    ) {
+        // TODO Auto-generated method stub
+        return this.template.getReportMeta().getReportId();
+    }
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class Template {
+        @NotNull
+        private TemplateMeta templateMeta;
+
+        @NotNull
+        private ReportMeta reportMeta;
+
+        @NotNull
+        private ReportData reportData;
+    }
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class TemplateMeta {
+        private String templateId;
+        private String version;
+        private String description;
+        // e.g. "A4", "LETTER"; "portrait" / "landscape"
+        private String pageSize;
+        private String pageOrientation;
+        private String headerLayout;  //layout (1-col, 2-col, etc.)
+    }
+
+    @Data
+    public static class ReportMeta {
+        private String reportName;
+        private String reportId;
+        private List<Map<String, String>> extras;
+    }
+
+    @Data
+    public static class ReportData {
+        private List<ColumnDefinition> columns;
+        private List<Row> rows;
+    }
+
+    @Data
+    public static class ColumnDefinition {
+        private String id;
+        private String name;
+        private Map<String, Object> format; // flexible formatting map
+    }
+
+    @Data
+    public static class Row {
+        /**
+         * DATA|GROUP_START|GROUP_END|NOTE|BREAK|DYNAMIC (future)
+         */
+        private String id;
+        private String rowType;
+        private String rowTitle;
+        private List<Cell> cells;
+
+        // Extension point for dynamic blocks etc.
+        // Example: { "type":"DB_LIST", "table":"...", "filters":{...}, "limit":100 }
+        private Map<String, Object> dynamicConfig;
+    }
+
+    @Data
+    public static class Cell {
+        private String id;                     // assigned by TemplateProcessor (R{row}C{col})
+        private String type;                   // TEXT, DB_*, FORMULA, etc.
+        private Object value;                  // used for TEXT cells
+        private String expression;             // used for formulas
+        private Map<String, Object> variables; // formula vars (CELL_REF, DB_*, CONST, etc.)
+        private Map<String, Object> source;    // for DB_* types: { table, column, filters }
+        private Map<String, Object> render;    // { bold, colspan, rowspan, align, format, bgColor, ... }
+    }
+
+
+}
+
+
+
+
+// Report Template Filter Rule Dto
+
+package com.tcs.fincore.CommonRequestService.dto;
+
+import jakarta.validation.constraints.NotBlank;
+import lombok.*;
+
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class ReportTemplateFilterRuleDto {
+
+    private Long ruleId;
+    private String variantId;
+
+    @NotBlank
+    private String scopeType;
+
+    @NotBlank
+    private String scopeValue;
+
+    @NotBlank
+    private String paramName;
+
+    @NotBlank
+    private String dbColumn;
+
+    @NotBlank
+    private String operator;
+}
+
+
+
+
+// Report Template varient Dto
+
+package com.tcs.fincore.CommonRequestService.dto;
+
+import jakarta.validation.constraints.NotBlank;
+import lombok.*;
+
+import java.util.List;
+
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class ReportTemplateVariantDto {
+
+    @NotBlank
+    private String variantCode;
+
+    @NotBlank
+    private String variantName;
+
+    private String description;
+
+    @Builder.Default
+    private String status = "ACTIVE";
+
+    private List<ReportTemplateVariantParamDto> params;
+
+    private List<ReportTemplateFilterRuleDto> filterRules;
+}
+
+
+
+
+// Report Template Variant Param Dto
+
+package com.tcs.fincore.CommonRequestService.dto;
+
+import jakarta.validation.constraints.NotBlank;
+import lombok.*;
+
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class ReportTemplateVariantParamDto {
+
+    private Long paramId;
+    private String variantId;
+
+    @NotBlank
+    private String paramName;
+
+    @NotBlank
+    private String label;
+
+    @NotBlank
+    private String paramType;
+
+    private boolean required;
+
+    private boolean multiValued;
+
+    private String uiHint;
+
+    private String validation;
+}
+
+
+
+
+// ------------------------------------------------------------------------------------
+// model: com.tcs.fincore.CommonRequestService.model.converters
+// ------------------------------------------------------------------------------------
+// Change Type Converter
+
+package com.tcs.fincore.CommonRequestService.model.converters;
+
+import com.tcs.fincore.CommonRequestService.model.enums.ChangeType;
+import jakarta.persistence.AttributeConverter;
+import jakarta.persistence.Converter;
+import java.util.stream.Stream;
+
+/**
+ * This converter handles the mapping between the {@link ChangeType} enum in Java
+ * and its single-character representation ('A' for Add, 'U' for Update, 'D' for Delete) in the database.
+ * The {@code @Converter(autoApply = true)} annotation ensures that this converter is
+ * automatically applied to all fields of type {@link ChangeType} throughout the persistence unit.
+ *
+ * It implements the {@link AttributeConverter} interface to define the conversion logic.
+ */
+@Converter(autoApply = true)
+public class ChangeTypeConverter implements AttributeConverter<ChangeType, String> {
+
+    /**
+     * Converts a Java {@link ChangeType} enum value to its corresponding database column representation (a single-character String).
+     *
+     * @param changeType The Java enum value to convert.
+     * @return The single-character code ('A', 'U', or 'D') for the database, or {@code null} if the input is {@code null}.
+     */
+    @Override
+    public String convertToDatabaseColumn(ChangeType changeType) {
+        if (changeType == null) {
+            return null;
+        }
+        return changeType.getCode();
+    }
+
+    /**
+     * Converts a database column representation (a single-character String) back to its corresponding Java {@link ChangeType} enum value.
+     *
+     * @param code The single-character code ('A', 'U', or 'D') from the database to convert.
+     * @return The Java {@link ChangeType} enum value.
+     * @throws IllegalArgumentException if the provided database code does not match any known {@link ChangeType} code.
+     */
+    @Override
+    public ChangeType convertToEntityAttribute(String code) {
+        if (code == null) {
+            return null;
+        }
+        return Stream.of(ChangeType.values())
+                .filter(c -> c.getCode().equals(code))
+                .findFirst()
+                .orElseThrow(IllegalArgumentException::new);
+    }
+}
+
+
+
+// Request Status Converter
+
+package com.tcs.fincore.CommonRequestService.model.converters;
+
+
+import com.tcs.fincore.CommonRequestService.model.enums.RequestStatus;
+import jakarta.persistence.AttributeConverter;
+import jakarta.persistence.Converter;
+import java.util.stream.Stream;
+
+/**
+ * This converter handles the mapping between the RequestStatus enum in Java
+ * and its single-character representation ('P', 'A', 'R') in the database.
+ * The autoApply=true attribute means JPA will automatically use this converter
+ * for all fields of type RequestStatus.
+ */
+@Converter(autoApply = true)
+public class RequestStatusConverter implements AttributeConverter<RequestStatus, String> {
+
+    /**
+     * Converts the enum constant to its database character code.
+     * @param status The enum value (e.g., RequestStatus.PENDING)
+     * @return The database value (e.g., "P")
+     */
+    @Override
+    public String convertToDatabaseColumn(RequestStatus status) {
+        if (status == null) {
+            return null;
+        }
+        return status.getCode();
+    }
+
+    /**
+     * Converts the character code from the database back to the enum constant.
+     * @param code The database value (e.g., "P")
+     * @return The enum value (e.g., RequestStatus.PENDING)
+     */
+    @Override
+    public RequestStatus convertToEntityAttribute(String code) {
+        if (code == null) {
+            return null;
+        }
+        return Stream.of(RequestStatus.values())
+                .filter(c -> c.getCode().equals(code))
+                .findFirst()
+                .orElseThrow(IllegalArgumentException::new);
+    }
+}
+
+
+
+
+// Request Type Convereter
+
+package com.tcs.fincore.CommonRequestService.model.converters;
+
+import com.tcs.fincore.CommonRequestService.model.enums.RequestType;
+import jakarta.persistence.AttributeConverter;
+import jakarta.persistence.Converter;
+import java.util.stream.Stream;
+
+/**
+ * This converter handles the mapping between the {@link RequestType} enum in Java
+ * and its custom string representation ('SegmentCode', 'CGL') in the database.
+ *
+ * <p>It implements the {@link AttributeConverter} interface to facilitate
+ * seamless conversion by the persistence provider (e.g., Hibernate).
+ * The {@code autoApply = true} annotation ensures this converter is used automatically
+ * for all fields of type {@link RequestType} across the application,
+ * unless explicitly overridden.
+ */
+@Converter(autoApply = true)
+public class RequestTypeConverter implements AttributeConverter<RequestType, String> {
+
+    /**
+     * Converts a {@link RequestType} enum value to its corresponding database column string representation.
+     *
+     * @param requestType The Java enum value to convert.
+     * @return The database column value (e.g., 'SegmentCode', 'CGL'), or {@code null} if the input is {@code null}.
+     */
+    @Override
+    public String convertToDatabaseColumn(RequestType requestType) {
+        if (requestType == null) {
+            return null;
+        }
+        return requestType.getDbValue();
+    }
+
+    /**
+     * Converts a database column string value back to its corresponding {@link RequestType} enum value.
+     *
+     * @param dbValue The database column value (e.g., 'SegmentCode', 'CGL') to convert.
+     * @return The Java enum value matching the database value.
+     * @throws IllegalArgumentException if the provided {@code dbValue} does not match any known {@link RequestType} value.
+     */
+    @Override
+    public RequestType convertToEntityAttribute(String dbValue) {
+        if (dbValue == null) {
+            return null;
+        }
+        return Stream.of(RequestType.values())
+                .filter(c -> c.getDbValue().equals(dbValue))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Unknown database value: " + dbValue));
+    }
+}
+
+
+
+
+// model: enums
+// Change Type
+
+package com.tcs.fincore.CommonRequestService.model.enums;
+
+import lombok.Getter;
+
+/**
+ * Enumeration representing the types of changes that can be applied to a record or entity.
+ * This is commonly used in tracking the nature of a data modification request.
+ */
+@Getter
+public enum ChangeType {
+    /**
+     * Represents the addition (creation) of a new record.
+     */
+    ADD("A"),
+
+    /**
+     * Represents the modification (update) of an existing record.
+     */
+    UPDATE("U"),
+
+    /**
+     * Represents the removal (deletion) of an existing record.
+     */
+    DELETE("D"),
+
+    /**
+     * Represents the block state of an existing record in the master table.
+     */
+    BLOCK("B"),
+
+
+    /**
+     *Represents the unblock state of an existing record in the master table
+     */
+    UNBLOCK("UB");
+
+    /**
+     * The single-character code associated with the change type.
+     */
+    private final String code;
+
+    /**
+     * Constructs a {@code ChangeType} enum constant with the specified code.
+     *
+     * @param code The single-character representation of the change type (e.g., "A", "U", "D").
+     */
+    ChangeType(String code) {
+        this.code = code;
+    }
+}
+
+
+
+
+// Request Status 
+
+package com.tcs.fincore.CommonRequestService.model.enums;
+
+/**
+ * Represents the status of a request in the system.
+ * This enum provides a structured way to manage and reference different states
+ * a request can be in throughout its lifecycle within the application.
+ */
+import lombok.Getter;
+
+@Getter
+public enum RequestStatus {
+    /**
+     * The initial state of a request, awaiting review or processing.
+     * Mapped to the database code "P".
+     */
+    PENDING("P"),
+
+    /**
+     * The request has been reviewed and approved/accepted.
+     * Mapped to the database code "A".
+     */
+    ACCEPTED("A"),
+
+    /**
+     * The request has been reviewed and denied/rejected.
+     * Mapped to the database code "R".
+     */
+    REJECTED("R"),
+
+    /**
+     * The created request has been cancelled before execution.
+     * Mapped to the database code "C".
+     */
+    CANCELLED("C");
+
+    /**
+     * The single-character code used to represent the status in the database or external systems.
+     */
+    private final String code;
+
+    /**
+     * Constructs a RequestStatus enum constant with the specified code.
+     *
+     * @param code The single-character representation of the status.
+     */
+    RequestStatus(String code) {
+        this.code = code;
+    }
+
+    /**
+     * Returns the single-character code associated with this request status.
+     *
+     * @return The status code.
+     */
+    public String getCode() {
+        return this.code;
+    }
+}
+
+
+
+
+// Request Type
+
+package com.tcs.fincore.CommonRequestService.model.enums;
+
+/**
+ * Defines the type of entity a request is for (e.g., Segment Code, CGL).
+ * This enum provides a mapping between the logical request type and its
+ * corresponding database value representation.
+ */
+
+import lombok.Getter;
+
+@Getter
+public enum RequestType {
+    // The dbValue (e.g., "SegmentCode") is used for the database.
+
+    /**
+     * Represents a request type for Segment Code entities.
+     * Database value: "SEGMENT"
+     */
+    SEGMENT_CODE("SEGMENT"),
+
+    /**
+     * Represents a request type for CGL Code entities.
+     * Database value: "CGL"
+     */
+    CGL_CODE("CGL"),
+
+    /**
+     * Represents a request type for State entities.
+     * Database value: "STATE"
+     */
+    STATE("STATE"),
+
+    /**
+     * Represents a request type for Branch entities.
+     * Database value: "BRANCH"
+     */
+    BRANCH("BRANCH"),
+
+    /**
+     * Represents a request type for Circle entities.
+     * Database value: "CIRCLE"
+     */
+    CIRCLE("CIRCLE"),
+
+    /**
+     * Represents a request type for Currency entities.
+     * Database value: "CURRENCY"
+     */
+    CURRENCY("CURRENCY"),
+
+    /**
+     * Represents a request type for Calendar entities.
+     * Database value: "CALENDER"
+     */
+    CALENDER("CALENDER"),
+
+    /**
+     * Represents a request type for Currency Rate Change entities.
+     * Database value: "CURRENCY_RATE"
+     */
+    CURRENCY_RATE_CHANGE("CURRENCY_RATE_CHANGE"),
+
+    /**
+     * Represents a request type for Template Config Change entities like to save template.
+     * Database value: "REPORT_TEMPLATE_CONFIG"
+     */
+    RB_REPORT_TEMPLATE("RB_REPORT_TEMPLATE");
+
+    /**
+     * The database value associated with the request type.
+     */
+    private final String dbValue;
+
+    /**
+     * Constructs a new RequestType enum constant with the specified database value.
+     * @param dbValue The value used for database representation.
+     */
+    RequestType(String dbValue) {
+        this.dbValue = dbValue;
+    }
+
+    /**
+     * Retrieves the database value associated with this request type.
+     * This method is generated automatically by the {@link lombok.Getter} annotation.
+     * @return The database value as a String.
+     */
+    // public String getDbValue() is generated by Lombok
+}
+
+
+
+
+
+// Allowed Columns
+
+package com.tcs.fincore.CommonRequestService.model;
+
+import jakarta.persistence.*;
+import lombok.*;
+
+@Entity
+@Getter
+@Setter
+@AllArgsConstructor
+@NoArgsConstructor
+@Builder
+@Table(name = "RB_ALLOWED_COLUMNS")
+public class AllowedColumns {
+
+    @Id
+    @Column(name = "ID")
+    private Long id;
+
+    @Column(name = "COLUMN_NAME")
+    private String columnName;
+
+    @Column(name = "LABEL")
+    private String label;
+
+    @Column(name = "DATA_TYPE")
+    private String dataType;
+
+    @Column(name = "SELECTABLE")
+    private String selectable;
+
+    @Column(name = "FILTERABLE")
+    private String filterable;
+
+    @Column(name = "AGG_FUNCS")
+    private String aggFuncs;
+
+    @Column(name = "ACTIVE")
+    private String active;
+
+    @ManyToOne
+    @JoinColumn(name = "TABLE_ID")
+    private AllowedTables table;
+}
+
+
+
+
+
+// Allowed Tables
+
+package com.tcs.fincore.CommonRequestService.model;
+
+
+import jakarta.persistence.*;
+import lombok.*;
+
+import java.util.ArrayList;
+import java.util.List;
+
+@Entity
+@Getter
+@Setter
+@AllArgsConstructor
+@NoArgsConstructor
+@Builder
+@Table(name = "RB_ALLOWED_TABLES")
+
+public class AllowedTables {
+
+    @Id
+    @Column(name = "ID", nullable = false)
+    private Long id;
+
+    @Column(name = "TABLE_NAME", nullable = false)
+    private String tableName;
+
+    @Column(name = "LABEL")
+    private String label;
+
+    @Column(name = "ACTIVE", nullable = false)
+    private String active;
+
+    @OneToMany(mappedBy = "table", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    private List<AllowedColumns> columns =new ArrayList<>();
+}
+
+
+
+
+
+// Report Template
+
+package com.tcs.fincore.CommonRequestService.model;
+
+import jakarta.persistence.*;
+import lombok.*;
+
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "RB_REPORT_TEMPLATE")
+@Getter
+@Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ReportTemplate {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "TEMPLATE_ID")
+    private String templateId;
+
+    @Column(name = "VERSION_NO")
+    private Integer versionNo;
+
+    @Column(name = "REPORT_ID")
+    private String reportId;
+
+    @Column(name = "TEMPLATE_NAME", length = 200)
+    private String templateName;
+
+    @Column(name = "DESCRIPTION", length = 500)
+    private String description;
+
+    @Column(name = "STATUS", length = 30)
+    private String status;
+
+    @Lob
+    @Column(name = "TEMPLATE_JSON")
+    private String templateJson;
+
+    @Column(name = "CREATED_BY", length = 50)
+    private String createdBy;
+
+    @Column(name = "CREATED_AT")
+    private LocalDateTime createdAt;
+
+    @Column(name = "UPDATED_BY", length = 50)
+    private String updatedBy;
+
+    @Column(name = "UPDATED_AT")
+    private LocalDateTime updatedAt;
+}
+
+
+
+
+
+// Report Template Filter Rule
+
+package com.tcs.fincore.CommonRequestService.model;
+
+import jakarta.persistence.*;
+import lombok.*;
+
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "RB_FILTER_RULE")
+@Getter
+@Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ReportTemplateFilterRule {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "RULE_ID")
+    private Long ruleId;
+
+    @Column(name = "VARIANT_ID")
+    private Long variantId;
+
+    @Column(name = "SCOPE_TYPE", length = 50)
+    private String scopeType;
+
+    @Column(name = "SCOPE_VALUE", length = 200)
+    private String scopeValue;
+
+    @Column(name = "PARAM_NAME", length = 100)
+    private String paramName;
+
+    @Column(name = "DB_COLUMN", length = 100)
+    private String dbColumn;
+
+    @Column(name = "OPERATOR", length = 20)
+    private String operator;
+
+    @Column(name = "CREATED_AT")
+    private LocalDateTime createdAt;
+}
+
+
+
+
+
+// Report Template Variant
+
+package com.tcs.fincore.CommonRequestService.model;
+
+import jakarta.persistence.*;
+import lombok.*;
+
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "RB_REPORT_VARIANT")
+@Getter
+@Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ReportTemplateVariant {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "VARIANT_ID")
+    private Long variantId;
+
+    @Column(name = "TEMPLATE_ID", length = 100)
+    private String templateId;
+
+    @Column(name = "VARIANT_CODE", length = 100)
+    private String variantCode;
+
+    @Column(name = "VARIANT_NAME", length = 200)
+    private String variantName;
+
+    @Column(name = "DESCRIPTION", length = 500)
+    private String description;
+
+    @Column(name = "STATUS", length = 30)
+    private String status;
+
+    @Column(name = "CREATED_BY", length = 50)
+    private String createdBy;
+
+    @Column(name = "CREATED_AT")
+    private LocalDateTime createdAt;
+
+    @Column(name = "UPDATED_BY", length = 50)
+    private String updatedBy;
+
+    @Column(name = "UPDATED_AT")
+    private LocalDateTime updatedAt;
+}
+
+
+
+
+
+// Report Template Variant Param Def
+
+package com.tcs.fincore.CommonRequestService.model;
+
+import jakarta.persistence.*;
+import lombok.*;
+
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "RB_VARIANT_PARAM_DEF")
+@Getter
+@Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ReportTemplateVariantParamDef {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "PARAM_ID")
+    private Long paramId;
+
+    @Column(name = "VARIANT_ID")
+    private Long variantId;
+
+    @Column(name = "PARAM_NAME", length = 100)
+    private String paramName;
+
+    @Column(name = "LABEL", length = 200)
+    private String label;
+
+    @Column(name = "PARAM_TYPE", length = 50)
+    private String paramType;
+
+    @Column(name = "REQUIRED_YN", length = 1)
+    private String required; // 'Y' or 'N'
+
+    @Column(name = "MULTI_VALUED_YN", length = 1)
+    private String multiVal; // 'Y' or 'N'
+
+    @Column(name = "UI_HINT", length = 50)
+    private String uiHint;
+
+    @Column(name = "VALIDATION_REGEX", length = 500)
+    private String validation;
+
+    @Column(name = "CREATED_AT")
+    private LocalDateTime createdAt;
+}
+
+
+
+
+// -------------------------------------------------------------------------------------
+// com.tcs.fincore.CommonRequestService.repository
+// -------------------------------------------------------------------------------------
+
+// Report Template Filtger rule Repository
+
+package com.tcs.fincore.CommonRequestService.repository;
+
+import com.tcs.fincore.CommonRequestService.model.ReportTemplateFilterRule;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.List;
+
+public interface ReportTemplateFilterRuleRepository extends JpaRepository<ReportTemplateFilterRule, Long> {
+
+    List<ReportTemplateFilterRule> findByVariantIdIn(List<Long> variantIds);
+
+    void deleteByVariantId(Long variantIds);
+}
+
+
+
+
+
+// Report template Repository
+
+package com.tcs.fincore.CommonRequestService.repository;
+
+import com.tcs.fincore.CommonRequestService.model.ReportTemplate;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.Optional;
+
+public interface ReportTemplateRepository extends JpaRepository<ReportTemplate, String> {
+    Optional<ReportTemplate> findFirstByReportId(String reportId);
+
+    Optional<ReportTemplate> findFirstByReportIdAndStatus(String reportId, String status);
+
+}
+
+
+
+
+// Report Template Variant Param Def Repository
+
+package com.tcs.fincore.CommonRequestService.repository;
+
+import com.tcs.fincore.CommonRequestService.model.ReportTemplateVariantParamDef;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.List;
+
+public interface ReportTemplateVariantParamDefRepository extends JpaRepository<ReportTemplateVariantParamDef, Long> {
+
+    List<ReportTemplateVariantParamDef> findByVariantIdIn(List<Long> variantIds);
+
+    List<ReportTemplateVariantParamDef> findByVariantId(Long variantId);
+
+    //void deleteByVariantIdIn(List<Long> variantIds);
+
+    void deleteByVariantId(Long variantIds);
+}
+
+
+
+
+// Report Template Variant Repository
+
+package com.tcs.fincore.CommonRequestService.repository;
+
+import com.tcs.fincore.CommonRequestService.model.ReportTemplateVariant;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.List;
+
+public interface ReportTemplateVariantRepository extends JpaRepository<ReportTemplateVariant, Long> {
+
+    List<ReportTemplateVariant> findByTemplateIdIn(List<String> templateIds);
+
+    List<ReportTemplateVariant> findByTemplateId(String templateId);
+
+    //void deleteByTemplateId(String templateId);
+
+//    Optional<ReportVariant> findByTemplateIdAndVariantCode(String templateId, String variantCode);
+//
+//    boolean existsByTemplateIdAndVariantCode(String templateId, String variantCode);
+}
+
+
+
+
+
+// -----------------------------------------------------------------------------------
+// service: com.tcs.fincore.CommonRequestService.service.strategy
+// -----------------------------------------------------------------------------------
+
+// Report template Config Strategy
+
+package com.tcs.fincore.CommonRequestService.service.strategy;
+
+import java.time.LocalDateTime;
+import java.util.*;
+import java.util.stream.Collectors;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tcs.fincore.CommonRequestService.dto.*;
+import com.tcs.fincore.CommonRequestService.exception.ResourceNotFoundException;
+import com.tcs.fincore.CommonRequestService.model.*;
+import com.tcs.fincore.CommonRequestService.model.enums.RequestType;
+import com.tcs.fincore.CommonRequestService.repository.*;
+import com.tcs.fincore.CommonRequestService.validation.TemplateValidationService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class ReportTemplateConfigStrategy implements RequestTypeStrategy {
+
+    private final ObjectMapper objectMapper;
+    private final ReportTemplateRepository reportTemplateRepository;
+    private final ReportTemplateVariantRepository reportTemplateVariantRepository;
+    private final ReportTemplateVariantParamDefRepository reportTemplateVariantParamDefRepository;
+    private final ReportTemplateFilterRuleRepository reportTemplateFilterRuleRepository;
+    private final TemplateValidationService templateValidationService;
+
+    @Override
+    public RequestType getRequestType() {
+        return RequestType.RB_REPORT_TEMPLATE;
+    }
+
+    @Override
+    public void processApproval(CommonReq request) throws JsonProcessingException {
+        switch (request.getChangeType()) {
+            case ADD -> handleCreate(request);
+            case UPDATE -> handleUpdate(request);
+            case DELETE -> handleDelete(request);
+            default ->
+                    throw new UnsupportedOperationException("Change type " + request.getChangeType() + " not supported");
+        }
+    }
+
+    // -----------------------------------------------------------------------------------
+    // Template Validation
+    // -----------------------------------------------------------------------------------
+
+    @Override
+    public void validateRequest(CreateRequestDto requestDto) throws JsonProcessingException {
+        ReportTemplateDto payload = objectMapper.convertValue(requestDto.getPayload(), ReportTemplateDto.class);
+        log.info("In validate request {}", payload);
+         templateValidationService.validate(payload);
+    }
+
+
+    // CREATE  (New report OR New version)
+    private void handleCreate(CommonReq request) throws JsonProcessingException {
+
+        ReportTemplateDto payload = objectMapper.readValue(request.getPayload(), ReportTemplateDto.class);
+
+        ReportTemplateDto.Template templateDTO = payload.getTemplate();
+        String reportId = (String) templateDTO.getReportMeta().getReportId();
+        int incomingVersion = Integer.parseInt(templateDTO.getTemplateMeta().getVersion());
+
+        LocalDateTime now = LocalDateTime.now();
+        String templateJson = serialize(templateDTO);
+
+        Optional<ReportTemplate> activeOpt = reportTemplateRepository.findFirstByReportIdAndStatus(reportId, "ACTIVE");
+
+        // Same version already exists
+        if (activeOpt.isPresent() && incomingVersion == activeOpt.get().getVersionNo()) {
+            throw new IllegalStateException("Active version already exists for reportId " + reportId);
+        }
+
+        // Deactivate old version (if any)
+        if (activeOpt.isPresent()) {
+            ReportTemplate old = activeOpt.get();
+            old.setStatus("INACTIVE");
+            old.setUpdatedAt(now);
+            old.setUpdatedBy(request.getExecutorId());
+            reportTemplateRepository.save(old);
+        }
+
+        // Create new template row
+        ReportTemplate template = new ReportTemplate();
+        template.setReportId(reportId);
+        template.setTemplateName(templateDTO.getReportMeta().getReportName());
+        template.setDescription(templateDTO.getTemplateMeta().getDescription());
+        template.setVersionNo(incomingVersion);
+        template.setStatus("ACTIVE");
+        template.setTemplateJson(templateJson);
+        template.setCreatedAt(now);
+        template.setCreatedBy(request.getCreatorId());
+        template.setUpdatedAt(now);
+        template.setUpdatedBy(request.getExecutorId());
+
+        ReportTemplate savedTemplate = reportTemplateRepository.save(template);
+
+        saveVariants(payload, savedTemplate, request, now);
+    }
+
+
+    // UPDATE (Same version only, reportId can change)
+    private void handleUpdate(CommonReq request) throws JsonProcessingException {
+
+        if (request.getTargetId() == null || request.getTargetId().isBlank()) {
+            throw new IllegalArgumentException("TargetId required for UPDATE");
+        }
+
+        ReportTemplate template = reportTemplateRepository.findById(request.getTargetId()).orElseThrow(() -> new ResourceNotFoundException("Template not found"));
+
+        ReportTemplateDto payload = objectMapper.readValue(request.getPayload(), ReportTemplateDto.class);
+
+        ReportTemplateDto.Template templateDTO = payload.getTemplate();
+        int incomingVersion = Integer.parseInt(templateDTO.getTemplateMeta().getVersion());
+
+        // Version change not allowed in UPDATE
+        if (incomingVersion != template.getVersionNo()) {
+            throw new IllegalStateException("Version change not allowed in UPDATE. Use CREATE for new version.");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+
+        // Allow reportId change
+        template.setReportId((String) templateDTO.getReportMeta().getReportId());
+        template.setTemplateName((String) templateDTO.getReportMeta().getReportName());
+        template.setDescription(templateDTO.getTemplateMeta().getDescription());
+        template.setTemplateJson(serialize(templateDTO));
+        template.setUpdatedAt(now);
+        template.setUpdatedBy(request.getExecutorId());
+
+        ReportTemplate savedTemplate = reportTemplateRepository.save(template);
+
+        // Refresh variants completely
+        deleteVariants(savedTemplate.getTemplateId());
+        saveVariants(payload, savedTemplate, request, now);
+    }
+
+
+    // DELETE (Soft delete)
+    private void handleDelete(CommonReq request) {
+
+        if (request.getTargetId() == null || request.getTargetId().isBlank()) {
+            throw new IllegalArgumentException("TargetId required for DELETE");
+        }
+
+        ReportTemplate template = reportTemplateRepository.findById(request.getTargetId()).orElseThrow(() -> new ResourceNotFoundException("Template not found"));
+
+        template.setStatus("INACTIVE");
+        template.setUpdatedAt(LocalDateTime.now());
+        template.setUpdatedBy(request.getExecutorId());
+
+        reportTemplateRepository.save(template);
+    }
+
+
+    // VARIANT HANDLING
+    private void saveVariants(ReportTemplateDto payload, ReportTemplate template, CommonReq request, LocalDateTime now) {
+
+        for (ReportTemplateVariantDto dto : payload.getVariants()) {
+
+            ReportTemplateVariant variant = new ReportTemplateVariant();
+            variant.setTemplateId(template.getTemplateId());
+            variant.setVariantCode(dto.getVariantCode());
+            variant.setVariantName(dto.getVariantName());
+            variant.setDescription(dto.getDescription());
+            variant.setStatus(dto.getStatus());
+            variant.setCreatedAt(now);
+            variant.setCreatedBy(request.getCreatorId());
+            variant.setUpdatedAt(now);
+            variant.setUpdatedBy(request.getExecutorId());
+
+            ReportTemplateVariant savedVariant = reportTemplateVariantRepository.save(variant);
+
+            Long variantId = savedVariant.getVariantId();
+
+            if (dto.getParams() != null) {
+                for (ReportTemplateVariantParamDto p : dto.getParams()) {
+                    reportTemplateVariantParamDefRepository.save(ReportTemplateVariantParamDef.builder().variantId(variantId).paramName(p.getParamName()).label(p.getLabel()).paramType(p.getParamType()).required(p.isRequired() ? "Y" : "N").multiVal(p.isMultiValued() ? "Y" : "N").uiHint(p.getUiHint()).validation(p.getValidation()).createdAt(now).build());
+                }
+            }
+
+            if (dto.getFilterRules() != null) {
+                for (ReportTemplateFilterRuleDto r : dto.getFilterRules()) {
+                    reportTemplateFilterRuleRepository.save(ReportTemplateFilterRule.builder().variantId(variantId).dbColumn(r.getDbColumn()).operator(r.getOperator()).paramName(r.getParamName()).scopeType(r.getScopeType()).scopeValue(r.getScopeValue()).createdAt(now).build());
+                }
+            }
+        }
+    }
+
+    private void deleteVariants(String templateId) {
+        reportTemplateVariantRepository.findByTemplateId(templateId).forEach(v -> {
+            reportTemplateVariantParamDefRepository.deleteByVariantId(v.getVariantId());
+            reportTemplateFilterRuleRepository.deleteByVariantId(v.getVariantId());
+            reportTemplateVariantRepository.delete(v);
+        });
+    }
+
+
+    // UTIL
+    private String serialize(Object obj) {
+        try {
+            return objectMapper.writeValueAsString(obj);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Failed to serialize template json");
+        }
+    }
+}
+
+
+
+
+// com.tcs.fincore.CommonRequestService.service
+// Business Security Service
+
+package com.tcs.fincore.CommonRequestService.service;
+
+import com.fincore.commonutilities.jwt.JwtUtil;
+import com.tcs.fincore.CommonRequestService.model.enums.ChangeType;
+import com.tcs.fincore.CommonRequestService.model.enums.RequestType;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.stereotype.Service;
+
+/**
+ * SECURITY VALIDATOR
+ * validate any request (create|modify|block) based on their
+ * given action permissions from redis
+ */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class BusinessSecurityService {
+
+    private final StringRedisTemplate redisTemplate;
+    private final JwtUtil jwtUtil;
+
+    /**
+     * Checks if the user has specific permission for the INTENT (ChangeType).
+     * @param token JWT Token
+     * @param requestType e.g., CGL_CODE
+     * @param changeType e.g., BLOCK
+     */
+    public void validateUserAction(String token, RequestType requestType, ChangeType changeType) {
+
+        // 1. Get Role from Token
+        int roleId = jwtUtil.getUserRoleFromToken(token);
+
+        // 2. Construct Redis Key (Must match UserService logic)
+        String opsKey = "RBAC::OPS::" + roleId + "::" + requestType.name();
+
+        // 3. Check Redis: Does the set contain this specific operation?
+        Boolean isAllowed = redisTemplate.opsForSet().isMember(opsKey, changeType.name());
+
+        if (Boolean.FALSE.equals(isAllowed)) {
+            log.warn("SECURITY ALERT: User (Role {}) tried to perform restricted action {} on {}. Access Denied.",
+                    roleId, changeType, requestType);
+            throw new AccessDeniedException("You do not have permission to perform '" + changeType + "' actions on this screen.");
+        }
+
+        log.debug("Action {} on {} allowed for Role {}", changeType, requestType, roleId);
+    }
+}
+
+
+
+
+
+// Permission Config service 
+
+package com.tcs.fincore.CommonRequestService.service;
+
+import com.tcs.fincore.CommonRequestService.dto.NotificationConfigDto;
+
+import com.tcs.fincore.CommonRequestService.repository.PermissionRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.stereotype.Service;
+import java.util.List;
+import java.util.stream.Collectors;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class PermissionConfigService {
+
+    private final PermissionRepository permissionRepository;
+
+    /**
+     * This method is Cached.
+     * - First call: Hits DB (approx 10ms).
+     * - Subsequent calls: Hits Memory
+     * - Key: The RequestType string (e.g., "SEGMENT_CODE").
+     */
+    @Cacheable(value = "notification_configs", key = "#requestType")
+    public NotificationConfigDto getConfig(String requestType) {
+
+        log.info("Cache Miss: Fetching DB permissions for type: {}", requestType);
+
+        // 1. Single DB Call
+        List<Object[]> results = permissionRepository.findUrlAndRolesByRequestType(requestType);
+
+        if (results.isEmpty()) {
+            // Return default fallback logic if no config found
+            log.info("No URL and roles found for request type {}. Using defaults, need to change this in code later", requestType);
+            return new NotificationConfigDto("/dashboard", "ALL_USERS");
+        }
+
+        log.info("Fetched Url and roles from db for the request type {} : {}", requestType, results.getFirst()[0]);
+
+        // 2. Process logic in Java
+        // The URL is the same for all rows (index 0)
+        String url = (String) results.get(0)[0];
+
+        if (url == null) url = "/dashboard";
+        // Collect all Role IDs (index 1) into a comma-separated string.
+
+        String roles = results.stream()
+                .map(row -> String.valueOf(row[1])) // Role ID
+                .distinct()
+                .collect(Collectors.joining(","));
+
+        if (roles.isEmpty()) roles = "ALL_USERS";
+
+        return new NotificationConfigDto(url, roles);
+    }
+}
+
+
+
+
+
+// Request Service
+
+package com.tcs.fincore.CommonRequestService.service;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.tcs.fincore.CommonRequestService.dto.CancelRequestDto;
+import com.tcs.fincore.CommonRequestService.dto.CreateRequestDto;
+import com.tcs.fincore.CommonRequestService.dto.ProcessRequestDto;
+import com.tcs.fincore.CommonRequestService.model.CommonReq;
+import com.tcs.fincore.CommonRequestService.model.enums.RequestType;
+
+import java.util.List;
+import java.util.Optional;
+
+public interface RequestService {
+
+    /**
+     * Creates a new request.
+     *
+     * @param createRequestDto DTO containing request details.
+     * @param creatorId        The ID of the user creating the request.
+     * @return The saved request entity.
+     */
+    CommonReq createRequest(CreateRequestDto createRequestDto, String creatorId, String token) throws JsonProcessingException;
+
+    /**
+     * Retrieves all requests created by a specific user (Maker).
+     *
+     * @param userId The user's ID and requestType like : SegmentCode, CGL
+     * @return A list of their requests.
+     */
+    List<CommonReq> getMyRequests(String userId, RequestType requestType);
+
+    /**
+     * Retrieves all pending requests for Checkers.
+     *
+     * @return A list of pending requests.
+     */
+    List<CommonReq> getPendingRequests(String userId, RequestType requestType);
+
+    /**
+     * Retrieves all requests for Checkers (Pending, Accepted, Rejected).
+     *
+     * @return A list of all requests.
+     */
+    List<CommonReq> getAllRequests();
+
+    /**
+     * Updates the status of a request (Accept/Reject).
+     *
+     * @param processRequestDto DTO containing the request id, new status and
+     *                          executor remarks.
+     * @param executorId        The ID of the user performing the action.
+     * @return The updated request entity.
+     */
+    Optional<CommonReq> updateRequestStatus(ProcessRequestDto processRequestDto, String executorId) throws JsonProcessingException;
+
+
+    CommonReq cancelRequest(CancelRequestDto cancelRequestDto, String userId);
+}
+
+
+
+
+
+// Request Service Impl
+
+package com.tcs.fincore.CommonRequestService.service;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tcs.fincore.CommonRequestService.dto.*;
+import com.tcs.fincore.CommonRequestService.dto.payload.KeyablePayload;
+import com.tcs.fincore.CommonRequestService.exception.BusinessRuleViolationException;
+import com.tcs.fincore.CommonRequestService.exception.ResourceNotFoundException;
+import com.tcs.fincore.CommonRequestService.model.CGLMaster;
+import com.tcs.fincore.CommonRequestService.model.CommonReq;
+import com.tcs.fincore.CommonRequestService.model.enums.ChangeType;
+import com.tcs.fincore.CommonRequestService.model.enums.RequestStatus;
+import com.tcs.fincore.CommonRequestService.model.enums.RequestType;
+import com.tcs.fincore.CommonRequestService.repository.CommonRequestRepository;
+import com.tcs.fincore.CommonRequestService.service.strategy.RequestStrategyFactory;
+import jakarta.transaction.Transactional;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.stereotype.Service;
+
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.List;
+import java.util.Optional;
+
+/**
+ * - Handle all requests for different business objects [CGL, SEGMENT, CURRENCY]
+ * - Handle creator/executor scenarios
+ * - Used strategy design patter to differentiate different business objects
+ * - Injected NotificationWriterService and PermissionConfigService for notification
+ * - Injected BusinessSecurityService for second level RBAC authentication to check BLOCK/UNBLOCK/CREATE permissions
+ *
+ *   @author Shubhankar Das [v1018405]
+ *   @version 1.0
+ *   @since 2025-12-11
+ */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class RequestServiceImpl implements RequestService {
+
+    private static final String EVENT_SOURCE = "CommonRequestService";
+    private final CommonRequestRepository commonRequestRepository;
+    private final RequestStrategyFactory strategyFactory;
+    private final ObjectMapper objectMapper;
+    private final NotificationWriterService notificationWriterService;
+    private final PermissionConfigService permissionConfigService;
+    private final BusinessSecurityService businessSecurityService;
+
+    @Override
+    @Transactional(rollbackOn = Exception.class) // Ensure rollback on any exception
+    public CommonReq createRequest(
+            CreateRequestDto dto,
+            String creatorId,
+            String token
+    ) throws JsonProcessingException {
+
+
+        // --- LAYER 2 SECURITY CHECK --- (rbac) <-------- 1st check in filter [shubhankar]
+        // Validate that the user is allowed to perform this SPECIFIC ChangeType (e.g. BLOCK)
+        businessSecurityService.validateUserAction(token, dto.getRequestType(), dto.getChangeType());
+
+        // --- STRATEGIC VALIDATION -  VALIDATE MASTER DATA BEFORE PROCEEDING ---
+        strategyFactory.getStrategy(dto.getRequestType()).validateRequest(dto);
+
+        KeyablePayload payload = (KeyablePayload) dto.getPayload();
+
+        // --- PRE CHECKS ---
+        String targetId = payload.getKey();
+        if (targetId == null || targetId.isBlank()) {
+            throw new IllegalArgumentException("Could not determine targetId from payload.");
+        }
+        log.info("Determined targetId for new request as: {}", targetId);
+
+        List<CommonReq> existingRequests = commonRequestRepository.findByTargetIdAndReqStatus(targetId,
+                RequestStatus.PENDING);
+
+        if (!existingRequests.isEmpty()) {
+            log.warn("Attempted to create a duplicate request for targetId {} which already has a {} request.",
+                    targetId, existingRequests.get(0).getReqStatus());
+            throw new DataIntegrityViolationException(
+                    "An active or pending request for '" + targetId + "' already exists.");
+        }
+        log.info("Uniqueness check passed for targetId: {}", targetId);
+
+        // --- CREATE AND SAVE REQUEST ---
+        CommonReq request = new CommonReq();
+        request.setCreatorId(creatorId);
+        request.setReqType(dto.getRequestType());
+        request.setChangeType(dto.getChangeType());
+        request.setPayload(objectMapper.writeValueAsString(payload));
+        request.setTargetId(targetId);
+        request.setReqStatus(RequestStatus.PENDING);
+        // set correct time date
+        request.setReqDate(LocalDateTime.now(ZoneId.of("Asia/Kolkata")));
+
+
+        log.info("Saving new, validated request for targetId {}", targetId);
+        CommonReq savedRequest = commonRequestRepository.save(request);
+
+        try {
+            // --- NOTIFICATION LOGIC ---
+
+            // 1. Fetch Config from CACHE (Fast)
+            String requestTypeKey = dto.getRequestType().name(); // e.g., "SEGMENT_CODE"
+            log.info("Request Type String to fetch role ids from PERMISSIONS: {}", requestTypeKey);
+            NotificationConfigDto config = permissionConfigService.getConfig(requestTypeKey);
+
+            // 2. Customize Message
+            String action = request.getChangeType().name(); // ADD/ DELETE/ UPDATE / BLOCK
+
+            // Validate payload to detect "Block", "UNBLOCK action
+            if (request.getChangeType() == ChangeType.BLOCK || request.getChangeType() == ChangeType.UNBLOCK) {
+                // Parse payload to check if status is 0 (Blocked)
+                CGLMaster payload2 = objectMapper.readValue(request.getPayload(), CGLMaster.class);
+                if (payload2.getStatus() == 0) {
+                    action = "BLOCK"; // Override action name for the message
+                } else if (payload2.getStatus() == 1) {
+                    action = "UNBLOCK"; // Override action name for the message
+                }
+            }
+            String message = "New " + action + " request (" + targetId + ") pending for " + dto.getRequestType();
+
+            // 3. Send to Group (1-to-Many via Outbox)
+            notificationWriterService.createNotification(
+                    creatorId,                  // USER ID TO EXCLUDE FROM ROLES, IN THIS CASE ROLE WILL BE USED TO TARGET USER
+                    config.getTargetRoles(),    // Group to SEND TO "51,55" (Fetched from Cache/DB)
+                    message,
+                    config.getTargetUrl(),      // "/segment-requests" (Fetched from Cache/DB)
+                    savedRequest.getId().toString(),
+                    EVENT_SOURCE
+            );
+
+        } catch (Exception e) {
+            // Log the error and re-throw as a RuntimeException to force a rollback.
+            log.error("CRITICAL: Failed to create 'pending' notification for request: {}. Rolling back transaction.", savedRequest.getId(), e);
+            throw new RuntimeException("Failed to create notification event, rolling back request creation.", e);
+        }
+        return savedRequest;
+    }
+
+    @Override
+    @Transactional(rollbackOn = Exception.class) // Ensure rollback on any exception
+    public Optional<CommonReq> updateRequestStatus(
+            ProcessRequestDto dto,
+            String executorId
+    ) throws JsonProcessingException {
+
+        Long requestId = dto.getRequestId();
+        log.info("Attempting to update status for request ID: {} by executor: {}", requestId, executorId);
+
+        CommonReq request = commonRequestRepository.findById(requestId)
+                .orElseThrow(() -> new ResourceNotFoundException("Request with ID " + requestId + " not found."));
+
+        // SELF-APPROVAL CHECK
+        if (executorId.equals(request.getCreatorId())) {
+            log.warn("SECURITY VIOLATION: User {} attempted to approve their own request (ID: {}).", executorId,
+                    requestId);
+            throw new IllegalStateException("User cannot approve or reject their own request.");
+        }
+
+        if (request.getReqStatus() != RequestStatus.PENDING) {
+            log.warn("Attempted to modify an already processed request. ID: {}, Current Status: {}", dto.getRequestId(),
+                    request.getReqStatus());
+            throw new IllegalStateException("Request has already been processed and cannot be modified.");
+        }
+
+        // --- UPDATE REQUEST STATE ---
+        request.setExecutorId(executorId);
+        request.setExecutorRemarks(dto.getRemarks());
+        request.setExecutionDate(LocalDateTime.now(ZoneId.of("Asia/Kolkata")));
+        request.setReqStatus(dto.getStatus());
+
+        // --- PROCESS BUSINESS LOGIC (STRATEGY) & PREPARE NOTIFICATION 1: TO MAKER (1-to-1) ---
+        // This is a 1-to-1, so USER_ID is the recipient, TARGET_ROLE is null.
+        if (RequestStatus.ACCEPTED.equals(dto.getStatus())) {
+            log.info("Request {} ACCEPTED. Applying strategy for type {}", dto.getRequestId(), request.getReqType());
+            // 1. Execute the business logic (e.g., save to master table)
+            strategyFactory.getStrategy(request.getReqType()).processApproval(request);
+
+            // Notify Maker: Approved
+            notificationWriterService.createRequestApprovedNotification(request, executorId);
+            request.setExecutionRemarks("Successfully processed approval.");
+
+        } else {
+            log.info("Request {} REJECTED.", dto.getRequestId());
+
+            // Notify Maker: Rejected
+            notificationWriterService.createRequestRejectedNotification(request, executorId, dto.getRemarks());
+            request.setExecutionRemarks("Request rejected by user.");
+        }
+
+        // --- NOTIFICATION 2: CLOSURE (1-to-Many, Filtered) ---
+        // We wrap this in Try/Catch because if this fails, we do NOT want to roll back the actual Approval.
+        // The approval is critical data; the "FYI" notification to the group is secondary.
+        try {
+            // A. Get Group Config from Cache (Zero DB Cost)
+            NotificationConfigDto config = permissionConfigService.getConfig(request.getReqType().name());
+
+            // B. Prepare Message
+            String action = dto.getStatus().equals(RequestStatus.ACCEPTED) ? "Approved" : "Rejected";
+            String closureMessage = "CLOSURE: Request " + request.getTargetId() + " was " + action + " by " + executorId;
+
+            // C. Send to Group (1-to-Many)
+            // Pass the CHECKER'S ID as the exclusion ID.
+            notificationWriterService.createNotification(
+                    executorId,                 // User to EXCLUDE
+                    config.getTargetRoles(),    // // Group to SEND TO -> The same roles that received the Pending alert excluding the executor
+                    closureMessage,
+                    config.getTargetUrl(),      // Link to history
+                    request.getId().toString(),
+                    "CommonRequestService"
+            );
+            log.info("Sent closure notification to group for Request ID: {}", requestId);
+
+        } catch (Exception e) {
+            // Log error but allow transaction to commit
+            log.error("Failed to send closure notification for Request ID: {}", requestId, e);
+        }
+
+        // --- SAVE THE UPDATED REQUEST ---
+        CommonReq updatedRequest = commonRequestRepository.save(request);
+
+        return Optional.of(updatedRequest);
+    }
+
+    @Override
+    @Transactional(rollbackOn = Exception.class)
+    public CommonReq cancelRequest(CancelRequestDto dto, String userId) {
+
+        Long requestId = dto.getRequestId();
+        log.info("Attempting to cancel request ID: {} by user: {}", requestId, userId);
+
+        // 1. Fetch Request
+        CommonReq request = commonRequestRepository.findById(requestId)
+                .orElseThrow(() -> new ResourceNotFoundException("Request with ID " + requestId + " not found."));
+
+        // 2. Security Check: Only the CREATOR can cancel
+        if (!request.getCreatorId().equals(userId)) {
+            log.warn("SECURITY VIOLATION: User {} attempted to cancel request {} owned by {}",
+                    userId, requestId, request.getCreatorId());
+            throw new AccessDeniedException("You are not authorized to cancel this request.");
+        }
+
+        // 3. State Check: Must be PENDING
+        if (request.getReqStatus() != RequestStatus.PENDING) {
+            log.warn("Attempted to cancel a processed request. ID: {}, Status: {}", requestId, request.getReqStatus());
+            throw new IllegalStateException("Only pending requests can be cancelled. Current status: " + request.getReqStatus());
+        }
+
+        // 4. Update State
+        request.setReqStatus(RequestStatus.CANCELLED);
+
+        // We use Executor fields to track who cancelled it (the creator themselves)
+        request.setExecutorId(userId);
+        request.setExecutionDate(LocalDateTime.now());
+        request.setExecutorRemarks("CANCELLED BY USER: " + (dto.getRemarks() != null ? dto.getRemarks() : "No remarks"));
+
+        // 5. Save & Return
+        CommonReq updatedRequest = commonRequestRepository.save(request);
+        log.info("Request {} successfully cancelled by user.", requestId);
+
+        return updatedRequest;
+    }
+
+    @Override
+    public List<CommonReq> getMyRequests(
+            String userId,
+            RequestType requestType
+    ) {
+        if (requestType == null) {
+            log.info("Request type is missing, Please provide correct request type to fetch requests for user : {}",
+                    userId);
+            throw new IllegalArgumentException(
+                    "Request type is missing, Please provide correct request type to fetch requests.");
+        }
+        log.info("Fetching my requests for user {} with type {}", userId, requestType);
+        return commonRequestRepository.findByCreatorIdAndReqType(userId, requestType);
+    }
+
+    @Override
+    public List<CommonReq> getPendingRequests(
+            String userId,
+            RequestType requestType
+    ) {
+        if (requestType == null) {
+            log.info("Request type is missing, Please provide correct request type to fetch pending requests.");
+            throw new IllegalArgumentException(
+                    "Request type is missing, Please provide correct request type to fetch pending requests."
+            );
+        }
+        log.info("Fetching pending requests for user :  {} with type : {}",userId, requestType);
+        return commonRequestRepository
+                .findByCreatorIdNotAndReqStatusAndReqType(userId, RequestStatus.PENDING, requestType);
+    }
+
+
+    @Override
+    public List<CommonReq> getAllRequests(
+    ) {
+        return commonRequestRepository.findAll();
+    }
+
+}
+
+
+
+
+
+// -------------------------------------------------------------------------------------------------
+// com.tcs.fincore.CommonRequestService.validation
+// -------------------------------------------------------------------------------------------------
+// Template Validation Service
+
+package com.tcs.fincore.CommonRequestService.validation;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tcs.fincore.CommonRequestService.dto.*;
+import com.tcs.fincore.CommonRequestService.exception.BusinessRuleViolationException;
+import com.tcs.fincore.CommonRequestService.repository.SchemaMetadataRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.jexl3.JexlBuilder;
+import org.apache.commons.jexl3.JexlEngine;
+import org.apache.commons.jexl3.JexlException;
+import org.springframework.stereotype.Service;
+
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+
+/**
+ * STRICT Validation Service.
+ * Enforces Security (Whitelisting), Structural Integrity, and Runtime Limits ("Doom Check").
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class TemplateValidationService {
+
+    private final SchemaMetadataRepository schemaRepo;
+
+    // --- CONSTANTS & REGEX ---
+    private static final Pattern SQL_IDENTIFIER_PATTERN = Pattern.compile("^[A-Za-z0-9_]+$");
+
+    private static final Pattern ROW_ID_PATTERN = Pattern.compile("^R__[A-Za-z0-9]+$");
+
+    private static final Pattern COL_ID_PATTERN = Pattern.compile("^C__[A-Za-z0-9]+$");
+    // Matches cell references like "cell_R__1_C__2"
+    private static final Pattern CELL_REF_PATTERN = Pattern.compile("cell_(R[A-Za-z0-9_]+)_(C[A-Za-z0-9_]+)");
+
+    // Limits
+    private static final int MAX_TOTAL_SPECS = 5000; // Hard limit from AggregatorServiceImpl[span_0](end_span)
+    private static final int MAX_DYNAMIC_LIMIT = 10000;
+
+    // Whitelists
+    private static final Set<String> ALLOWED_PAGE_SIZES = Set.of("A4", "A3", "A5", "LETTER", "LEGAL");
+    private static final Set<String> ALLOWED_ORIENTATIONS = Set.of("PORTRAIT", "LANDSCAPE");
+    private static final Set<String> ALLOWED_ROW_TYPES = Set.of("DATA", "DYNAMIC", "HEADER", "FOOTER", "GROUP_START", "GROUP_END");
+    private static final Set<String> ALLOWED_CELL_TYPES = Set.of(
+            "TEXT", "FORMULA", "DB_VALUE", "DB_SUM", "DB_COUNT", "DB_AVG", "DB_MIN", "DB_MAX", "DB_DATE", "DB_TEXT"
+    );
+    private static final Set<String> ALLOWED_OPERATORS = Set.of("=", "!=", ">", "<", ">=", "<=", "LIKE", "IN", "BETWEEN");
+    private static final Set<String> ALLOWED_VARIANT_SCOPES = Set.of("ALL_DB", "TABLE", "DYNAMIC_TABLE", "TAG");
+    private static final Set<String> ALLOWED_PARAM_TYPES = Set.of("STRING", "NUMBER", "DATE", "LIST");
+    private static final Set<String> VALID_ORDER_DIRECTIONS = Set.of("ASC", "DESC");
+
+    // Syntax Checker
+    private static final JexlEngine JEXL = new JexlBuilder().silent(false).strict(true).create();
+
+    public void validate(ReportTemplateDto request) {
+        if (request == null) throw new BusinessRuleViolationException("Request body cannot be null");
+        if (request.getTemplate() == null) throw new BusinessRuleViolationException("ReportTemplate is missing");
+
+        ReportTemplateDto.Template t = request.getTemplate();
+
+        // 1. Structure & Metadata
+        validateMetadata(t);
+
+        // 2. Column Definitions
+        validateColumns(t);
+
+        assignIds(t);
+
+        // 3-5 & 11 & 12. Rows, Cells, Dynamic Config & Doom Check
+        // We collect DB requirements here to validate against whitelist later
+        ValidationContext ctx = validateRowsAndCells(t);
+
+        // 6. Formula Logic & Circular Dependencies
+        validateFormulasAndCircularDependencies(t);
+
+        // 8. Security & Semantic Validation (The "Main Thing")
+        // Checks if tables/cols exist in DB and are allowed/filterable
+        validateSchemaPermissions(ctx.dbRequirements);
+        log.info("Validation {}", ctx.dbRequirements);
+
+        // 9 & 10. Variant Definitions & Cross-Validation
+        if (request.getVariants() != null) {
+            validateVariants(request.getVariants(), ctx.tablesUsed);
+        }
+
+        // 11. "Doom Check" (Runtime Limits)
+        if (ctx.totalEstimatedSpecs > MAX_TOTAL_SPECS) {
+            throw new BusinessRuleViolationException(String.format(
+                    "DOOM CHECK FAILED: Template is too heavy! Estimated queries: %d. Max allowed: %d. " +
+                            "Reduce dynamic row limits or split report.",
+                    ctx.totalEstimatedSpecs, MAX_TOTAL_SPECS));
+        }
+    }
+
+    // =========================================================================
+    // 1. Metadata Validation
+    // =========================================================================
+    private void validateMetadata(ReportTemplateDto.Template t) {
+        if (t.getTemplateMeta() == null) throw new BusinessRuleViolationException("templateMeta is required");
+        if (t.getReportMeta() == null) throw new BusinessRuleViolationException("reportMeta is required");
+
+        //validateIdentifier(t.getTemplateMeta().getTemplateId(), "templateId");
+
+        if (isBlank(t.getReportMeta().getReportName())) throw new BusinessRuleViolationException("reportName is required");
+
+        String size = t.getTemplateMeta().getPageSize();
+        if (size != null && !ALLOWED_PAGE_SIZES.contains(size.toUpperCase())) {
+            throw new BusinessRuleViolationException("Invalid Page Size: " + size + ". Allowed: " + ALLOWED_PAGE_SIZES);
+        }
+        String orient = t.getTemplateMeta().getPageOrientation();
+        if (orient != null && !ALLOWED_ORIENTATIONS.contains(orient.toUpperCase())) {
+            throw new BusinessRuleViolationException("Invalid Orientation: " + orient + ". Allowed: " + ALLOWED_ORIENTATIONS);
+        }
+
+        if (t.getReportData() == null) throw new BusinessRuleViolationException("reportData object must be present");
+    }
+
+    // =========================================================================
+    // 2. Column Definitions
+    // =========================================================================
+    private void validateColumns(ReportTemplateDto.Template t) {
+        List<ReportTemplateDto.ColumnDefinition> cols = t.getReportData().getColumns();
+        if (cols == null || cols.isEmpty()) {
+            throw new BusinessRuleViolationException("Columns list cannot be null or empty");
+        }
+
+        Set<String> colIds = new HashSet<>();
+        for (ReportTemplateDto.ColumnDefinition c : cols) {
+
+            if(!COL_ID_PATTERN.matcher(c.getId()).matches()){
+                throw new BusinessRuleViolationException("Invalid column id: "+ c.getId());
+            }
+//            validateIdentifier(c.getId(), "Column ID");
+
+            if (!colIds.add(c.getId())) {
+                throw new BusinessRuleViolationException("Duplicate Column ID found: " + c.getId());
+            }
+            if (isBlank(c.getName())) throw new BusinessRuleViolationException("Column 'name' is mandatory for ID: " + c.getId());
+        }
+    }
+
+    // =========================================================================
+    // 3, 4, 5. Rows & Cells (Validation + Data Gathering)
+    // =========================================================================
+    private ValidationContext validateRowsAndCells(ReportTemplateDto.Template t) {
+        if (t.getReportData().getRows() == null) return new ValidationContext();
+
+        int colCount = t.getReportData().getColumns().size();
+        ValidationContext ctx = new ValidationContext();
+        int rowIdx = 0;
+
+        for (ReportTemplateDto.Row row : t.getReportData().getRows()) {
+            rowIdx++;
+
+            if(!ROW_ID_PATTERN.matcher(row.getId()).matches()){
+                throw new BusinessRuleViolationException("Invalid row id: "+ row.getId() + " for index " + rowIdx);
+            }
+
+//            validateIdentifier(row.getId(), "Row ID at index " + rowIdx);
+
+            if (row.getRowType() == null || !ALLOWED_ROW_TYPES.contains(row.getRowType())) {
+                throw new BusinessRuleViolationException("Invalid rowType: " + row.getRowType());
+            }
+
+            // --- 5. Dynamic Row Configuration ---
+            if ("DYNAMIC".equalsIgnoreCase(row.getRowType())) {
+                ctx.totalEstimatedSpecs += validateDynamicRow(row, ctx);
+                continue;
+            }
+
+            // --- 3. Grid Consistency ---
+            if ("DATA".equalsIgnoreCase(row.getRowType()) && row.getCells() != null) {
+                if (row.getCells().size() > colCount) {
+                    throw new BusinessRuleViolationException("Row " + row.getId() + " has " + row.getCells().size() +
+                            " cells, but only " + colCount + " columns defined.");
+                }
+                for (ReportTemplateDto.Cell cell : row.getCells()) {
+                    ctx.totalEstimatedSpecs += validateCell(cell, row.getId(), ctx);
+                }
+            }
+        }
+        return ctx;
+    }
+
+    public void assignIds(ReportTemplateDto.Template t) {
+        int rowNum = 0;
+
+        for (ReportTemplateDto.Row row : t.getReportData().getRows()) {
+            if (row.getCells() == null) {
+                continue;
+            }
+
+            if (row.getId() == null || row.getId().isBlank()) {
+                throw new BusinessRuleViolationException("Row id cannot be null/blank at row index: " + rowNum);
+            }
+
+            int colNum = 0;
+            for (ReportTemplateDto.Cell cell : row.getCells()) {
+                if (cell.getId() == null || cell.getId().isBlank()) {
+                    if (colNum >= t.getReportData().getColumns().size()) {
+                        throw new BusinessRuleViolationException(
+                                "Cell at row " + rowNum + " col " + colNum + " exceeds column definitions");
+                    }
+
+                    String colId = t.getReportData().getColumns().get(colNum).getId();
+                    cell.setId("cell_" + row.getId() + "_" + colId);
+                }
+                colNum++;
+            }
+            rowNum++;
+        }
+
+        log.debug("Assigned IDs to {} rows", rowNum);
+    }
+
+    private long validateDynamicRow(ReportTemplateDto.Row row, ValidationContext ctx) {
+        Map<String, Object> cfg = row.getDynamicConfig();
+        if (cfg == null) throw new BusinessRuleViolationException("DYNAMIC row " + row.getId() + " requires dynamicConfig");
+
+        if (!"DB_LIST".equals(cfg.get("type"))) {
+            throw new BusinessRuleViolationException("Row " + row.getId() + ": Only DB_LIST type is supported");
+        }
+
+        String table = (String) cfg.get("table");
+        validateIdentifier(table, "Row " + row.getId() + " table");
+        ctx.tablesUsed.add(table.toUpperCase());
+
+        List<String> select = (List<String>) cfg.get("select");
+        if (select == null || select.isEmpty()) throw new BusinessRuleViolationException("Row " + row.getId() + ": 'select' fields required");
+
+        // Register usages for Whitelist Check
+        select.forEach(col -> addDbRequirement(ctx, table, col, null, false, true));
+
+        // Limits
+        int limit = cfg.containsKey("limit") ? ((Number) cfg.get("limit")).intValue() : 300;
+        if (limit < 1 || limit > MAX_DYNAMIC_LIMIT) {
+            throw new BusinessRuleViolationException("Row " + row.getId() + ": Limit must be between 1 and " + MAX_DYNAMIC_LIMIT);
+        }
+
+        // Filters
+        validateFilters((Map<String, Object>) cfg.get("filters"), "Row " + row.getId(), table, ctx);
+
+        // --- 12. Dynamic Query Safety (Order By) ---
+        String orderBy = (String) cfg.get("orderby");
+        if (orderBy != null && !orderBy.isBlank()) {
+            validateOrderBy(orderBy, select);
+        }
+
+        // Doom Calculation: 1 query * limit rows
+        return (long) select.size() * limit;
+    }
+
+    private void validateOrderBy(String orderBy, List<String> selectCols) {
+        for (String part : orderBy.split(",")) {
+            String[] tokens = part.trim().split("\\s+");
+            if (tokens.length > 2) throw new BusinessRuleViolationException("Invalid Order By clause: " + part);
+
+            String col = tokens[0];
+            // Rule: Column must be in select list
+            if (!selectCols.contains(col)) throw new BusinessRuleViolationException("Order By column '" + col + "' must be in select list");
+
+            // Rule: Injection check
+            if (col.contains(";") || col.contains("--") || col.contains("'") || col.contains("/*")) {
+                throw new BusinessRuleViolationException("Potential SQL Injection in Order By: " + col);
+            }
+
+            if (tokens.length == 2) {
+                String dir = tokens[1].toUpperCase();
+                if (!VALID_ORDER_DIRECTIONS.contains(dir)) {
+                    throw new BusinessRuleViolationException("Invalid sort direction: " + dir);
+                }
+            }
+        }
+    }
+
+    private long validateCell(ReportTemplateDto.Cell cell, String rowId, ValidationContext ctx) {
+        if (cell.getType() == null) return 0;
+        String type = cell.getType().toUpperCase();
+        //log.info("Cell Id {}", cell.getId());
+
+        if (!ALLOWED_CELL_TYPES.contains(type)) {
+            throw new BusinessRuleViolationException("Row " + rowId + ": Invalid cell type " + type);
+        }
+//        if(!CELL_REF_PATTERN.matcher(cell.getId()).matches()){
+//            throw new BusinessRuleViolationException("Invalid CELL REFERENCE PATTERN");
+//        }
+
+        // --- 7. Formatting & Rendering (Spanning) ---
+        if (cell.getRender() != null) {
+            Number colspan = (Number) cell.getRender().get("colspan");
+            Number rowspan = (Number) cell.getRender().get("rowspan");
+            if (colspan != null && colspan.intValue() < 1) throw new BusinessRuleViolationException("colspan must be > 0");
+            if (rowspan != null && rowspan.intValue() < 1) throw new BusinessRuleViolationException("rowspan must be > 0");
+        }
+
+        // --- 4. Database Cells (DB_*) ---
+        if (type.startsWith("DB_")) {
+            Map<String, Object> src = cell.getSource();
+            if (src == null) throw new BusinessRuleViolationException("Row " + rowId + ": DB cell missing 'source'");
+
+            String table = (String) src.get("table");
+            String col = (String) src.get("column");
+            validateIdentifier(table, rowId + " table");
+            validateIdentifier(col, rowId + " column");
+
+            ctx.tablesUsed.add(table.toUpperCase());
+            addDbRequirement(ctx, table, col, type, false, true);
+
+            validateFilters((Map<String, Object>) src.get("filters"), rowId, table, ctx);
+            return 1; // 1 spec
+        }
+
+        // --- 6. Formula Validation ---
+        if ("FORMULA".equals(type)) {
+            return validateFormulaCell(cell, rowId, ctx);
+        }
+        return 0;
+    }
+
+    private long validateFormulaCell(ReportTemplateDto.Cell cell, String rowId, ValidationContext ctx) {
+        if (isBlank(cell.getExpression())) throw new BusinessRuleViolationException("Row " + rowId + ": Formula expression is empty");
+
+        // Syntax Check
+        try {
+            JEXL.createExpression(cell.getExpression());
+        } catch (JexlException e) {
+            throw new BusinessRuleViolationException("Row " + rowId + ": Invalid Formula Syntax: " + e.getMessage());
+        }
+
+        long inlineSpecs = 0;
+        // Variables Validation
+        if (cell.getVariables() != null) {
+            for (Map.Entry<String, Object> entry : cell.getVariables().entrySet()) {
+                if (entry.getValue() instanceof Map) {
+                    Map<String, Object> varCfg = (Map<String, Object>) entry.getValue();
+                    String type = (String) varCfg.get("type");
+
+                    // Inline DB Refs
+                    if (type != null && type.startsWith("DB_")) {
+                        String table = (String) varCfg.get("table");
+                        String col = (String) varCfg.get("column");
+                        validateIdentifier(table, rowId + " var table");
+                        validateIdentifier(col, rowId + " var column");
+
+                        ctx.tablesUsed.add(table.toUpperCase());
+                        addDbRequirement(ctx, table, col, type, false, true);
+
+                        validateFilters((Map<String, Object>) varCfg.get("filters"), rowId, table, ctx);
+                        inlineSpecs++;
+                    }
+                }
+            }
+        }
+        return inlineSpecs;
+    }
+
+    private void validateFilters(Map<String, Object> filters, String context, String tableName, ValidationContext ctx) {
+        if (filters == null) return;
+
+        for (Map.Entry<String, Object> entry : filters.entrySet()) {
+            validateIdentifier(entry.getKey(), context + " filter key");
+
+            // Register filter column usage for Semantic Check
+            addDbRequirement(ctx, tableName, entry.getKey(), null, true, true);
+
+            Object val = entry.getValue();
+            if (val instanceof Map) {
+                Map<String, Object> fMap = (Map<String, Object>) val;
+                String op = (String) fMap.get("op");
+
+                if (op != null && !ALLOWED_OPERATORS.contains(op.toUpperCase())) {
+                    throw new BusinessRuleViolationException(context + ": Invalid operator " + op);
+                }
+
+                if ("IN".equalsIgnoreCase(op) && !(fMap.get("value") instanceof List)) {
+                    throw new BusinessRuleViolationException(context + ": IN operator requires List value");
+                }
+                if ("BETWEEN".equalsIgnoreCase(op)) {
+                    if (!(fMap.get("value") instanceof List) || ((List<?>) fMap.get("value")).size() != 2) {
+                        throw new BusinessRuleViolationException(context + ": BETWEEN operator requires List of size 2");
+                    }
+                }
+            }
+        }
+    }
+
+    // =========================================================================
+    // 6. Circular Dependency Detection
+    // =========================================================================
+    private void validateFormulasAndCircularDependencies(ReportTemplateDto.Template t) {
+        Map<String, Set<String>> graph = new HashMap<>();
+        Set<String> allFormulaCells = new HashSet<>();
+
+        if (t.getReportData().getRows() == null) return;
+
+        for (ReportTemplateDto.Row row : t.getReportData().getRows()) {
+            if (row.getCells() == null) continue;
+            for (ReportTemplateDto.Cell cell : row.getCells()) {
+                log.info("Cell Id {}", cell.getId());
+                log.info("Cell Type {}", cell.getType());
+                if ("FORMULA".equalsIgnoreCase(cell.getType())) {
+                    String cellId = cell.getId();
+                    if (cellId == null) continue;
+
+                    allFormulaCells.add(cellId);
+                    graph.putIfAbsent(cellId, new HashSet<>());
+
+                    // Deps from Variables
+                    if (cell.getVariables() != null) {
+                        for (Object varVal : cell.getVariables().values()) {
+                            if (varVal instanceof Map m && "CELL_REF".equals(m.get("type"))) {
+                                graph.get(cellId).add((String) m.get("ref"));
+                            }
+                        }
+                    }
+
+                    String expression = cell.getExpression();
+                    if(expression != null){
+                        // Deps from Expression String (Regex)
+                        Matcher m = CELL_REF_PATTERN.matcher(expression);
+
+                        // Iterate through every match found in the expression string
+                        while (m.find()) {
+                            String variableName = m.group();
+                            Map<String, Object> variables = cell.getVariables();
+
+                            // Check id it is a defined variable first
+                            if(variables != null && variables.containsKey(variableName)){
+                                graph.get(cellId).add(variableName);
+                                continue;             // Valid variable, move to next match
+                            }
+                            Matcher refMatcher = CELL_REF_PATTERN.matcher(variableName);
+                            if(refMatcher.matches()){
+                                String rowId = refMatcher.group(1);
+                                String colId = refMatcher.group(2);
+                                log.info("Print the row id and col id: {} {}", rowId, colId);
+                                boolean exists = validateCellExists(t, rowId, colId);
+                                if(!exists){
+                                    throw new BusinessRuleViolationException("Cell reference " + variableName + " (Row: " + rowId + ", Coll: " + colId + ") does not exist in report data.");
+                                }
+                                graph.get(cellId).add(variableName);
+                            } else {
+                                throw new BusinessRuleViolationException("Undefined reference found in expression: " + variableName);
+                            }
+                        }
+                    }
+                }
+
+            }
+        }
+
+        // Topological Sort / Cycle Detection via DFS
+        Set<String> visited = new HashSet<>();
+        Set<String> recursionStack = new HashSet<>();
+
+        for (String cellId : allFormulaCells) {
+            if (detectCycle(cellId, graph, visited, recursionStack)) {
+                throw new BusinessRuleViolationException("Circular dependency detected involving cell: " + cellId);
+            }
+        }
+    }
+
+    private boolean validateCellExists(ReportTemplateDto.Template t, String rowId, String colId){
+        if(t.getReportData() == null) return false;
+
+        // Check if the Row id exists in the row list
+        boolean rowExists = t.getReportData().getRows().stream().anyMatch(row -> rowId.equals(row.getId()));
+
+        // Check if the Column id exists in the column list
+        boolean colExists = t.getReportData().getColumns().stream().anyMatch(col -> colId.equals(col.getId()));
+
+        // Return true only if both exists
+        return colExists && rowExists;
+    }
+
+    private boolean detectCycle(String current, Map<String, Set<String>> graph, Set<String> visited, Set<String> recursionStack) {
+        if (recursionStack.contains(current)) return true;
+        if (visited.contains(current)) return false;
+
+        visited.add(current);
+        recursionStack.add(current);
+
+        Set<String> neighbors = graph.get(current);
+        if (neighbors != null) {
+            for (String neighbor : neighbors) {
+                if (detectCycle(neighbor, graph, visited, recursionStack)) return true;
+            }
+        }
+
+        recursionStack.remove(current);
+        return false;
+    }
+
+    public boolean isAllowed(String column,  Map<String, AllowedColumnsDTO> colMetaMap) {
+//        log.info("show me the data {}", colMetaMap);
+//        log.info("show me the column {}", colMetaMap.get(column));
+//        log.info("show me the njhcythyjuy6tuj {}", column);
+        if(colMetaMap.get(column) == null) return false;
+        return true;
+    }
+
+    // =========================================================================
+    // 8. Security & Semantic Validation (DB Whitelist)
+    // =========================================================================
+    private void validateSchemaPermissions(Map<String, Set<ColumnUsage>> requirements) {
+        if (requirements.isEmpty()) return;
+        ObjectMapper mapper = new ObjectMapper();
+
+        // Bulk fetch allowed schema from DB
+        Map<String, AllowedTablesDTO> allowedSchema = schemaRepo.findAll().stream().filter(c -> "Y".equalsIgnoreCase(c.getActive())).map(AllowedTablesDTO::new).collect(Collectors.toMap(AllowedTablesDTO :: getTableName, dto -> dto));
+        log.info("List of all the table {}", allowedSchema);
+        //Map<String, List<ColumnMetadata>> allowedSchema = rawData.stream().collect(Collectors.groupingBy(ColumnMetadata::getTableName));
+
+        for (Map.Entry<String, Set<ColumnUsage>> entry : requirements.entrySet()) {
+            String tableName = entry.getKey();
+
+            // Check if Table is allowed
+            if (!allowedSchema.containsKey(tableName)) {
+                throw new BusinessRuleViolationException("Security Violation: Table '" + tableName + "' is not allowed/whitelisted.");
+            }
+
+            Map<String, AllowedColumnsDTO> colMetaMap = allowedSchema.get(tableName).getColumns().stream()
+                    .collect(Collectors.toMap(c -> c.getColumnName().toUpperCase(), c -> c));
+
+            for (ColumnUsage usage : entry.getValue()) {
+                String colName = usage.column.toUpperCase();
+                AllowedColumnsDTO meta = colMetaMap.get(colName);
+                log.info("Column name {}", meta);
+
+                // Check if Column exists
+                if (meta == null) {
+                    throw new BusinessRuleViolationException("Column '" + colName + "' does not exist in table '" + tableName + "'");
+                }
+
+                // Check if Column is PRESENT IN THIS TABLE
+                if (!isAllowed(colName, colMetaMap)) {
+                    throw new BusinessRuleViolationException("Security Violation: Column '" + colName + "' in table '" + tableName + "' is not allowed.");
+                }
+
+                // Check if Column is SELECTABLE (if used in source or if formula then inside variable)
+                if (usage.isSelectable && !"Y".equals(meta.getSelectable())) {
+                    throw new BusinessRuleViolationException("Column '" + colName + "' cannot be Selectable.");
+                }
+
+                // Check if Column is filterable (if used in filters)
+                if (usage.isUsedInFilter && !"Y".equals(meta.getFilterable())) {
+                    throw new BusinessRuleViolationException("Column '" + colName + "' cannot be used in Filters.");
+                }
+                // Check Aggregation Compatibility
+                if (usage.aggType != null) {
+                    boolean isNumeric = "NUMBER".equalsIgnoreCase(meta.getDataType()) || "DECIMAL".equalsIgnoreCase(meta.getDataType());
+                    if (Set.of("DB_SUM", "DB_AVG").contains(usage.aggType) && !isNumeric) {
+                        throw new BusinessRuleViolationException("Aggregation " + usage.aggType + " requires numeric column. Got: " + meta.getDataType());
+                    }
+                }
+            }
+        }
+    }
+
+    // =========================================================================
+    // 9 & 10. Variant Definitions & Cross-Validation
+    // =========================================================================
+    private void validateVariants(List<ReportTemplateVariantDto> variants, Set<String> tablesUsedInTemplate) {
+        Set<String> codes = new HashSet<>();
+
+        for (ReportTemplateVariantDto v : variants) {
+            validateIdentifier(v.getVariantCode(), "Variant Code");
+            if (!codes.add(v.getVariantCode())) throw new BusinessRuleViolationException("Duplicate Variant Code: " + v.getVariantCode());
+
+            // Params
+            if (v.getParams() != null) {
+                for (ReportTemplateVariantParamDto p : v.getParams()) {
+                    validateIdentifier(p.getParamName(), "Param Name");
+                    if (!ALLOWED_PARAM_TYPES.contains(p.getParamType())) {
+                        throw new BusinessRuleViolationException("Invalid Param Type: " + p.getParamType());
+                    }
+                    if (p.getValidation() != null) {
+                        try { Pattern.compile(p.getValidation()); }
+                        catch (Exception e) { throw new BusinessRuleViolationException("Invalid Regex for param " + p.getParamName()); }
+                    }
+                }
+            }
+
+            // Rules
+            if (v.getFilterRules() != null) {
+                for (ReportTemplateFilterRuleDto r : v.getFilterRules()) {
+                    if (r.getScopeType() != null && !ALLOWED_VARIANT_SCOPES.contains(r.getScopeType())) {
+                        throw new BusinessRuleViolationException("Invalid Scope Type: " + r.getScopeType());
+                    }
+                    if (r.getOperator() != null && !ALLOWED_OPERATORS.contains(r.getOperator())) {
+                        throw new BusinessRuleViolationException("Invalid Rule Operator: " + r.getOperator());
+                    }
+                    validateIdentifier(r.getDbColumn(), "Variant Rule DB Column"); // Injection Check
+
+                    // --- 10. Cross-Validation (Rule Scope) ---
+                    // If variant tries to filter a table, ensure that table is actually used in the template
+                    if ("TABLE".equals(r.getScopeType()) && r.getScopeValue() != null) {
+                        if (!tablesUsedInTemplate.contains(r.getScopeValue().toUpperCase())) {
+                            throw new BusinessRuleViolationException("Variant Rule references table '" + r.getScopeValue() +
+                                    "' which is NOT used in the template.");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // =========================================================================
+    // Helpers
+    // =========================================================================
+    private void validateIdentifier(String id, String ctx) {
+        if (isBlank(id)) throw new BusinessRuleViolationException(ctx + " cannot be empty");
+        // Strict Regex: Alphanumeric + Underscore only (Rule 2 & 8)
+        if (!SQL_IDENTIFIER_PATTERN.matcher(id).matches()) {
+            throw new BusinessRuleViolationException("Security Error: " + ctx + " '" + id + "' contains invalid characters. Alphanumeric only.");
+        }
+    }
+
+    private boolean isBlank(String s) { return s == null || s.trim().isEmpty(); }
+
+    private void addDbRequirement(ValidationContext ctx, String table, String col, String aggType, boolean isFilter, boolean isSelectable) {
+        ctx.dbRequirements.computeIfAbsent(table.toUpperCase(), k -> new HashSet<>())
+                .add(new ColumnUsage(col, aggType, isFilter, isSelectable));
+    }
+
+    // Context Class to carry state through validation
+    private static class ValidationContext {
+        long totalEstimatedSpecs = 0;
+        Set<String> tablesUsed = new HashSet<>();
+        Map<String, Set<ColumnUsage>> dbRequirements = new HashMap<>();
+    }
+
+    // Helper DTO for collecting usages
+    private static class ColumnUsage {
+        String column;
+        String aggType;
+        boolean isUsedInFilter;
+        boolean isSelectable;
+
+        public ColumnUsage(String column, String aggType, boolean isUsedInFilter, boolean isSelectable) {
+            this.column = column;
+            this.aggType = aggType;
+            this.isUsedInFilter = isUsedInFilter;
+            this.isSelectable = isSelectable;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            ColumnUsage that = (ColumnUsage) o;
+            return isUsedInFilter == that.isUsedInFilter && isSelectable == that.isSelectable && Objects.equals(column, that.column) && Objects.equals(aggType, that.aggType);
+        }
+
+        @Override
+        public int hashCode() { return Objects.hash(column, aggType, isSelectable, isUsedInFilter); }
+    }
+}
+
+
+
