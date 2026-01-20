@@ -1,0 +1,209 @@
+// ---------------------------
+//  dto/diff/FieldDiffDto.java
+// ----------------------------
+
+package com.tcs.fincore.CommonRequestService.dto.diff;
+
+import lombok.*;
+
+@Getter
+@Setter
+@AllArgsConstructor
+@NoArgsConstructor
+@Builder
+public class FieldDiffDto {
+
+    private String field;      // field name
+    private Object oldValue;   // value from DB
+    private Object newValue;   // value from request
+    private boolean changed;   // true if different
+}
+
+
+// ------------------------------------
+// dto/diff/RequestDiffResponseDto.java
+// -------------------------------------
+
+package com.tcs.fincore.CommonRequestService.dto.diff;
+
+import lombok.*;
+
+import java.util.List;
+
+@Getter
+@Setter
+@AllArgsConstructor
+@NoArgsConstructor
+@Builder
+public class RequestDiffResponseDto {
+
+    private String changeType;           // UPDATE
+    private String requestId;
+    private List<FieldDiffDto> templateDiffs;
+}
+
+
+
+// ------------------------------------------
+// service/diff/TemplateDiffUtil.java
+// ------------------------------------------
+
+package com.tcs.fincore.CommonRequestService.service.diff;
+
+import com.tcs.fincore.CommonRequestService.dto.diff.FieldDiffDto;
+import com.tcs.fincore.CommonRequestService.dto.ReportTemplateDto;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+
+/**
+ * ⭐ COMMENT:
+ * This utility compares OLD vs NEW report template
+ * and produces field-level diffs.
+ */
+public class TemplateDiffUtil {
+
+    public static List<FieldDiffDto> compare(
+            ReportTemplateDto.Template oldT,
+            ReportTemplateDto.Template newT
+    ) {
+        List<FieldDiffDto> diffs = new ArrayList<>();
+
+        // -------------------------------
+        // TEMPLATE META
+        // -------------------------------
+        compareField(diffs, "reportName",
+                oldT.getReportMeta().getReportName(),
+                newT.getReportMeta().getReportName());
+
+        compareField(diffs, "reportId",
+                oldT.getReportMeta().getReportId(),
+                newT.getReportMeta().getReportId());
+
+        compareField(diffs, "version",
+                oldT.getTemplateMeta().getVersion(),
+                newT.getTemplateMeta().getVersion());
+
+        compareField(diffs, "pageSize",
+                oldT.getTemplateMeta().getPageSize(),
+                newT.getTemplateMeta().getPageSize());
+
+        compareField(diffs, "pageOrientation",
+                oldT.getTemplateMeta().getPageOrientation(),
+                newT.getTemplateMeta().getPageOrientation());
+
+        return diffs;
+    }
+
+    private static void compareField(
+            List<FieldDiffDto> diffs,
+            String field,
+            Object oldVal,
+            Object newVal
+    ) {
+        boolean changed = !Objects.equals(oldVal, newVal);
+
+        diffs.add(FieldDiffDto.builder()
+                .field(field)
+                .oldValue(oldVal)
+                .newValue(newVal)
+                .changed(changed)
+                .build());
+    }
+}
+
+
+
+// ---‐--------‐-----------------------
+// service/RequestDiffService.java
+// -----------------------------------
+
+package com.tcs.fincore.CommonRequestService.service;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tcs.fincore.CommonRequestService.dto.ReportTemplateDto;
+import com.tcs.fincore.CommonRequestService.dto.diff.RequestDiffResponseDto;
+import com.tcs.fincore.CommonRequestService.model.CommonReq;
+import com.tcs.fincore.CommonRequestService.model.ReportTemplate;
+import com.tcs.fincore.CommonRequestService.repository.CommonRequestRepository;
+import com.tcs.fincore.CommonRequestService.repository.ReportTemplateRepository;
+import com.tcs.fincore.CommonRequestService.service.diff.TemplateDiffUtil;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+@Service
+@RequiredArgsConstructor
+public class RequestDiffService {
+
+    private final CommonRequestRepository commonRequestRepository;
+    private final ReportTemplateRepository reportTemplateRepository;
+    private final ObjectMapper objectMapper;
+
+    public RequestDiffResponseDto getDiff(Long requestId) throws Exception {
+
+        // ⭐ Fetch request
+        CommonReq req = commonRequestRepository.findById(requestId)
+                .orElseThrow(() -> new RuntimeException("Request not found"));
+
+        if (!"UPDATE".equals(req.getChangeType().name())) {
+            throw new IllegalStateException("Diff available only for UPDATE");
+        }
+
+        // ⭐ Fetch ACTIVE template (OLD)
+        ReportTemplate activeTemplate =
+                reportTemplateRepository
+                        .findFirstByReportIdAndStatus(req.getTargetId(), "ACTIVE")
+                        .orElseThrow(() -> new RuntimeException("Active template not found"));
+
+        // ⭐ Deserialize OLD + NEW
+        ReportTemplateDto.Template oldTemplate =
+                objectMapper.readValue(activeTemplate.getTemplateJson(),
+                        ReportTemplateDto.Template.class);
+
+        ReportTemplateDto newPayload =
+                objectMapper.readValue(req.getPayload(), ReportTemplateDto.class);
+
+        return RequestDiffResponseDto.builder()
+                .requestId(String.valueOf(requestId))
+                .changeType("UPDATE")
+                .templateDiffs(
+                        TemplateDiffUtil.compare(
+                                oldTemplate,
+                                newPayload.getTemplate()
+                        )
+                )
+                .build();
+    }
+}
+
+
+
+// --------------------------------------
+// controller/RequestDiffController.java
+// --------------------------------------
+
+package com.tcs.fincore.CommonRequestService.controller;
+
+import com.tcs.fincore.CommonRequestService.dto.diff.RequestDiffResponseDto;
+import com.tcs.fincore.CommonRequestService.service.RequestDiffService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api")
+@RequiredArgsConstructor
+public class RequestDiffController {
+
+    private final RequestDiffService diffService;
+
+    /**
+     * ⭐ COMMENT:
+     * Used by checker to view OLD vs NEW data
+     */
+    @GetMapping("/request-diff/{requestId}")
+    public RequestDiffResponseDto getDiff(@PathVariable Long requestId)
+            throws Exception {
+        return diffService.getDiff(requestId);
+    }
+}
