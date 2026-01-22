@@ -63,21 +63,22 @@ import java.util.stream.Collectors;
 public class ReportTemplateDiffEngine {
 
     public static List<SectionDiffDto> diff(
-            ReportTemplateDto.Template oldT,
-            ReportTemplateDto.Template newT
+            ReportTemplateDto oldDto,
+            ReportTemplateDto newDto
     ) {
-        List<SectionDiffDto> result = new ArrayList<>();
+        List<SectionDiffDto> diffs = new ArrayList<>();
 
-        result.add(diffTemplateMeta(oldT, newT));
-        result.add(diffReportMeta(oldT, newT));
-        result.addAll(diffColumns(oldT, newT));
-        result.addAll(diffRows(oldT, newT));
-        result.addAll(diffVariants(oldT, newT));
+        // ================= TEMPLATE =================
+        diffs.add(diffTemplateMeta(oldDto.getTemplate(), newDto.getTemplate()));
+        diffs.add(diffReportMeta(oldDto.getTemplate(), newDto.getTemplate()));
+        diffs.addAll(diffReportData(oldDto.getTemplate(), newDto.getTemplate()));
 
-        // remove empty sections
-        return result.stream()
-                .filter(s -> s.getFields() != null && !s.getFields().isEmpty())
-                .collect(Collectors.toList());
+        // ================= VARIANTS =================
+        diffs.addAll(diffVariants(oldDto.getVariants(), newDto.getVariants()));
+
+        return diffs.stream()
+                .filter(d -> d.getFields() != null && !d.getFields().isEmpty())
+                .toList();
     }
 
     /* ================= TEMPLATE META ================= */
@@ -88,10 +89,7 @@ public class ReportTemplateDiffEngine {
     ) {
         return SectionDiffDto.builder()
                 .section("TEMPLATE_META")
-                .fields(compareObjects(
-                        oldT.getTemplateMeta(),
-                        newT.getTemplateMeta()
-                ))
+                .fields(compareObjects(oldT.getTemplateMeta(), newT.getTemplateMeta()))
                 .build();
     }
 
@@ -103,67 +101,105 @@ public class ReportTemplateDiffEngine {
     ) {
         return SectionDiffDto.builder()
                 .section("REPORT_META")
-                .fields(compareObjects(
-                        oldT.getReportMeta(),
-                        newT.getReportMeta()
-                ))
+                .fields(compareObjects(oldT.getReportMeta(), newT.getReportMeta()))
                 .build();
     }
 
-    /* ================= COLUMNS ================= */
+    /* ================= REPORT DATA ================= */
 
-    private static List<SectionDiffDto> diffColumns(
+    private static List<SectionDiffDto> diffReportData(
             ReportTemplateDto.Template oldT,
             ReportTemplateDto.Template newT
     ) {
-        Map<String, ReportTemplateDto.ColumnDefinition> oldMap =
-                mapById(oldT.getReportData().getColumns());
+        List<SectionDiffDto> result = new ArrayList<>();
 
-        Map<String, ReportTemplateDto.ColumnDefinition> newMap =
-                mapById(newT.getReportData().getColumns());
+        result.addAll(diffById(
+                "COLUMN",
+                oldT.getReportData().getColumns(),
+                newT.getReportData().getColumns(),
+                ReportTemplateDto.ColumnDefinition::getId
+        ));
 
-        return buildDiffByKey("COLUMN", oldMap, newMap);
-    }
+        result.addAll(diffById(
+                "ROW",
+                oldT.getReportData().getRows(),
+                newT.getReportData().getRows(),
+                ReportTemplateDto.Row::getId
+        ));
 
-    /* ================= ROWS ================= */
-
-    private static List<SectionDiffDto> diffRows(
-            ReportTemplateDto.Template oldT,
-            ReportTemplateDto.Template newT
-    ) {
-        Map<String, ReportTemplateDto.Row> oldMap =
-                mapById(oldT.getReportData().getRows());
-
-        Map<String, ReportTemplateDto.Row> newMap =
-                mapById(newT.getReportData().getRows());
-
-        return buildDiffByKey("ROW", oldMap, newMap);
+        return result;
     }
 
     /* ================= VARIANTS ================= */
 
     private static List<SectionDiffDto> diffVariants(
-            ReportTemplateDto.Template oldT,
-            ReportTemplateDto.Template newT
+            List<ReportTemplateVariantDto> oldVariants,
+            List<ReportTemplateVariantDto> newVariants
     ) {
-        Map<String, ReportTemplateDto.ReportTemplateVariantDto> oldMap =
-                mapByKey(oldT.getVariants(), ReportTemplateDto.ReportTemplateVariantDto::getVariantCode);
-
-        Map<String, ReportTemplateDto.ReportTemplateVariantDto> newMap =
-                mapByKey(newT.getVariants(), ReportTemplateDto.ReportTemplateVariantDto::getVariantCode);
-
-        return buildDiffByKey("VARIANT", oldMap, newMap);
+        return diffById(
+                "VARIANT",
+                oldVariants,
+                newVariants,
+                ReportTemplateVariantDto::getVariantCode
+        );
     }
 
     /* ================= GENERIC HELPERS ================= */
 
+    private static <T> List<SectionDiffDto> diffById(
+            String section,
+            List<T> oldList,
+            List<T> newList,
+            Function<T, String> keyExtractor
+    ) {
+        Map<String, T> oldMap = oldList == null ? Map.of()
+                : oldList.stream().collect(Collectors.toMap(keyExtractor, Function.identity()));
+
+        Map<String, T> newMap = newList == null ? Map.of()
+                : newList.stream().collect(Collectors.toMap(keyExtractor, Function.identity()));
+
+        Set<String> keys = new HashSet<>();
+        keys.addAll(oldMap.keySet());
+        keys.addAll(newMap.keySet());
+
+        List<SectionDiffDto> result = new ArrayList<>();
+
+        for (String key : keys) {
+            T oldObj = oldMap.get(key);
+            T newObj = newMap.get(key);
+
+            if (!Objects.equals(oldObj, newObj)) {
+                result.add(
+                        SectionDiffDto.builder()
+                                .section(section)
+                                .identifier(key)
+                                .fields(compareObjects(oldObj, newObj))
+                                .build()
+                );
+            }
+        }
+        return result;
+    }
+
     private static <T> List<FieldDiffDto> compareObjects(T oldObj, T newObj) {
         List<FieldDiffDto> diffs = new ArrayList<>();
-        for (var f : oldObj.getClass().getDeclaredFields()) {
+
+        if (oldObj == null || newObj == null) {
+            diffs.add(FieldDiffDto.builder()
+                    .field("OBJECT")
+                    .oldValue(oldObj)
+                    .newValue(newObj)
+                    .changed(true)
+                    .build());
+            return diffs;
+        }
+
+        for (Field f : oldObj.getClass().getDeclaredFields()) {
             f.setAccessible(true);
             try {
                 Object oldVal = f.get(oldObj);
                 Object newVal = f.get(newObj);
+
                 if (!Objects.equals(oldVal, newVal)) {
                     diffs.add(FieldDiffDto.builder()
                             .field(f.getName())
@@ -176,50 +212,7 @@ public class ReportTemplateDiffEngine {
         }
         return diffs;
     }
-
-    private static <T> Map<String, T> mapById(List<T> list) {
-        return list.stream()
-                .collect(Collectors.toMap(
-                        o -> {
-                            try {
-                                return (String) o.getClass().getDeclaredField("id").get(o);
-                            } catch (Exception e) {
-                                return UUID.randomUUID().toString();
-                            }
-                        },
-                        o -> o
-                ));
-    }
-
-    private static <T> Map<String, T> mapByKey(List<T> list, java.util.function.Function<T, String> fn) {
-        return list.stream().collect(Collectors.toMap(fn, o -> o));
-    }
-
-    private static <T> List<SectionDiffDto> buildDiffByKey(
-            String section,
-            Map<String, T> oldMap,
-            Map<String, T> newMap
-    ) {
-        List<SectionDiffDto> result = new ArrayList<>();
-        Set<String> keys = new HashSet<>(oldMap.keySet());
-        keys.addAll(newMap.keySet());
-
-        for (String key : keys) {
-            T oldObj = oldMap.get(key);
-            T newObj = newMap.get(key);
-
-            if (!Objects.equals(oldObj, newObj)) {
-                result.add(SectionDiffDto.builder()
-                        .section(section)
-                        .identifier(key)
-                        .fields(compareObjects(oldObj, newObj))
-                        .build());
-            }
-        }
-        return result;
-    }
 }
-
 
 // ---‐--------‐-----------------------
 // service/RequestDiffService.java
