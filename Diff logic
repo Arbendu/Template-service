@@ -223,55 +223,150 @@ package com.tcs.fincore.CommonRequestService.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tcs.fincore.CommonRequestService.dto.ReportTemplateDto;
 import com.tcs.fincore.CommonRequestService.dto.diff.RequestDiffResponseDto;
+import com.tcs.fincore.CommonRequestService.dto.diff.SectionDiffDto;
+import com.tcs.fincore.CommonRequestService.exception.ResourceNotFoundException;
 import com.tcs.fincore.CommonRequestService.model.CommonReq;
 import com.tcs.fincore.CommonRequestService.model.ReportTemplate;
+import com.tcs.fincore.CommonRequestService.model.ReportTemplateVariant;
 import com.tcs.fincore.CommonRequestService.repository.CommonRequestRepository;
 import com.tcs.fincore.CommonRequestService.repository.ReportTemplateRepository;
-import com.tcs.fincore.CommonRequestService.service.diff.TemplateDiffUtil;
+import com.tcs.fincore.CommonRequestService.repository.ReportTemplateVariantRepository;
+import com.tcs.fincore.CommonRequestService.service.diff.ReportTemplateDiffEngine;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
+/**
+ * ⭐ RequestDiffService
+ *
+ * Responsible for preparing OLD vs NEW comparison data
+ * for UPDATE requests (maker–checker flow).
+ *
+ * - OLD  → ACTIVE data from DB
+ * - NEW  → Pending request payload
+ *
+ * This service DOES NOT modify DB.
+ */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class RequestDiffService {
 
     private final CommonRequestRepository commonRequestRepository;
     private final ReportTemplateRepository reportTemplateRepository;
+    private final ReportTemplateVariantRepository reportTemplateVariantRepository;
     private final ObjectMapper objectMapper;
 
-    public RequestDiffResponseDto getDiff(Long requestId) throws Exception {
+    /**
+     * ⭐ Main method called by controller
+     */
+    public RequestDiffResponseDto getDiff(Long requestId) {
 
-        // ⭐ Fetch request
-        CommonReq req = commonRequestRepository.findById(requestId)
-                .orElseThrow(() -> new RuntimeException("Request not found"));
+        // =====================================================
+        // 1️⃣ Fetch Common Request
+        // =====================================================
+        CommonReq request = commonRequestRepository.findById(requestId)
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Request not found for id: " + requestId));
 
-        if (!"UPDATE".equals(req.getChangeType().name())) {
-            throw new IllegalStateException("Diff available only for UPDATE");
+        // =====================================================
+        // 2️⃣ Validate change type
+        // =====================================================
+        if (!"UPDATE".equals(request.getChangeType().name())) {
+            throw new IllegalStateException(
+                    "Diff comparison is allowed only for UPDATE requests");
         }
 
-        // ⭐ Fetch ACTIVE template (OLD)
-        ReportTemplate activeTemplate =
-                reportTemplateRepository
-                        .findFirstByReportIdAndStatus(req.getTargetId(), "ACTIVE")
-                        .orElseThrow(() -> new RuntimeException("Active template not found"));
+        // =====================================================
+        // 3️⃣ Fetch ACTIVE template (OLD DATA)
+        // =====================================================
+        ReportTemplate activeTemplate = reportTemplateRepository
+                .findFirstByReportIdAndStatus(request.getTargetId(), "ACTIVE")
+                .orElseThrow(() ->
+                        new ResourceNotFoundException(
+                                "Active template not found for reportId: " + request.getTargetId()));
 
-        // ⭐ Deserialize OLD + NEW
-        ReportTemplateDto.Template oldTemplate =
-                objectMapper.readValue(activeTemplate.getTemplateJson(),
-                        ReportTemplateDto.Template.class);
+        // =====================================================
+        // 4️⃣ Deserialize OLD template JSON → Template DTO
+        // =====================================================
+        ReportTemplateDto.Template oldTemplate;
+        try {
+            oldTemplate = objectMapper.readValue(
+                    activeTemplate.getTemplateJson(),
+                    ReportTemplateDto.Template.class
+            );
+        } catch (Exception ex) {
+            log.error("Failed to deserialize old template JSON", ex);
+            throw new IllegalStateException("Invalid stored template JSON");
+        }
 
-        ReportTemplateDto newPayload =
-                objectMapper.readValue(req.getPayload(), ReportTemplateDto.class);
+        // =====================================================
+        // 5️⃣ Fetch OLD variants from DB
+        // =====================================================
+        List<ReportTemplateVariant> oldVariantEntities =
+                reportTemplateVariantRepository.findByTemplateId(
+                        activeTemplate.getTemplateId()
+                );
 
+        // =====================================================
+        // 6️⃣ Convert OLD variants → DTO
+        // =====================================================
+        List<ReportTemplateDto.ReportTemplateVariantDto> oldVariants =
+                oldVariantEntities.stream()
+                        .map(this::mapVariantEntityToDto)
+                        .toList();
+
+        // =====================================================
+        // 7️⃣ Build OLD DTO (template + variants)
+        // =====================================================
+        ReportTemplateDto oldDto = new ReportTemplateDto();
+        oldDto.setTemplate(oldTemplate);
+        oldDto.setVariants(oldVariants);
+
+        // =====================================================
+        // 8️⃣ Deserialize NEW payload → FULL DTO
+        // =====================================================
+        ReportTemplateDto newDto;
+        try {
+            newDto = objectMapper.readValue(
+                    request.getPayload(),
+                    ReportTemplateDto.class
+            );
+        } catch (Exception ex) {
+            log.error("Failed to deserialize request payload", ex);
+            throw new IllegalStateException("Invalid request payload JSON");
+        }
+
+        // =====================================================
+        // 9️⃣ Perform FULL DIFF (ALL SECTIONS)
+        // =====================================================
+        List<SectionDiffDto> diffs =
+                ReportTemplateDiffEngine.diff(oldDto, newDto);
+
+        // =====================================================
+        // 🔟 Build final response
+        // =====================================================
         return RequestDiffResponseDto.builder()
                 .requestId(String.valueOf(requestId))
-                .changeType("UPDATE")
-                .templateDiffs(
-                        TemplateDiffUtil.compare(
-                                oldTemplate,
-                                newPayload.getTemplate()
-                        )
-                )
+                .changeType(request.getChangeType().name())
+                .diffs(diffs)
+                .build();
+    }
+
+    // =========================================================
+    // 🔁 HELPER: Convert Variant Entity → Variant DTO
+    // =========================================================
+    private ReportTemplateDto.ReportTemplateVariantDto mapVariantEntityToDto(
+            ReportTemplateVariant entity
+    ) {
+        return ReportTemplateDto.ReportTemplateVariantDto.builder()
+                .variantCode(entity.getVariantCode())
+                .variantName(entity.getVariantName())
+                .description(entity.getDescription())
+                .status(entity.getStatus())
+                // ⭐ params & filterRules can be added later
                 .build();
     }
 }
