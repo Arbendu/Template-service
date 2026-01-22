@@ -833,14 +833,18 @@ import {
   Box,
   CircularProgress,
   IconButton,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
   Table,
+  TableHead,
   TableBody,
+  TableRow,
   TableCell,
   TableContainer,
-  TableHead,
-  TableRow,
   Paper
 } from "@mui/material";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import CloseIcon from "@mui/icons-material/Close";
 import useApi from "../../hooks/useApi";
 
@@ -848,27 +852,19 @@ import useApi from "../../hooks/useApi";
    Styles
 ====================================================== */
 const styles = {
-  oldChanged: {
-    bgcolor: "#ffebee"
-  },
-  newChanged: {
-    bgcolor: "#e8f5e9"
-  },
+  oldChanged: { bgcolor: "#ffebee" },   // light red
+  newChanged: { bgcolor: "#e8f5e9" },   // light green
+  sectionTitle: { fontWeight: 600 },
   pre: {
     margin: 0,
     whiteSpace: "pre-wrap",
     wordBreak: "break-word",
     fontSize: 12
-  },
-  sectionTitle: {
-    fontWeight: 600,
-    mt: 3,
-    mb: 1
   }
 };
 
 /* ======================================================
-   Helper: Render value safely
+   Helpers
 ====================================================== */
 const renderValue = (value) => {
   if (value === null || value === undefined) {
@@ -891,6 +887,90 @@ const renderValue = (value) => {
 };
 
 /* ======================================================
+   Base Diff Table (Reusable)
+====================================================== */
+const DiffTable = ({ fields }) => (
+  <TableContainer component={Paper} variant="outlined">
+    <Table size="small">
+      <TableHead>
+        <TableRow>
+          <TableCell><b>Field</b></TableCell>
+          <TableCell><b>Old Value</b></TableCell>
+          <TableCell><b>New Value</b></TableCell>
+        </TableRow>
+      </TableHead>
+
+      <TableBody>
+        {fields.map((f, i) => (
+          <TableRow key={i}>
+            <TableCell>{f.field}</TableCell>
+
+            <TableCell sx={f.changed ? styles.oldChanged : {}}>
+              {renderValue(f.oldValue)}
+            </TableCell>
+
+            <TableCell sx={f.changed ? styles.newChanged : {}}>
+              {renderValue(f.newValue)}
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  </TableContainer>
+);
+
+/* ======================================================
+   Column Diff Table
+====================================================== */
+const ColumnDiffTable = ({ section }) => (
+  <Accordion defaultExpanded>
+    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+      <Typography sx={styles.sectionTitle}>
+        COLUMN : {section.identifier}
+      </Typography>
+    </AccordionSummary>
+
+    <AccordionDetails>
+      <DiffTable fields={section.fields} />
+    </AccordionDetails>
+  </Accordion>
+);
+
+/* ======================================================
+   Row Diff Table
+====================================================== */
+const RowDiffTable = ({ section }) => (
+  <Accordion>
+    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+      <Typography sx={styles.sectionTitle}>
+        ROW : {section.identifier}
+      </Typography>
+    </AccordionSummary>
+
+    <AccordionDetails>
+      <DiffTable fields={section.fields} />
+    </AccordionDetails>
+  </Accordion>
+);
+
+/* ======================================================
+   Variant Diff Table
+====================================================== */
+const VariantDiffTable = ({ section }) => (
+  <Accordion>
+    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+      <Typography sx={styles.sectionTitle}>
+        VARIANT : {section.identifier}
+      </Typography>
+    </AccordionSummary>
+
+    <AccordionDetails>
+      <DiffTable fields={section.fields} />
+    </AccordionDetails>
+  </Accordion>
+);
+
+/* ======================================================
    CompareRequestDialog
 ====================================================== */
 export default function CompareRequestDialog({ open, onClose, requestId }) {
@@ -898,6 +978,9 @@ export default function CompareRequestDialog({ open, onClose, requestId }) {
   const [diffs, setDiffs] = useState([]);
   const [loading, setLoading] = useState(false);
 
+  /* ----------------------------------------------------
+     Fetch diff
+  ---------------------------------------------------- */
   useEffect(() => {
     if (!open || !requestId) return;
 
@@ -908,6 +991,33 @@ export default function CompareRequestDialog({ open, onClose, requestId }) {
       })
       .finally(() => setLoading(false));
   }, [open, requestId]);
+
+  /* ----------------------------------------------------
+     Render section by type
+  ---------------------------------------------------- */
+  const renderSection = (section, idx) => {
+    switch (section.section) {
+      case "COLUMN":
+        return <ColumnDiffTable key={idx} section={section} />;
+      case "ROW":
+        return <RowDiffTable key={idx} section={section} />;
+      case "VARIANT":
+        return <VariantDiffTable key={idx} section={section} />;
+      default:
+        return (
+          <Accordion key={idx} defaultExpanded>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography sx={styles.sectionTitle}>
+                {section.section}
+              </Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <DiffTable fields={section.fields} />
+            </AccordionDetails>
+          </Accordion>
+        );
+    }
+  };
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
@@ -932,55 +1042,7 @@ export default function CompareRequestDialog({ open, onClose, requestId }) {
         ) : diffs.length === 0 ? (
           <Typography>No changes detected</Typography>
         ) : (
-          diffs.map((section, idx) => (
-            <Box key={idx}>
-              {/* ---------- Section Title ---------- */}
-              <Typography sx={styles.sectionTitle}>
-                {section.section}
-                {section.identifier ? ` : ${section.identifier}` : ""}
-              </Typography>
-
-              {/* ---------- Table ---------- */}
-              <TableContainer component={Paper} variant="outlined">
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell><b>Field</b></TableCell>
-                      <TableCell><b>Old Value</b></TableCell>
-                      <TableCell><b>New Value</b></TableCell>
-                    </TableRow>
-                  </TableHead>
-
-                  <TableBody>
-                    {section.fields.map((field, i) => (
-                      <TableRow key={i}>
-                        {/* Field name */}
-                        <TableCell>
-                          {field.field}
-                        </TableCell>
-
-                        {/* Old value */}
-                        <TableCell
-                          sx={field.changed ? styles.oldChanged : {}}
-                        >
-                          {renderValue(field.oldValue)}
-                        </TableCell>
-
-                        {/* New value */}
-                        <TableCell
-                          sx={field.changed ? styles.newChanged : {}}
-                        >
-                          {renderValue(field.newValue)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-
-              <Divider sx={{ mt: 3 }} />
-            </Box>
-          ))
+          diffs.map(renderSection)
         )}
       </DialogContent>
     </Dialog>
