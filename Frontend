@@ -829,51 +829,131 @@ import {
   Grid,
   Typography,
   Box,
-  CircularProgress
+  CircularProgress,
+  IconButton
 } from "@mui/material";
+import CloseIcon from "@mui/icons-material/Close";
 import useApi from "../../hooks/useApi";
 
+/**
+ * =====================================================
+ * Styles
+ * =====================================================
+ */
 const styles = {
-  oldChanged: {
-    bgcolor: "#ffebee",
-    p: 1,
-    borderRadius: 1
+  sectionTitle: {
+    fontWeight: 600,
+    mt: 2,
+    mb: 1
   },
-  newChanged: {
-    bgcolor: "#e8f5e9",
-    p: 1,
-    borderRadius: 1
+  headerCell: {
+    fontWeight: 600
   },
   normal: {
-    p: 1
+    p: 1,
+    borderRadius: 1,
+    bgcolor: "transparent"
+  },
+  oldChanged: {
+    p: 1,
+    borderRadius: 1,
+    bgcolor: "#ffebee" // light red
+  },
+  newChanged: {
+    p: 1,
+    borderRadius: 1,
+    bgcolor: "#e8f5e9" // light green
+  },
+  pre: {
+    margin: 0,
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+    fontSize: 12
   }
 };
 
+/**
+ * =====================================================
+ * Helper: Render any value safely
+ * =====================================================
+ */
+const renderValue = (value) => {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+
+  // Primitive values
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return String(value);
+  }
+
+  // Objects / Arrays → Pretty JSON
+  return (
+    <pre style={styles.pre}>
+      {JSON.stringify(value, null, 2)}
+    </pre>
+  );
+};
+
+/**
+ * =====================================================
+ * CompareRequestDialog
+ * =====================================================
+ *
+ * Shows OLD vs NEW report changes for UPDATE requests
+ */
 export default function CompareRequestDialog({ open, onClose, requestId }) {
   const { callApi } = useApi();
+
   const [diffs, setDiffs] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // ---------------------------------------------------
-  // Fetch diff
-  // ---------------------------------------------------
+  /**
+   * ---------------------------------------------------
+   * Fetch diff when dialog opens
+   * ---------------------------------------------------
+   */
   useEffect(() => {
     if (!open || !requestId) return;
 
     setLoading(true);
+
     callApi(`/CR/api/request-diff/${requestId}`, {}, "GET")
       .then((res) => {
-        setDiffs(res?.diffs || []);
+        // ⭐ IMPORTANT: diffs are inside res.data
+        setDiffs(res?.data?.diffs || []);
+      })
+      .catch(() => {
+        setDiffs([]);
       })
       .finally(() => setLoading(false));
   }, [open, requestId]);
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
-      <DialogTitle>Report Change Comparison</DialogTitle>
+      {/* ================================================= */}
+      {/* Dialog Header                                     */}
+      {/* ================================================= */}
+      <DialogTitle sx={{ display: "flex", alignItems: "center" }}>
+        <Typography variant="h6" sx={{ flexGrow: 1 }}>
+          Report Change Comparison
+        </Typography>
+
+        <IconButton onClick={onClose}>
+          <CloseIcon />
+        </IconButton>
+      </DialogTitle>
+
       <Divider />
 
-      <DialogContent>
+      {/* ================================================= */}
+      {/* Dialog Content                                    */}
+      {/* ================================================= */}
+      <DialogContent dividers>
         {loading ? (
           <Box textAlign="center" p={4}>
             <CircularProgress />
@@ -882,36 +962,63 @@ export default function CompareRequestDialog({ open, onClose, requestId }) {
           <Typography>No changes detected</Typography>
         ) : (
           diffs.map((section, idx) => (
-            <Box key={idx} mb={3}>
-              {/* Section Header */}
-              <Typography variant="h6" gutterBottom>
+            <Box key={idx} mb={4}>
+              {/* ================= Section Title ================= */}
+              <Typography sx={styles.sectionTitle}>
                 {section.section}
-                {section.identifier && ` : ${section.identifier}`}
+                {section.identifier ? ` : ${section.identifier}` : ""}
               </Typography>
 
-              {/* Table Header */}
+              {/* ================= Table Header ================= */}
               <Grid container spacing={2} mb={1}>
-                <Grid item xs={3}><b>Field</b></Grid>
-                <Grid item xs={4}><b>Old Value</b></Grid>
-                <Grid item xs={4}><b>New Value</b></Grid>
+                <Grid item xs={3}>
+                  <Typography sx={styles.headerCell}>Field</Typography>
+                </Grid>
+                <Grid item xs={4}>
+                  <Typography sx={styles.headerCell}>Old Value</Typography>
+                </Grid>
+                <Grid item xs={4}>
+                  <Typography sx={styles.headerCell}>New Value</Typography>
+                </Grid>
               </Grid>
 
-              {/* Fields */}
-              {section.fields.map((f, i) => (
-                <Grid container spacing={2} key={i} mb={1}>
+              {/* ================= Diff Fields ================= */}
+              {section.fields.map((field, i) => (
+                <Grid
+                  container
+                  spacing={2}
+                  key={i}
+                  alignItems="flex-start"
+                  mb={1}
+                >
+                  {/* Field Name */}
                   <Grid item xs={3}>
-                    <Typography>{f.field}</Typography>
+                    <Typography>{field.field}</Typography>
                   </Grid>
 
+                  {/* Old Value */}
                   <Grid item xs={4}>
-                    <Box sx={f.changed ? styles.oldChanged : styles.normal}>
-                      {String(f.oldValue ?? "—")}
+                    <Box
+                      sx={
+                        field.changed
+                          ? styles.oldChanged
+                          : styles.normal
+                      }
+                    >
+                      {renderValue(field.oldValue)}
                     </Box>
                   </Grid>
 
+                  {/* New Value */}
                   <Grid item xs={4}>
-                    <Box sx={f.changed ? styles.newChanged : styles.normal}>
-                      {String(f.newValue ?? "—")}
+                    <Box
+                      sx={
+                        field.changed
+                          ? styles.newChanged
+                          : styles.normal
+                      }
+                    >
+                      {renderValue(field.newValue)}
                     </Box>
                   </Grid>
                 </Grid>
