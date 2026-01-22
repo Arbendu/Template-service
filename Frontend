@@ -811,3 +811,117 @@ const ViewRequestDialog = ({ open, handleClose, data }) => {
 };
 
 export default ViewRequestDialog;
+
+
+
+
+
+// ‐------------------------------------------------------
+// src/pages/template/CompareRequestDialog.jsx
+// -------------------------------------------------------
+
+import React, { useEffect, useState } from "react";
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  Divider,
+  Grid,
+  Typography,
+  Box,
+  CircularProgress
+} from "@mui/material";
+import useApi from "../../hooks/useApi";
+
+const styles = {
+  oldChanged: {
+    bgcolor: "#ffebee",
+    p: 1,
+    borderRadius: 1
+  },
+  newChanged: {
+    bgcolor: "#e8f5e9",
+    p: 1,
+    borderRadius: 1
+  },
+  normal: {
+    p: 1
+  }
+};
+
+export default function CompareRequestDialog({ open, onClose, requestId }) {
+  const { callApi } = useApi();
+  const [diffs, setDiffs] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  // ---------------------------------------------------
+  // Fetch diff
+  // ---------------------------------------------------
+  useEffect(() => {
+    if (!open || !requestId) return;
+
+    setLoading(true);
+    callApi(`/CR/api/request-diff/${requestId}`, {}, "GET")
+      .then((res) => {
+        setDiffs(res?.diffs || []);
+      })
+      .finally(() => setLoading(false));
+  }, [open, requestId]);
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
+      <DialogTitle>Report Change Comparison</DialogTitle>
+      <Divider />
+
+      <DialogContent>
+        {loading ? (
+          <Box textAlign="center" p={4}>
+            <CircularProgress />
+          </Box>
+        ) : diffs.length === 0 ? (
+          <Typography>No changes detected</Typography>
+        ) : (
+          diffs.map((section, idx) => (
+            <Box key={idx} mb={3}>
+              {/* Section Header */}
+              <Typography variant="h6" gutterBottom>
+                {section.section}
+                {section.identifier && ` : ${section.identifier}`}
+              </Typography>
+
+              {/* Table Header */}
+              <Grid container spacing={2} mb={1}>
+                <Grid item xs={3}><b>Field</b></Grid>
+                <Grid item xs={4}><b>Old Value</b></Grid>
+                <Grid item xs={4}><b>New Value</b></Grid>
+              </Grid>
+
+              {/* Fields */}
+              {section.fields.map((f, i) => (
+                <Grid container spacing={2} key={i} mb={1}>
+                  <Grid item xs={3}>
+                    <Typography>{f.field}</Typography>
+                  </Grid>
+
+                  <Grid item xs={4}>
+                    <Box sx={f.changed ? styles.oldChanged : styles.normal}>
+                      {String(f.oldValue ?? "—")}
+                    </Box>
+                  </Grid>
+
+                  <Grid item xs={4}>
+                    <Box sx={f.changed ? styles.newChanged : styles.normal}>
+                      {String(f.newValue ?? "—")}
+                    </Box>
+                  </Grid>
+                </Grid>
+              ))}
+
+              <Divider sx={{ mt: 2 }} />
+            </Box>
+          ))
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
