@@ -820,69 +820,61 @@ export default ViewRequestDialog;
 // src/pages/template/CompareRequestDialog.jsx
 // -------------------------------------------------------
 
+
+  
+                  
 import React, { useEffect, useState } from "react";
 import {
   Dialog,
   DialogTitle,
   DialogContent,
   Divider,
-  Grid,
   Typography,
   Box,
   CircularProgress,
-  IconButton
+  IconButton,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
 import useApi from "../../hooks/useApi";
 
-/**
- * =====================================================
- * Styles
- * =====================================================
- */
+/* ======================================================
+   Styles
+====================================================== */
 const styles = {
-  sectionTitle: {
-    fontWeight: 600,
-    mt: 2,
-    mb: 1
-  },
-  headerCell: {
-    fontWeight: 600
-  },
-  normal: {
-    p: 1,
-    borderRadius: 1,
-    bgcolor: "transparent"
-  },
   oldChanged: {
-    p: 1,
-    borderRadius: 1,
-    bgcolor: "#ffebee" // light red
+    bgcolor: "#ffebee"
   },
   newChanged: {
-    p: 1,
-    borderRadius: 1,
-    bgcolor: "#e8f5e9" // light green
+    bgcolor: "#e8f5e9"
   },
   pre: {
     margin: 0,
     whiteSpace: "pre-wrap",
     wordBreak: "break-word",
     fontSize: 12
+  },
+  sectionTitle: {
+    fontWeight: 600,
+    mt: 3,
+    mb: 1
   }
 };
 
-/**
- * =====================================================
- * Helper: Render any value safely
- * =====================================================
- */
+/* ======================================================
+   Helper: Render value safely
+====================================================== */
 const renderValue = (value) => {
   if (value === null || value === undefined) {
-    return "—";
+    return <i>null</i>;
   }
 
-  // Primitive values
   if (
     typeof value === "string" ||
     typeof value === "number" ||
@@ -891,7 +883,6 @@ const renderValue = (value) => {
     return String(value);
   }
 
-  // Objects / Arrays → Pretty JSON
   return (
     <pre style={styles.pre}>
       {JSON.stringify(value, null, 2)}
@@ -899,50 +890,32 @@ const renderValue = (value) => {
   );
 };
 
-/**
- * =====================================================
- * CompareRequestDialog
- * =====================================================
- *
- * Shows OLD vs NEW report changes for UPDATE requests
- */
+/* ======================================================
+   CompareRequestDialog
+====================================================== */
 export default function CompareRequestDialog({ open, onClose, requestId }) {
   const { callApi } = useApi();
-
   const [diffs, setDiffs] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  /**
-   * ---------------------------------------------------
-   * Fetch diff when dialog opens
-   * ---------------------------------------------------
-   */
   useEffect(() => {
     if (!open || !requestId) return;
 
     setLoading(true);
-
     callApi(`/CR/api/request-diff/${requestId}`, {}, "GET")
       .then((res) => {
-        // ⭐ IMPORTANT: diffs are inside res.data
         setDiffs(res?.data?.diffs || []);
-      })
-      .catch(() => {
-        setDiffs([]);
       })
       .finally(() => setLoading(false));
   }, [open, requestId]);
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
-      {/* ================================================= */}
-      {/* Dialog Header                                     */}
-      {/* ================================================= */}
+    <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
+      {/* ================= Header ================= */}
       <DialogTitle sx={{ display: "flex", alignItems: "center" }}>
         <Typography variant="h6" sx={{ flexGrow: 1 }}>
           Report Change Comparison
         </Typography>
-
         <IconButton onClick={onClose}>
           <CloseIcon />
         </IconButton>
@@ -950,9 +923,7 @@ export default function CompareRequestDialog({ open, onClose, requestId }) {
 
       <Divider />
 
-      {/* ================================================= */}
-      {/* Dialog Content                                    */}
-      {/* ================================================= */}
+      {/* ================= Content ================= */}
       <DialogContent dividers>
         {loading ? (
           <Box textAlign="center" p={4}>
@@ -962,69 +933,52 @@ export default function CompareRequestDialog({ open, onClose, requestId }) {
           <Typography>No changes detected</Typography>
         ) : (
           diffs.map((section, idx) => (
-            <Box key={idx} mb={4}>
-              {/* ================= Section Title ================= */}
+            <Box key={idx}>
+              {/* ---------- Section Title ---------- */}
               <Typography sx={styles.sectionTitle}>
                 {section.section}
                 {section.identifier ? ` : ${section.identifier}` : ""}
               </Typography>
 
-              {/* ================= Table Header ================= */}
-              <Grid container spacing={2} mb={1}>
-                <Grid item xs={3}>
-                  <Typography sx={styles.headerCell}>Field</Typography>
-                </Grid>
-                <Grid item xs={4}>
-                  <Typography sx={styles.headerCell}>Old Value</Typography>
-                </Grid>
-                <Grid item xs={4}>
-                  <Typography sx={styles.headerCell}>New Value</Typography>
-                </Grid>
-              </Grid>
+              {/* ---------- Table ---------- */}
+              <TableContainer component={Paper} variant="outlined">
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell><b>Field</b></TableCell>
+                      <TableCell><b>Old Value</b></TableCell>
+                      <TableCell><b>New Value</b></TableCell>
+                    </TableRow>
+                  </TableHead>
 
-              {/* ================= Diff Fields ================= */}
-              {section.fields.map((field, i) => (
-                <Grid
-                  container
-                  spacing={2}
-                  key={i}
-                  alignItems="flex-start"
-                  mb={1}
-                >
-                  {/* Field Name */}
-                  <Grid item xs={3}>
-                    <Typography>{field.field}</Typography>
-                  </Grid>
+                  <TableBody>
+                    {section.fields.map((field, i) => (
+                      <TableRow key={i}>
+                        {/* Field name */}
+                        <TableCell>
+                          {field.field}
+                        </TableCell>
 
-                  {/* Old Value */}
-                  <Grid item xs={4}>
-                    <Box
-                      sx={
-                        field.changed
-                          ? styles.oldChanged
-                          : styles.normal
-                      }
-                    >
-                      {renderValue(field.oldValue)}
-                    </Box>
-                  </Grid>
+                        {/* Old value */}
+                        <TableCell
+                          sx={field.changed ? styles.oldChanged : {}}
+                        >
+                          {renderValue(field.oldValue)}
+                        </TableCell>
 
-                  {/* New Value */}
-                  <Grid item xs={4}>
-                    <Box
-                      sx={
-                        field.changed
-                          ? styles.newChanged
-                          : styles.normal
-                      }
-                    >
-                      {renderValue(field.newValue)}
-                    </Box>
-                  </Grid>
-                </Grid>
-              ))}
+                        {/* New value */}
+                        <TableCell
+                          sx={field.changed ? styles.newChanged : {}}
+                        >
+                          {renderValue(field.newValue)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
 
-              <Divider sx={{ mt: 2 }} />
+              <Divider sx={{ mt: 3 }} />
             </Box>
           ))
         )}
