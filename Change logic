@@ -1,0 +1,87 @@
+package com.fincore.commonrequestservice.diff.engine;
+
+import com.fincore.commonrequestservice.diff.dto.FieldDiffDto;
+import com.fincore.commonrequestservice.diff.model.DiffType;
+import org.springframework.stereotype.Component;
+
+import java.util.*;
+
+@Component
+public class TemplateDiffEngine {
+
+    public List<FieldDiffDto> diffMaps(
+            String basePath,
+            Map<String, Object> oldMap,
+            Map<String, Object> newMap
+    ) {
+        List<FieldDiffDto> diffs = new ArrayList<>();
+
+        Set<String> keys = new HashSet<>();
+        if (oldMap != null) keys.addAll(oldMap.keySet());
+        if (newMap != null) keys.addAll(newMap.keySet());
+
+        for (String key : keys) {
+            Object oldVal = oldMap != null ? oldMap.get(key) : null;
+            Object newVal = newMap != null ? newMap.get(key) : null;
+
+            DiffType type;
+            if (oldVal == null && newVal != null) type = DiffType.ADDED;
+            else if (oldVal != null && newVal == null) type = DiffType.REMOVED;
+            else if (!Objects.equals(oldVal, newVal)) type = DiffType.MODIFIED;
+            else type = DiffType.UNCHANGED;
+
+            diffs.add(FieldDiffDto.builder()
+                    .fieldPath(basePath + "." + key)
+                    .oldValue(oldVal)
+                    .newValue(newVal)
+                    .diffType(type)
+                    .build());
+        }
+
+        return diffs;
+    }
+}
+
+
+
+
+
+
+///////////////////////////////////////////
+
+package com.fincore.commonrequestservice.diff.service;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fincore.commonrequestservice.diff.dto.SectionDiffDto;
+import com.fincore.commonrequestservice.diff.dto.TemplateDiffResponseDto;
+import com.fincore.commonrequestservice.diff.engine.TemplateDiffEngine;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.Map;
+
+@Service
+@RequiredArgsConstructor
+public class TemplateDiffService {
+
+    private final ObjectMapper objectMapper;
+    private final TemplateDiffEngine engine;
+
+    public TemplateDiffResponseDto diffTemplates(String oldJson, String newJson) throws Exception {
+        Map<String, Object> oldTemplate = objectMapper.readValue(oldJson, Map.class);
+        Map<String, Object> newTemplate = objectMapper.readValue(newJson, Map.class);
+
+        SectionDiffDto templateMeta = SectionDiffDto.builder()
+                .section("TEMPLATE")
+                .identifier(null)
+                .fields(engine.diffMaps("template", oldTemplate, newTemplate))
+                .build();
+
+        return TemplateDiffResponseDto.builder()
+                .oldVersion("PREVIOUS")
+                .newVersion("CURRENT")
+                .sections(List.of(templateMeta))
+                .build();
+    }
+}
