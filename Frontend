@@ -852,9 +852,10 @@ import useApi from "../../hooks/useApi";
    Styles
 ====================================================== */
 const styles = {
-  oldChanged: { bgcolor: "#ffebee" },   // light red
-  newChanged: { bgcolor: "#e8f5e9" },   // light green
+  oldChanged: { backgroundColor: "#ffebee" },
+  newChanged: { backgroundColor: "#e8f5e9" },
   sectionTitle: { fontWeight: 600 },
+  nestedTable: { border: "1px solid #e0e0e0" },
   pre: {
     margin: 0,
     whiteSpace: "pre-wrap",
@@ -866,28 +867,89 @@ const styles = {
 /* ======================================================
    Helpers
 ====================================================== */
-const renderValue = (value) => {
+const isPrimitive = (v) =>
+  v === null ||
+  v === undefined ||
+  typeof v === "string" ||
+  typeof v === "number" ||
+  typeof v === "boolean";
+
+/**
+ * Convert object diff into table rows
+ * Handles added / removed fields safely
+ */
+const normalizeObjectDiff = (oldObj = {}, newObj = {}) => {
+  const keys = new Set([
+    ...Object.keys(oldObj || {}),
+    ...Object.keys(newObj || {})
+  ]);
+
+  return Array.from(keys).map((key) => ({
+    field: key,
+    oldValue: oldObj?.[key] ?? null,
+    newValue: newObj?.[key] ?? null,
+    changed:
+      JSON.stringify(oldObj?.[key]) !==
+      JSON.stringify(newObj?.[key])
+  }));
+};
+
+const renderPrimitive = (value) => {
   if (value === null || value === undefined) {
     return <i>null</i>;
   }
+  return String(value);
+};
 
-  if (
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return String(value);
-  }
+/* ======================================================
+   Nested Object Diff Table
+====================================================== */
+const NestedObjectDiffTable = ({ oldValue, newValue }) => {
+  const rows = normalizeObjectDiff(oldValue, newValue);
 
   return (
-    <pre style={styles.pre}>
-      {JSON.stringify(value, null, 2)}
-    </pre>
+    <Table size="small" sx={styles.nestedTable}>
+      <TableHead>
+        <TableRow>
+          <TableCell><b>Field</b></TableCell>
+          <TableCell><b>Old Value</b></TableCell>
+          <TableCell><b>New Value</b></TableCell>
+        </TableRow>
+      </TableHead>
+
+      <TableBody>
+        {rows.map((row, idx) => (
+          <TableRow key={idx}>
+            <TableCell>{row.field}</TableCell>
+
+            <TableCell sx={row.changed ? styles.oldChanged : {}}>
+              {isPrimitive(row.oldValue)
+                ? renderPrimitive(row.oldValue)
+                : (
+                  <pre style={styles.pre}>
+                    {JSON.stringify(row.oldValue, null, 2)}
+                  </pre>
+                )}
+            </TableCell>
+
+            <TableCell sx={row.changed ? styles.newChanged : {}}>
+              {isPrimitive(row.newValue)
+                ? renderPrimitive(row.newValue)
+                : (
+                  <pre style={styles.pre}>
+                    {JSON.stringify(row.newValue, null, 2)}
+                  </pre>
+                )}
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 };
 
 /* ======================================================
-   Base Diff Table (Reusable)
+   Base Diff Table (Top Level)
 ====================================================== */
 const DiffTable = ({ fields }) => (
   <TableContainer component={Paper} variant="outlined">
@@ -901,16 +963,30 @@ const DiffTable = ({ fields }) => (
       </TableHead>
 
       <TableBody>
-        {fields.map((f, i) => (
-          <TableRow key={i}>
+        {fields.map((f, idx) => (
+          <TableRow key={idx}>
             <TableCell>{f.field}</TableCell>
 
             <TableCell sx={f.changed ? styles.oldChanged : {}}>
-              {renderValue(f.oldValue)}
+              {isPrimitive(f.oldValue) && isPrimitive(f.newValue) ? (
+                renderPrimitive(f.oldValue)
+              ) : (
+                <NestedObjectDiffTable
+                  oldValue={f.oldValue}
+                  newValue={f.newValue}
+                />
+              )}
             </TableCell>
 
             <TableCell sx={f.changed ? styles.newChanged : {}}>
-              {renderValue(f.newValue)}
+              {isPrimitive(f.oldValue) && isPrimitive(f.newValue) ? (
+                renderPrimitive(f.newValue)
+              ) : (
+                <NestedObjectDiffTable
+                  oldValue={f.oldValue}
+                  newValue={f.newValue}
+                />
+              )}
             </TableCell>
           </TableRow>
         ))}
@@ -920,52 +996,15 @@ const DiffTable = ({ fields }) => (
 );
 
 /* ======================================================
-   Column Diff Table
+   Section Wrapper
 ====================================================== */
-const ColumnDiffTable = ({ section }) => (
+const SectionAccordion = ({ title, fields }) => (
   <Accordion defaultExpanded>
     <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-      <Typography sx={styles.sectionTitle}>
-        COLUMN : {section.identifier}
-      </Typography>
+      <Typography sx={styles.sectionTitle}>{title}</Typography>
     </AccordionSummary>
-
     <AccordionDetails>
-      <DiffTable fields={section.fields} />
-    </AccordionDetails>
-  </Accordion>
-);
-
-/* ======================================================
-   Row Diff Table
-====================================================== */
-const RowDiffTable = ({ section }) => (
-  <Accordion>
-    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-      <Typography sx={styles.sectionTitle}>
-        ROW : {section.identifier}
-      </Typography>
-    </AccordionSummary>
-
-    <AccordionDetails>
-      <DiffTable fields={section.fields} />
-    </AccordionDetails>
-  </Accordion>
-);
-
-/* ======================================================
-   Variant Diff Table
-====================================================== */
-const VariantDiffTable = ({ section }) => (
-  <Accordion>
-    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-      <Typography sx={styles.sectionTitle}>
-        VARIANT : {section.identifier}
-      </Typography>
-    </AccordionSummary>
-
-    <AccordionDetails>
-      <DiffTable fields={section.fields} />
+      <DiffTable fields={fields} />
     </AccordionDetails>
   </Accordion>
 );
@@ -977,47 +1016,28 @@ export default function CompareRequestDialog({ open, onClose, requestId }) {
   const { callApi } = useApi();
   const [diffs, setDiffs] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
 
-  /* ----------------------------------------------------
-     Fetch diff
-  ---------------------------------------------------- */
   useEffect(() => {
     if (!open || !requestId) return;
 
+    // 🔒 Reset state to avoid stale data
+    setDiffs([]);
+    setErrorMsg("");
     setLoading(true);
+
     callApi(`/CR/api/request-diff/${requestId}`, {}, "GET")
       .then((res) => {
         setDiffs(res?.data?.diffs || []);
       })
+      .catch((err) => {
+        setDiffs([]);
+        setErrorMsg(
+          err?.response?.data?.message || "Unable to load comparison"
+        );
+      })
       .finally(() => setLoading(false));
   }, [open, requestId]);
-
-  /* ----------------------------------------------------
-     Render section by type
-  ---------------------------------------------------- */
-  const renderSection = (section, idx) => {
-    switch (section.section) {
-      case "COLUMN":
-        return <ColumnDiffTable key={idx} section={section} />;
-      case "ROW":
-        return <RowDiffTable key={idx} section={section} />;
-      case "VARIANT":
-        return <VariantDiffTable key={idx} section={section} />;
-      default:
-        return (
-          <Accordion key={idx} defaultExpanded>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-              <Typography sx={styles.sectionTitle}>
-                {section.section}
-              </Typography>
-            </AccordionSummary>
-            <AccordionDetails>
-              <DiffTable fields={section.fields} />
-            </AccordionDetails>
-          </Accordion>
-        );
-    }
-  };
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
@@ -1039,10 +1059,22 @@ export default function CompareRequestDialog({ open, onClose, requestId }) {
           <Box textAlign="center" p={4}>
             <CircularProgress />
           </Box>
+        ) : errorMsg ? (
+          <Typography color="error">{errorMsg}</Typography>
         ) : diffs.length === 0 ? (
           <Typography>No changes detected</Typography>
         ) : (
-          diffs.map(renderSection)
+          diffs.map((section, idx) => (
+            <SectionAccordion
+              key={idx}
+              title={
+                section.identifier
+                  ? `${section.section} : ${section.identifier}`
+                  : section.section
+              }
+              fields={section.fields}
+            />
+          ))
         )}
       </DialogContent>
     </Dialog>
