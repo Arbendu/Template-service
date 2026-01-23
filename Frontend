@@ -854,47 +854,13 @@ import useApi from "../../hooks/useApi";
 const styles = {
   oldChanged: { backgroundColor: "#ffebee" },
   newChanged: { backgroundColor: "#e8f5e9" },
-  sectionTitle: { fontWeight: 600 },
-  nestedTable: { border: "1px solid #e0e0e0" },
-  pre: {
-    margin: 0,
-    whiteSpace: "pre-wrap",
-    wordBreak: "break-word",
-    fontSize: 12
-  }
+  sectionTitle: { fontWeight: 600 }
 };
 
 /* ======================================================
    Helpers
 ====================================================== */
-const isPrimitive = (v) =>
-  v === null ||
-  v === undefined ||
-  typeof v === "string" ||
-  typeof v === "number" ||
-  typeof v === "boolean";
-
-/**
- * Convert object diff into table rows
- * Handles added / removed fields safely
- */
-const normalizeObjectDiff = (oldObj = {}, newObj = {}) => {
-  const keys = new Set([
-    ...Object.keys(oldObj || {}),
-    ...Object.keys(newObj || {})
-  ]);
-
-  return Array.from(keys).map((key) => ({
-    field: key,
-    oldValue: oldObj?.[key] ?? null,
-    newValue: newObj?.[key] ?? null,
-    changed:
-      JSON.stringify(oldObj?.[key]) !==
-      JSON.stringify(newObj?.[key])
-  }));
-};
-
-const renderPrimitive = (value) => {
+const renderValue = (value) => {
   if (value === null || value === undefined) {
     return <i>null</i>;
   }
@@ -902,56 +868,9 @@ const renderPrimitive = (value) => {
 };
 
 /* ======================================================
-   Nested Object Diff Table
+   Flat Diff Table (USED EVERYWHERE)
 ====================================================== */
-const NestedObjectDiffTable = ({ oldValue, newValue }) => {
-  const rows = normalizeObjectDiff(oldValue, newValue);
-
-  return (
-    <Table size="small" sx={styles.nestedTable}>
-      <TableHead>
-        <TableRow>
-          <TableCell><b>Field</b></TableCell>
-          <TableCell><b>Old Value</b></TableCell>
-          <TableCell><b>New Value</b></TableCell>
-        </TableRow>
-      </TableHead>
-
-      <TableBody>
-        {rows.map((row, idx) => (
-          <TableRow key={idx}>
-            <TableCell>{row.field}</TableCell>
-
-            <TableCell sx={row.changed ? styles.oldChanged : {}}>
-              {isPrimitive(row.oldValue)
-                ? renderPrimitive(row.oldValue)
-                : (
-                  <pre style={styles.pre}>
-                    {JSON.stringify(row.oldValue, null, 2)}
-                  </pre>
-                )}
-            </TableCell>
-
-            <TableCell sx={row.changed ? styles.newChanged : {}}>
-              {isPrimitive(row.newValue)
-                ? renderPrimitive(row.newValue)
-                : (
-                  <pre style={styles.pre}>
-                    {JSON.stringify(row.newValue, null, 2)}
-                  </pre>
-                )}
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  );
-};
-
-/* ======================================================
-   Base Diff Table (Top Level)
-====================================================== */
-const DiffTable = ({ fields }) => (
+const FlatDiffTable = ({ fields }) => (
   <TableContainer component={Paper} variant="outlined">
     <Table size="small">
       <TableHead>
@@ -968,25 +887,11 @@ const DiffTable = ({ fields }) => (
             <TableCell>{f.field}</TableCell>
 
             <TableCell sx={f.changed ? styles.oldChanged : {}}>
-              {isPrimitive(f.oldValue) && isPrimitive(f.newValue) ? (
-                renderPrimitive(f.oldValue)
-              ) : (
-                <NestedObjectDiffTable
-                  oldValue={f.oldValue}
-                  newValue={f.newValue}
-                />
-              )}
+              {renderValue(f.oldValue)}
             </TableCell>
 
             <TableCell sx={f.changed ? styles.newChanged : {}}>
-              {isPrimitive(f.oldValue) && isPrimitive(f.newValue) ? (
-                renderPrimitive(f.newValue)
-              ) : (
-                <NestedObjectDiffTable
-                  oldValue={f.oldValue}
-                  newValue={f.newValue}
-                />
-              )}
+              {renderValue(f.newValue)}
             </TableCell>
           </TableRow>
         ))}
@@ -996,15 +901,19 @@ const DiffTable = ({ fields }) => (
 );
 
 /* ======================================================
-   Section Wrapper
+   Section Accordion
 ====================================================== */
-const SectionAccordion = ({ title, fields }) => (
+const SectionAccordion = ({ section }) => (
   <Accordion defaultExpanded>
     <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-      <Typography sx={styles.sectionTitle}>{title}</Typography>
+      <Typography sx={styles.sectionTitle}>
+        {section.section}
+        {section.identifier ? ` : ${section.identifier}` : ""}
+      </Typography>
     </AccordionSummary>
+
     <AccordionDetails>
-      <DiffTable fields={fields} />
+      <FlatDiffTable fields={section.fields} />
     </AccordionDetails>
   </Accordion>
 );
@@ -1014,6 +923,7 @@ const SectionAccordion = ({ title, fields }) => (
 ====================================================== */
 export default function CompareRequestDialog({ open, onClose, requestId }) {
   const { callApi } = useApi();
+
   const [diffs, setDiffs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -1021,7 +931,7 @@ export default function CompareRequestDialog({ open, onClose, requestId }) {
   useEffect(() => {
     if (!open || !requestId) return;
 
-    // 🔒 Reset state to avoid stale data
+    // Reset to avoid stale data
     setDiffs([]);
     setErrorMsg("");
     setLoading(true);
@@ -1033,7 +943,8 @@ export default function CompareRequestDialog({ open, onClose, requestId }) {
       .catch((err) => {
         setDiffs([]);
         setErrorMsg(
-          err?.response?.data?.message || "Unable to load comparison"
+          err?.response?.data?.message ||
+          "Unable to load comparison"
         );
       })
       .finally(() => setLoading(false));
@@ -1065,15 +976,7 @@ export default function CompareRequestDialog({ open, onClose, requestId }) {
           <Typography>No changes detected</Typography>
         ) : (
           diffs.map((section, idx) => (
-            <SectionAccordion
-              key={idx}
-              title={
-                section.identifier
-                  ? `${section.section} : ${section.identifier}`
-                  : section.section
-              }
-              fields={section.fields}
-            />
+            <SectionAccordion key={idx} section={section} />
           ))
         )}
       </DialogContent>
