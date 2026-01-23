@@ -858,19 +858,45 @@ const styles = {
 };
 
 /* ======================================================
-   Helpers
+   🔑 CORE FIX: Flatten any object into rows
 ====================================================== */
-const renderValue = (value) => {
-  if (value === null || value === undefined) {
-    return <i>null</i>;
+const flattenDiffField = (field) => {
+  const { field: fieldName, oldValue, newValue } = field;
+
+  // Primitive → return as-is
+  if (
+    oldValue === null ||
+    typeof oldValue !== "object"
+  ) {
+    return [field];
   }
-  return String(value);
+
+  const keys = new Set([
+    ...Object.keys(oldValue || {}),
+    ...Object.keys(newValue || {})
+  ]);
+
+  return Array.from(keys).map((key) => ({
+    field: `${fieldName}.${key}`,
+    oldValue: oldValue?.[key] ?? null,
+    newValue: newValue?.[key] ?? null,
+    changed:
+      JSON.stringify(oldValue?.[key]) !==
+      JSON.stringify(newValue?.[key])
+  }));
 };
 
 /* ======================================================
-   Flat Diff Table (USED EVERYWHERE)
+   Normalize section fields (NO OBJECTS LEFT)
 ====================================================== */
-const FlatDiffTable = ({ fields }) => (
+const normalizeSectionFields = (fields) => {
+  return fields.flatMap(flattenDiffField);
+};
+
+/* ======================================================
+   Flat Diff Table (ONE FORMAT EVERYWHERE)
+====================================================== */
+const DiffTable = ({ fields }) => (
   <TableContainer component={Paper} variant="outlined">
     <Table size="small">
       <TableHead>
@@ -887,11 +913,11 @@ const FlatDiffTable = ({ fields }) => (
             <TableCell>{f.field}</TableCell>
 
             <TableCell sx={f.changed ? styles.oldChanged : {}}>
-              {renderValue(f.oldValue)}
+              {f.oldValue ?? <i>null</i>}
             </TableCell>
 
             <TableCell sx={f.changed ? styles.newChanged : {}}>
-              {renderValue(f.newValue)}
+              {f.newValue ?? <i>null</i>}
             </TableCell>
           </TableRow>
         ))}
@@ -903,27 +929,30 @@ const FlatDiffTable = ({ fields }) => (
 /* ======================================================
    Section Accordion
 ====================================================== */
-const SectionAccordion = ({ section }) => (
-  <Accordion defaultExpanded>
-    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-      <Typography sx={styles.sectionTitle}>
-        {section.section}
-        {section.identifier ? ` : ${section.identifier}` : ""}
-      </Typography>
-    </AccordionSummary>
+const SectionAccordion = ({ section }) => {
+  const normalizedFields = normalizeSectionFields(section.fields);
 
-    <AccordionDetails>
-      <FlatDiffTable fields={section.fields} />
-    </AccordionDetails>
-  </Accordion>
-);
+  return (
+    <Accordion defaultExpanded>
+      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+        <Typography sx={styles.sectionTitle}>
+          {section.section}
+          {section.identifier ? ` : ${section.identifier}` : ""}
+        </Typography>
+      </AccordionSummary>
+
+      <AccordionDetails>
+        <DiffTable fields={normalizedFields} />
+      </AccordionDetails>
+    </Accordion>
+  );
+};
 
 /* ======================================================
    CompareRequestDialog
 ====================================================== */
 export default function CompareRequestDialog({ open, onClose, requestId }) {
   const { callApi } = useApi();
-
   const [diffs, setDiffs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -931,7 +960,6 @@ export default function CompareRequestDialog({ open, onClose, requestId }) {
   useEffect(() => {
     if (!open || !requestId) return;
 
-    // Reset to avoid stale data
     setDiffs([]);
     setErrorMsg("");
     setLoading(true);
@@ -941,7 +969,6 @@ export default function CompareRequestDialog({ open, onClose, requestId }) {
         setDiffs(res?.data?.diffs || []);
       })
       .catch((err) => {
-        setDiffs([]);
         setErrorMsg(
           err?.response?.data?.message ||
           "Unable to load comparison"
@@ -952,7 +979,6 @@ export default function CompareRequestDialog({ open, onClose, requestId }) {
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
-      {/* ================= Header ================= */}
       <DialogTitle sx={{ display: "flex", alignItems: "center" }}>
         <Typography variant="h6" sx={{ flexGrow: 1 }}>
           Report Change Comparison
@@ -964,7 +990,6 @@ export default function CompareRequestDialog({ open, onClose, requestId }) {
 
       <Divider />
 
-      {/* ================= Content ================= */}
       <DialogContent dividers>
         {loading ? (
           <Box textAlign="center" p={4}>
