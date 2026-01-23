@@ -935,6 +935,116 @@ const DiffTable = ({ fields }) => (
 
             <TableCell sx={f.changed ? styles.newChanged : {}}>
               {safeRender(f.newValue)}
+import React, { useEffect, useState } from "react";
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  Divider,
+  Typography,
+  Box,
+  CircularProgress,
+  IconButton,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Table,
+  TableHead,
+  TableBody,
+  TableRow,
+  TableCell,
+  TableContainer,
+  Paper
+} from "@mui/material";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import CloseIcon from "@mui/icons-material/Close";
+import useApi from "../../hooks/useApi";
+
+/* ======================================================
+   Styles
+====================================================== */
+const styles = {
+  oldChanged: { backgroundColor: "#ffebee" },
+  newChanged: { backgroundColor: "#e8f5e9" },
+  sectionTitle: { fontWeight: 600 }
+};
+
+/* ======================================================
+   SAFE VALUE RENDER
+====================================================== */
+const renderValue = (value) => {
+  if (value === null || value === undefined) {
+    return <i>null</i>;
+  }
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return String(value);
+  }
+  // safety fallback
+  return JSON.stringify(value);
+};
+
+/* ======================================================
+   🔥 CORE FIX
+   Expand OBJECT field into domain fields
+====================================================== */
+const expandObjectField = (field) => {
+  const { field: fieldName, oldValue, newValue } = field;
+
+  // Normal field → return as-is
+  if (fieldName !== "OBJECT") {
+    return [field];
+  }
+
+  const keys = new Set([
+    ...Object.keys(oldValue || {}),
+    ...Object.keys(newValue || {})
+  ]);
+
+  return Array.from(keys).map((key) => ({
+    field: key, // 🔥 NO OBJECT.id
+    oldValue: oldValue?.[key] ?? null,
+    newValue: newValue?.[key] ?? null,
+    changed:
+      JSON.stringify(oldValue?.[key]) !==
+      JSON.stringify(newValue?.[key])
+  }));
+};
+
+/* ======================================================
+   Normalize section fields
+====================================================== */
+const normalizeSectionFields = (fields = []) =>
+  fields.flatMap(expandObjectField);
+
+/* ======================================================
+   Diff Table (USED EVERYWHERE)
+====================================================== */
+const DiffTable = ({ fields }) => (
+  <TableContainer component={Paper} variant="outlined">
+    <Table size="small">
+      <TableHead>
+        <TableRow>
+          <TableCell><b>Field</b></TableCell>
+          <TableCell><b>Old Value</b></TableCell>
+          <TableCell><b>New Value</b></TableCell>
+        </TableRow>
+      </TableHead>
+
+      <TableBody>
+        {fields.map((f, idx) => (
+          <TableRow key={idx}>
+            <TableCell>{f.field}</TableCell>
+
+            <TableCell sx={f.changed ? styles.oldChanged : {}}>
+              {renderValue(f.oldValue)}
+            </TableCell>
+
+            <TableCell sx={f.changed ? styles.newChanged : {}}>
+              {renderValue(f.newValue)}
             </TableCell>
           </TableRow>
         ))}
@@ -944,10 +1054,10 @@ const DiffTable = ({ fields }) => (
 );
 
 /* ======================================================
-   SECTION ACCORDION
+   Section Accordion
 ====================================================== */
 const SectionAccordion = ({ section }) => {
-  const normalizedFields = normalizeSectionFields(section.fields || []);
+  const normalizedFields = normalizeSectionFields(section.fields);
 
   return (
     <Accordion defaultExpanded>
@@ -978,7 +1088,7 @@ export default function CompareRequestDialog({ open, onClose, requestId }) {
   useEffect(() => {
     if (!open || !requestId) return;
 
-    // Reset to avoid stale data
+    // Reset to avoid stale UI
     setDiffs([]);
     setErrorMsg("");
     setLoading(true);
