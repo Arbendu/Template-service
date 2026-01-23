@@ -254,3 +254,180 @@
       ],
     "timestamp": "2026-01-20T10:25:16.282050700Z"
 }
+
+
+
+
+
+// ==============================================================
+// Json format
+// ===============================================================
+
+{
+  "requestType": "RB_REPORT_TEMPLATE",
+  "changeType": "UPDATE",
+  "payload": {
+  "template": {
+    "templateMeta": {
+      "templateId": "",
+      "version": "1",
+      "description": null,
+      "pageSize": "A3",
+      "pageOrientation": "LANDSCAPE",
+      "headerLayout": null,
+      "status": null
+    },
+    "reportMeta": {
+      "reportName": "Testing_modified",
+      "reportId": "Test986",
+      "extras": [
+        {
+          "name": "Report Date",
+          "value": "2025-12-19"
+        }
+      ]
+    },
+    "reportData": {
+      "columns": [
+        {
+          "id": "C__1",
+          "name": "Column 1",
+          "format": {}
+        },
+        {
+          "id": "C__2",
+          "name": "L01A",
+          "format": {}
+        },
+        {
+          "id": "C__3",
+          "name": "Column 3",
+          "format": {
+            "type": "number",
+            "thousandSeparator": true,
+            "decimals": 2
+          }
+        },
+        {
+          "id": "C__10",
+          "name": "Column 10",
+          "format": {}
+        }
+      ],
+      "rows": [
+        {
+          "rowType": "DATA",
+          "id": "R__1",
+          "cells": [
+            {
+              "type": "TEXT",
+              "value": "L01A"
+            },
+            
+            {
+              "type": "FORMULA",
+              "value": "",
+              "expression": "Normal_Balance_CGL_LIST+SWING_BALANCE_LIST+cell_R__1_C__1",
+              "variables": {
+                "Normal_Balance_CGL_LIST": {
+                  "type": "DB_SUM",
+                  "table": "GL_BALANCE",
+                  "column": "BALANCE",
+                  "filters": {
+                    "CGL": [
+                      {
+                        "op": "IN",
+                        "value": [
+                          "2011501101",
+                          "2001500101"
+                        ],
+                        "dataType": "STRING"
+                      }
+                    ]
+                  }
+                },
+                "SWING_BALANCE_LIST": {
+                  "type": "DB_SUM",
+                  "table": "GL_BALANCE",
+                  "column": "BALANCE",
+                  "filters": {
+                    "BALANCE": [
+                      {
+                        "op": ">",
+                        "value": "0",
+                        "dataType": "NUMBER"
+                      }
+                    ],
+                    "CGL": [
+                      {
+                        "op": "=",
+                        "value": "1020070602",
+                        "dataType": "NUMBER"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "type": "DB_COUNT",
+              "source": {
+                "table": "GL_TRANSACTIONS",
+                "column": "TRANSACTION_ID",
+                "filters": {}
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "variants": [
+    {
+      "variantCode": "BRANCH_DATE_Test",
+      "variantName": "Branch Wise",
+      "description": null,
+      "status": "ACTIVE",
+      "params": [
+        {
+          "paramName": "DT",
+          "label": "Date",
+          "paramType": "DATE",
+          "required": false,
+          "multiValued": false,
+          "uiHint": "date",
+          "validation": null
+        },
+        {
+          "paramName": "BR",
+          "label": "BRANCH",
+          "paramType": "STRING",
+          "required": false,
+          "multiValued": false,
+          "uiHint": "text",
+          "validation": null
+        }
+      ],
+      "filterRules": [
+        {
+          "scopeType": "ALL_DB",
+          "scopeValue": null,
+          "paramName": "BR",
+          "dbColumn": "BRANCH_CODE_Test",
+          "operator": "="
+        },
+        {
+          "scopeType": "ALL_DB",
+          "scopeValue": null,
+          "paramName": "DT",
+          "dbColumn": "BALANCE_DATE",
+          "operator": "="
+        }
+      ]
+    }
+  ]
+  }
+}
+
+
+
