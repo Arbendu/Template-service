@@ -858,12 +858,33 @@ const styles = {
 };
 
 /* ======================================================
-   🔑 CORE FIX: Flatten any object into rows
+   SAFE RENDER (🔥 MOST IMPORTANT)
+   Never lets object reach JSX
+====================================================== */
+const safeRender = (value) => {
+  if (value === null || value === undefined) {
+    return <i>null</i>;
+  }
+
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return String(value);
+  }
+
+  // object / array → stringify (no crash)
+  return JSON.stringify(value);
+};
+
+/* ======================================================
+   FLATTEN FIELD (NO OBJECT LEFT)
 ====================================================== */
 const flattenDiffField = (field) => {
   const { field: fieldName, oldValue, newValue } = field;
 
-  // Primitive → return as-is
+  // Primitive values → keep as-is
   if (
     oldValue === null ||
     typeof oldValue !== "object"
@@ -886,15 +907,11 @@ const flattenDiffField = (field) => {
   }));
 };
 
-/* ======================================================
-   Normalize section fields (NO OBJECTS LEFT)
-====================================================== */
-const normalizeSectionFields = (fields) => {
-  return fields.flatMap(flattenDiffField);
-};
+const normalizeSectionFields = (fields) =>
+  fields.flatMap(flattenDiffField);
 
 /* ======================================================
-   Flat Diff Table (ONE FORMAT EVERYWHERE)
+   FLAT DIFF TABLE (USED EVERYWHERE)
 ====================================================== */
 const DiffTable = ({ fields }) => (
   <TableContainer component={Paper} variant="outlined">
@@ -913,11 +930,11 @@ const DiffTable = ({ fields }) => (
             <TableCell>{f.field}</TableCell>
 
             <TableCell sx={f.changed ? styles.oldChanged : {}}>
-              {f.oldValue ?? <i>null</i>}
+              {safeRender(f.oldValue)}
             </TableCell>
 
             <TableCell sx={f.changed ? styles.newChanged : {}}>
-              {f.newValue ?? <i>null</i>}
+              {safeRender(f.newValue)}
             </TableCell>
           </TableRow>
         ))}
@@ -927,10 +944,10 @@ const DiffTable = ({ fields }) => (
 );
 
 /* ======================================================
-   Section Accordion
+   SECTION ACCORDION
 ====================================================== */
 const SectionAccordion = ({ section }) => {
-  const normalizedFields = normalizeSectionFields(section.fields);
+  const normalizedFields = normalizeSectionFields(section.fields || []);
 
   return (
     <Accordion defaultExpanded>
@@ -953,6 +970,7 @@ const SectionAccordion = ({ section }) => {
 ====================================================== */
 export default function CompareRequestDialog({ open, onClose, requestId }) {
   const { callApi } = useApi();
+
   const [diffs, setDiffs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -960,6 +978,7 @@ export default function CompareRequestDialog({ open, onClose, requestId }) {
   useEffect(() => {
     if (!open || !requestId) return;
 
+    // Reset to avoid stale data
     setDiffs([]);
     setErrorMsg("");
     setLoading(true);
@@ -969,6 +988,7 @@ export default function CompareRequestDialog({ open, onClose, requestId }) {
         setDiffs(res?.data?.diffs || []);
       })
       .catch((err) => {
+        setDiffs([]);
         setErrorMsg(
           err?.response?.data?.message ||
           "Unable to load comparison"
@@ -979,6 +999,7 @@ export default function CompareRequestDialog({ open, onClose, requestId }) {
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
+      {/* ================= Header ================= */}
       <DialogTitle sx={{ display: "flex", alignItems: "center" }}>
         <Typography variant="h6" sx={{ flexGrow: 1 }}>
           Report Change Comparison
@@ -990,6 +1011,7 @@ export default function CompareRequestDialog({ open, onClose, requestId }) {
 
       <Divider />
 
+      {/* ================= Content ================= */}
       <DialogContent dividers>
         {loading ? (
           <Box textAlign="center" p={4}>
