@@ -144,27 +144,82 @@ import java.util.Map;
 public class TemplateDiffService {
 
     private final ObjectMapper objectMapper;
+
+    // ✅ keep engine as-is (no change in logic)
     private final TemplateDiffEngine engine = new TemplateDiffEngine();
 
-    public TemplateDiffResponseDto diff(String oldJson, String newJson) throws Exception {
+    /**
+     * Compare old and new template JSON and return diff
+     */
+    public TemplateDiffResponseDto diff(String oldJson, String newJson) {
 
-        Map<String, Object> oldTemplate = objectMapper.readValue(oldJson, Map.class);
-        Map<String, Object> newTemplate = objectMapper.readValue(newJson, Map.class);
+        // ✅ ADD: defensive validation
+        if (oldJson == null || oldJson.isBlank()) {
+            throw new IllegalArgumentException("oldPayload cannot be null or empty");
+        }
 
-        SectionDiffDto templateSection = SectionDiffDto.builder()
-                .section("TEMPLATE_META")
-                .identifier(null)
-                .fields(engine.diffObjects("template", oldTemplate, newTemplate))
-                .build();
+        if (newJson == null || newJson.isBlank()) {
+            throw new IllegalArgumentException("newPayload cannot be null or empty");
+        }
 
-        return TemplateDiffResponseDto.builder()
-                .sections(List.of(templateSection))
-                .build();
+        try {
+            // ✅ SAFE JSON parsing
+            Map<String, Object> oldTemplate =
+                    objectMapper.readValue(oldJson, Map.class);
+
+            Map<String, Object> newTemplate =
+                    objectMapper.readValue(newJson, Map.class);
+
+            SectionDiffDto templateSection = SectionDiffDto.builder()
+                    .section("TEMPLATE_META")
+                    .identifier(null)
+                    .fields(engine.diffObjects("template", oldTemplate, newTemplate))
+                    .build();
+
+            return TemplateDiffResponseDto.builder()
+                    .sections(List.of(templateSection))
+                    .build();
+
+        } catch (Exception e) {
+            // ✅ Wrap parsing errors with a meaningful message
+            throw new IllegalArgumentException("Invalid JSON payload for template diff", e);
+        }
     }
 }
 
 
 
+
+// =================================================================================
+// Rest Controller
+// =================================================================================
+
+
+@PostMapping("/template/diff")
+public ApiResponse<?> diff(@RequestBody Map<String, Object> body) {
+
+    String requestType = (String) body.get("requestType");
+    String changeType  = (String) body.get("changeType");
+    String oldPayload  = (String) body.get("oldPayload");
+    String newPayload  = (String) body.get("newPayload");
+
+    // 🔒 HARD VALIDATION (IMPORTANT)
+    if (!"UPDATE".equals(changeType)) {
+        throw new IllegalArgumentException("Diff is supported only for UPDATE changeType");
+    }
+
+    if (oldPayload == null || oldPayload.isBlank()) {
+        throw new IllegalArgumentException("oldPayload must not be null or empty");
+    }
+
+    if (newPayload == null || newPayload.isBlank()) {
+        throw new IllegalArgumentException("newPayload must not be null or empty");
+    }
+
+    return ApiResponse.success(
+        templateDiffService.diff(oldPayload, newPayload)
+    );
+}
 
 
 
