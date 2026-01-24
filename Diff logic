@@ -4,43 +4,144 @@
 
 package com.tcs.fincore.CommonRequestService.dto.diff;
 
+import com.tcs.fincore.CommonRequestService.model.enums.DiffType;
 import lombok.*;
 
-@Getter
-@Setter
-@AllArgsConstructor
-@NoArgsConstructor
-@Builder
+@Getter @Setter @Builder
+@NoArgsConstructor @AllArgsConstructor
 public class FieldDiffDto {
 
-    private String field;      // field name
-    private Object oldValue;   // value from DB
-    private Object newValue;   // value from request
-    private boolean changed;   // true if different
+    private String fieldPath;      // e.g row[R__1].cells[C__2].expression
+    private Object oldValue;
+    private Object newValue;
+    private DiffType diffType;
 }
 
 
+
 // ------------------------------------
-// dto/diff/RequestDiffResponseDto.java
+// dto/diff/SectionDiffDto.java
 // -------------------------------------
 
 package com.tcs.fincore.CommonRequestService.dto.diff;
 
 import lombok.*;
-
 import java.util.List;
 
-@Getter
-@Setter
-@AllArgsConstructor
-@NoArgsConstructor
-@Builder
-public class RequestDiffResponseDto {
+@Getter @Setter @Builder
+@NoArgsConstructor @AllArgsConstructor
+public class SectionDiffDto {
 
-    private String changeType;           // UPDATE
-    private String requestId;
-    private List<FieldDiffDto> templateDiffs;
+    private String section;        // TEMPLATE_META / ROW / COLUMN / VARIANT
+    private String identifier;     // R__1 / C__2 / BRANCH_DATE
+    private List<FieldDiffDto> fields;
 }
+
+
+
+// ---------------------------------------------
+// dto/diff/TemplateSideBySideDiffDto.java
+// ---------------------------------------------
+
+package com.tcs.fincore.CommonRequestService.dto.diff;
+
+import lombok.*;
+import java.util.List;
+
+@Getter @Setter @Builder
+@NoArgsConstructor @AllArgsConstructor
+public class TemplateSideBySideDiffDto {
+
+    private String changeType;          // UPDATE
+    private String requestId;
+
+    private Object oldTemplate;         // FULL OLD TEMPLATE
+    private Object newTemplate;         // FULL NEW TEMPLATE
+
+    private List<SectionDiffDto> diffs; // WHAT TO HIGHLIGHT
+}
+
+
+
+// -------------------------------------------
+// service/diff/IdentityResolver.java
+// -------------------------------------------
+
+package com.tcs.fincore.CommonRequestService.service.diff;
+
+import java.util.Map;
+
+public class IdentityResolver {
+
+    public static String variantKey(Map<String, Object> v) {
+        return (String) v.get("variantCode");
+    }
+
+    public static String rowKey(Map<String, Object> r) {
+        return (String) r.get("id");
+    }
+
+    public static String columnKey(Map<String, Object> c) {
+        return (String) c.get("id");
+    }
+
+    public static String paramKey(Map<String, Object> p) {
+        return (String) p.get("paramName");
+    }
+
+    public static String filterKey(Map<String, Object> f) {
+        return f.get("paramName") + "|" + f.get("dbColumn") + "|" + f.get("operator");
+    }
+}
+
+
+
+// -----------------------------------------------
+// service/diff/DiffUtil.java
+// -----------------------------------------------
+
+package com.tcs.fincore.CommonRequestService.service.diff;
+
+import com.tcs.fincore.CommonRequestService.dto.diff.FieldDiffDto;
+import com.tcs.fincore.CommonRequestService.model.enums.DiffType;
+
+import java.util.*;
+
+public class DiffUtil {
+
+    public static List<FieldDiffDto> diffMaps(
+            String basePath,
+            Map<String, Object> oldMap,
+            Map<String, Object> newMap
+    ) {
+        List<FieldDiffDto> diffs = new ArrayList<>();
+
+        Set<String> keys = new HashSet<>();
+        if (oldMap != null) keys.addAll(oldMap.keySet());
+        if (newMap != null) keys.addAll(newMap.keySet());
+
+        for (String k: keys) {
+            Object o = oldMap != null? oldMap.get(k) : null;
+            Object n = newMap != null? newMap.get(k) : null;
+
+            DiffType type;
+            if (o == null && n != null) type = DiffType.ADDED;
+            else if (o != null && n == null) type = DiffType.REMOVED;
+            else if (!Objects.equals(o, n)) type = DiffType.MODIFIED;
+            else continue; // unchanged not needed for highlight
+
+            diffs.add(FieldDiffDto.builder()
+                    .fieldPath(basePath + "." + k)
+                    .oldValue(o)
+                    .newValue(n)
+                    .diffType(type)
+                    .build());
+        }
+
+        return diffs;
+    }
+}
+
 
 
 
@@ -50,326 +151,346 @@ public class RequestDiffResponseDto {
 
 package com.tcs.fincore.CommonRequestService.service.diff;
 
-import com.tcs.fincore.CommonRequestService.dto.ReportTemplateDto;
-import com.tcs.fincore.CommonRequestService.dto.diff.*;
+import com.tcs.fincore.CommonRequestService.dto.diff.FieldDiffDto;
+import com.tcs.fincore.CommonRequestService.dto.diff.SectionDiffDto;
+import com.tcs.fincore.CommonRequestService.model.enums.DiffType;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
-/**
- * ⭐ CENTRAL DIFF ENGINE
- * Compares FULL report: meta, data, variants, params, rules
- */
-public class ReportTemplateDiffEngine {
+@SuppressWarnings("unchecked")
+public class TemplateDiffEngine {
 
-    public static List<SectionDiffDto> diff(
-            ReportTemplateDto oldDto,
-            ReportTemplateDto newDto
+    /* =========================
+       PUBLIC ENTRY
+    ========================== */
+
+    public List<SectionDiffDto> diffTemplate(
+            Map<String, Object> oldPayload,
+            Map<String, Object> newPayload
     ) {
-        List<SectionDiffDto> diffs = new ArrayList<>();
+        List<SectionDiffDto> sections = new ArrayList<>();
 
-        // ================= TEMPLATE =================
-        diffs.add(diffTemplateMeta(oldDto.getTemplate(), newDto.getTemplate()));
-        diffs.add(diffReportMeta(oldDto.getTemplate(), newDto.getTemplate()));
-        diffs.addAll(diffReportData(oldDto.getTemplate(), newDto.getTemplate()));
+        Map<String, Object> oldTemplate = (Map<String, Object>) oldPayload.get("template");
+        Map<String, Object> newTemplate = (Map<String, Object>) newPayload.get("template");
 
-        // ================= VARIANTS =================
-        diffs.addAll(diffVariants(oldDto.getVariants(), newDto.getVariants()));
+        // 1. TEMPLATE META
+        sections.add(diffSimpleSection(
+                "TEMPLATE_META",
+                null,
+                (Map<String, Object>) oldTemplate.get("templateMeta"),
+                (Map<String, Object>) newTemplate.get("templateMeta"),
+                "template.templateMeta"
+        ));
 
-        return diffs.stream()
-                .filter(d -> d.getFields() != null && !d.getFields().isEmpty())
-                .toList();
-    }
+        // 2. REPORT META
+        sections.add(diffSimpleSection(
+                "REPORT_META",
+                null,
+                (Map<String, Object>) oldTemplate.get("reportMeta"),
+                (Map<String, Object>) newTemplate.get("reportMeta"),
+                "template.reportMeta"
+        ));
 
-    /* ================= TEMPLATE META ================= */
-
-    private static SectionDiffDto diffTemplateMeta(
-            ReportTemplateDto.Template oldT,
-            ReportTemplateDto.Template newT
-    ) {
-        return SectionDiffDto.builder()
-                .section("TEMPLATE_META")
-                .fields(compareObjects(oldT.getTemplateMeta(), newT.getTemplateMeta()))
-                .build();
-    }
-
-    /* ================= REPORT META ================= */
-
-    private static SectionDiffDto diffReportMeta(
-            ReportTemplateDto.Template oldT,
-            ReportTemplateDto.Template newT
-    ) {
-        return SectionDiffDto.builder()
-                .section("REPORT_META")
-                .fields(compareObjects(oldT.getReportMeta(), newT.getReportMeta()))
-                .build();
-    }
-
-    /* ================= REPORT DATA ================= */
-
-    private static List<SectionDiffDto> diffReportData(
-            ReportTemplateDto.Template oldT,
-            ReportTemplateDto.Template newT
-    ) {
-        List<SectionDiffDto> result = new ArrayList<>();
-
-        result.addAll(diffById(
+        // 3. COLUMNS
+        diffByIdentity(
+                sections,
                 "COLUMN",
-                oldT.getReportData().getColumns(),
-                newT.getReportData().getColumns(),
-                ReportTemplateDto.ColumnDefinition::getId
-        ));
-
-        result.addAll(diffById(
-                "ROW",
-                oldT.getReportData().getRows(),
-                newT.getReportData().getRows(),
-                ReportTemplateDto.Row::getId
-        ));
-
-        return result;
-    }
-
-    /* ================= VARIANTS ================= */
-
-    private static List<SectionDiffDto> diffVariants(
-            List<ReportTemplateVariantDto> oldVariants,
-            List<ReportTemplateVariantDto> newVariants
-    ) {
-        return diffById(
-                "VARIANT",
-                oldVariants,
-                newVariants,
-                ReportTemplateVariantDto::getVariantCode
+                (List<Map<String, Object>>) ((Map<String, Object>) oldTemplate.get("reportData")).get("columns"),
+                (List<Map<String, Object>>) ((Map<String, Object>) newTemplate.get("reportData")).get("columns"),
+                "id",
+                "template.reportData.columns"
         );
+
+        // 4. ROWS + CELLS
+        diffRows(
+                sections,
+                (List<Map<String, Object>>) ((Map<String, Object>) oldTemplate.get("reportData")).get("rows"),
+                (List<Map<String, Object>>) ((Map<String, Object>) newTemplate.get("reportData")).get("rows")
+        );
+
+        // 5. VARIANTS (PARAMS + FILTER RULES)
+        diffVariants(
+                sections,
+                (List<Map<String, Object>>) oldPayload.get("variants"),
+                (List<Map<String, Object>>) newPayload.get("variants")
+        );
+
+        return sections;
     }
 
-    /* ================= GENERIC HELPERS ================= */
+    /* =========================
+       SIMPLE FIELD DIFF
+    ========================== */
 
-    private static <T> List<SectionDiffDto> diffById(
+    private SectionDiffDto diffSimpleSection(
             String section,
-            List<T> oldList,
-            List<T> newList,
-            Function<T, String> keyExtractor
+            String identifier,
+            Map<String, Object> oldMap,
+            Map<String, Object> newMap,
+            String basePath
     ) {
-        Map<String, T> oldMap = oldList == null ? Map.of()
-                : oldList.stream().collect(Collectors.toMap(keyExtractor, Function.identity()));
-
-        Map<String, T> newMap = newList == null ? Map.of()
-                : newList.stream().collect(Collectors.toMap(keyExtractor, Function.identity()));
-
+        List<FieldDiffDto> diffs = new ArrayList<>();
         Set<String> keys = new HashSet<>();
-        keys.addAll(oldMap.keySet());
-        keys.addAll(newMap.keySet());
-
-        List<SectionDiffDto> result = new ArrayList<>();
+        if (oldMap != null) keys.addAll(oldMap.keySet());
+        if (newMap != null) keys.addAll(newMap.keySet());
 
         for (String key : keys) {
-            T oldObj = oldMap.get(key);
-            T newObj = newMap.get(key);
+            Object o = oldMap != null ? oldMap.get(key) : null;
+            Object n = newMap != null ? newMap.get(key) : null;
 
-            if (!Objects.equals(oldObj, newObj)) {
-                result.add(
-                        SectionDiffDto.builder()
-                                .section(section)
-                                .identifier(key)
-                                .fields(compareObjects(oldObj, newObj))
-                                .build()
-                );
+            if (!Objects.equals(o, n)) {
+                diffs.add(field(basePath + "." + key, o, n, diffType(o, n)));
             }
         }
-        return result;
+
+        return SectionDiffDto.builder()
+                .section(section)
+                .identifier(identifier)
+                .fields(diffs)
+                .build();
     }
 
-    private static <T> List<FieldDiffDto> compareObjects(T oldObj, T newObj) {
+    /* =========================
+       GENERIC IDENTITY DIFF
+    ========================== */
+
+    private void diffByIdentity(
+            List<SectionDiffDto> sections,
+            String section,
+            List<Map<String, Object>> oldList,
+            List<Map<String, Object>> newList,
+            String idKey,
+            String basePath
+    ) {
+        Map<String, Map<String, Object>> oldMap = index(oldList, idKey);
+        Map<String, Map<String, Object>> newMap = index(newList, idKey);
+
+        Set<String> allIds = new HashSet<>();
+        allIds.addAll(oldMap.keySet());
+        allIds.addAll(newMap.keySet());
+
+        for (String id : allIds) {
+            Map<String, Object> o = oldMap.get(id);
+            Map<String, Object> n = newMap.get(id);
+
+            if (!Objects.equals(o, n)) {
+                sections.add(SectionDiffDto.builder()
+                        .section(section)
+                        .identifier(id)
+                        .fields(diffFields(basePath + "[" + id + "]", o, n))
+                        .build());
+            }
+        }
+    }
+
+    /* =========================
+       ROW + CELL DIFF
+    ========================== */
+
+    private void diffRows(
+            List<SectionDiffDto> sections,
+            List<Map<String, Object>> oldRows,
+            List<Map<String, Object>> newRows
+    ) {
+        Map<String, Map<String, Object>> oldMap = index(oldRows, "id");
+        Map<String, Map<String, Object>> newMap = index(newRows, "id");
+
+        for (String rowId : union(oldMap, newMap)) {
+            Map<String, Object> o = oldMap.get(rowId);
+            Map<String, Object> n = newMap.get(rowId);
+
+            if (!Objects.equals(o, n)) {
+                sections.add(SectionDiffDto.builder()
+                        .section("ROW")
+                        .identifier(rowId)
+                        .fields(diffCells(o, n, rowId))
+                        .build());
+            }
+        }
+    }
+
+    private List<FieldDiffDto> diffCells(
+            Map<String, Object> oldRow,
+            Map<String, Object> newRow,
+            String rowId
+    ) {
         List<FieldDiffDto> diffs = new ArrayList<>();
 
-        if (oldObj == null || newObj == null) {
-            diffs.add(FieldDiffDto.builder()
-                    .field("OBJECT")
-                    .oldValue(oldObj)
-                    .newValue(newObj)
-                    .changed(true)
-                    .build());
-            return diffs;
-        }
+        List<Map<String, Object>> oldCells =
+                oldRow != null ? (List<Map<String, Object>>) oldRow.get("cells") : List.of();
+        List<Map<String, Object>> newCells =
+                newRow != null ? (List<Map<String, Object>>) newRow.get("cells") : List.of();
 
-        for (Field f : oldObj.getClass().getDeclaredFields()) {
-            f.setAccessible(true);
-            try {
-                Object oldVal = f.get(oldObj);
-                Object newVal = f.get(newObj);
+        int max = Math.max(oldCells.size(), newCells.size());
 
-                if (!Objects.equals(oldVal, newVal)) {
-                    diffs.add(FieldDiffDto.builder()
-                            .field(f.getName())
-                            .oldValue(oldVal)
-                            .newValue(newVal)
-                            .changed(true)
-                            .build());
-                }
-            } catch (Exception ignored) {}
+        for (int i = 0; i < max; i++) {
+            Map<String, Object> o = i < oldCells.size() ? oldCells.get(i) : null;
+            Map<String, Object> n = i < newCells.size() ? newCells.get(i) : null;
+
+            if (!Objects.equals(o, n)) {
+                diffs.add(field(
+                        "row[" + rowId + "].cell[" + i + "]",
+                        o, n,
+                        diffType(o, n)
+                ));
+            }
         }
         return diffs;
     }
+
+    /* =========================
+       VARIANT / PARAM / FILTER
+    ========================== */
+
+    private void diffVariants(
+            List<SectionDiffDto> sections,
+            List<Map<String, Object>> oldVars,
+            List<Map<String, Object>> newVars
+    ) {
+        Map<String, Map<String, Object>> oldMap = index(oldVars, "variantCode");
+        Map<String, Map<String, Object>> newMap = index(newVars, "variantCode");
+
+        for (String code : union(oldMap, newMap)) {
+            Map<String, Object> o = oldMap.get(code);
+            Map<String, Object> n = newMap.get(code);
+
+            List<FieldDiffDto> diffs = new ArrayList<>();
+            diffs.addAll(diffFields("variant[" + code + "]", o, n));
+            diffs.addAll(diffBySubIdentity("param", "paramName", o, n));
+            diffs.addAll(diffBySubIdentity("filterRule", "paramName", o, n));
+
+            if (!diffs.isEmpty()) {
+                sections.add(SectionDiffDto.builder()
+                        .section("VARIANT")
+                        .identifier(code)
+                        .fields(diffs)
+                        .build());
+            }
+        }
+    }
+
+    /* =========================
+       UTILITIES
+    ========================== */
+
+    private List<FieldDiffDto> diffFields(String base, Map<String, Object> o, Map<String, Object> n) {
+        List<FieldDiffDto> diffs = new ArrayList<>();
+        Set<String> keys = union(o, n);
+        for (String k : keys) {
+            Object ov = o != null ? o.get(k) : null;
+            Object nv = n != null ? n.get(k) : null;
+            if (!Objects.equals(ov, nv)) {
+                diffs.add(field(base + "." + k, ov, nv, diffType(ov, nv)));
+            }
+        }
+        return diffs;
+    }
+
+    private List<FieldDiffDto> diffBySubIdentity(
+            String name,
+            String idKey,
+            Map<String, Object> o,
+            Map<String, Object> n
+    ) {
+        Map<String, Map<String, Object>> om =
+                index(o != null ? (List<Map<String, Object>>) o.get(name + "s") : null, idKey);
+        Map<String, Map<String, Object>> nm =
+                index(n != null ? (List<Map<String, Object>>) n.get(name + "s") : null, idKey);
+
+        List<FieldDiffDto> diffs = new ArrayList<>();
+        for (String id : union(om, nm)) {
+            diffs.addAll(diffFields(name + "[" + id + "]", om.get(id), nm.get(id)));
+        }
+        return diffs;
+    }
+
+    private FieldDiffDto field(String path, Object o, Object n, DiffType t) {
+        return FieldDiffDto.builder()
+                .fieldPath(path)
+                .oldValue(o)
+                .newValue(n)
+                .diffType(t)
+                .build();
+    }
+
+    private DiffType diffType(Object o, Object n) {
+        if (o == null && n != null) return DiffType.ADDED;
+        if (o != null && n == null) return DiffType.REMOVED;
+        return DiffType.MODIFIED;
+    }
+
+    private Map<String, Map<String, Object>> index(List<Map<String, Object>> list, String key) {
+        Map<String, Map<String, Object>> map = new HashMap<>();
+        if (list == null) return map;
+        for (Map<String, Object> m : list) {
+            map.put(String.valueOf(m.get(key)), m);
+        }
+        return map;
+    }
+
+    private Set<String> union(Map<String, ?> a, Map<String, ?> b) {
+        Set<String> s = new HashSet<>();
+        if (a != null) s.addAll(a.keySet());
+        if (b != null) s.addAll(b.keySet());
+        return s;
+    }
 }
+
+
+
+  
 
 // ---‐--------‐-----------------------
-// service/RequestDiffService.java
+// service/TemplateDiffService.java
 // -----------------------------------
 
-package com.tcs.fincore.CommonRequestService.service;
+package com.tcs.fincore.CommonRequestService.service.diff;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.tcs.fincore.CommonRequestService.dto.ReportTemplateDto;
-import com.tcs.fincore.CommonRequestService.dto.diff.RequestDiffResponseDto;
-import com.tcs.fincore.CommonRequestService.dto.diff.SectionDiffDto;
-import com.tcs.fincore.CommonRequestService.exception.ResourceNotFoundException;
-import com.tcs.fincore.CommonRequestService.model.CommonReq;
-import com.tcs.fincore.CommonRequestService.model.ReportTemplate;
-import com.tcs.fincore.CommonRequestService.model.ReportTemplateVariant;
-import com.tcs.fincore.CommonRequestService.repository.CommonRequestRepository;
-import com.tcs.fincore.CommonRequestService.repository.ReportTemplateRepository;
-import com.tcs.fincore.CommonRequestService.repository.ReportTemplateVariantRepository;
-import com.tcs.fincore.CommonRequestService.service.diff.ReportTemplateDiffEngine;
+import com.tcs.fincore.CommonRequestService.dto.diff.TemplateSideBySideDiffDto;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
+import java.util.Map;
 
-/**
- * ⭐ RequestDiffService
- *
- * Responsible for preparing OLD vs NEW comparison data
- * for UPDATE requests (maker–checker flow).
- *
- * - OLD  → ACTIVE data from DB
- * - NEW  → Pending request payload
- *
- * This service DOES NOT modify DB.
- */
 @Service
 @RequiredArgsConstructor
-@Slf4j
-public class RequestDiffService {
+public class TemplateDiffService {
 
-    private final CommonRequestRepository commonRequestRepository;
-    private final ReportTemplateRepository reportTemplateRepository;
-    private final ReportTemplateVariantRepository reportTemplateVariantRepository;
     private final ObjectMapper objectMapper;
+    private final TemplateDiffEngine engine = new TemplateDiffEngine();
 
-    /**
-     * ⭐ Main method called by controller
-     */
-    public RequestDiffResponseDto getDiff(Long requestId) {
-
-        // =====================================================
-        // 1️⃣ Fetch Common Request
-        // =====================================================
-        CommonReq request = commonRequestRepository.findById(requestId)
-                .orElseThrow(() ->
-                        new ResourceNotFoundException("Request not found for id: " + requestId));
-
-        // =====================================================
-        // 2️⃣ Validate change type
-        // =====================================================
-        if (!"UPDATE".equals(request.getChangeType().name())) {
-            throw new IllegalStateException(
-                    "Diff comparison is allowed only for UPDATE requests");
-        }
-
-        // =====================================================
-        // 3️⃣ Fetch ACTIVE template (OLD DATA)
-        // =====================================================
-        ReportTemplate activeTemplate = reportTemplateRepository
-                .findFirstByReportIdAndStatus(request.getTargetId(), "ACTIVE")
-                .orElseThrow(() ->
-                        new ResourceNotFoundException(
-                                "Active template not found for reportId: " + request.getTargetId()));
-
-        // =====================================================
-        // 4️⃣ Deserialize OLD template JSON → Template DTO
-        // =====================================================
-        ReportTemplateDto.Template oldTemplate;
-        try {
-            oldTemplate = objectMapper.readValue(
-                    activeTemplate.getTemplateJson(),
-                    ReportTemplateDto.Template.class
-            );
-        } catch (Exception ex) {
-            log.error("Failed to deserialize old template JSON", ex);
-            throw new IllegalStateException("Invalid stored template JSON");
-        }
-
-        // =====================================================
-        // 5️⃣ Fetch OLD variants from DB
-        // =====================================================
-        List<ReportTemplateVariant> oldVariantEntities =
-                reportTemplateVariantRepository.findByTemplateId(
-                        activeTemplate.getTemplateId()
-                );
-
-        // =====================================================
-        // 6️⃣ Convert OLD variants → DTO
-        // =====================================================
-        List<ReportTemplateDto.ReportTemplateVariantDto> oldVariants =
-                oldVariantEntities.stream()
-                        .map(this::mapVariantEntityToDto)
-                        .toList();
-
-        // =====================================================
-        // 7️⃣ Build OLD DTO (template + variants)
-        // =====================================================
-        ReportTemplateDto oldDto = new ReportTemplateDto();
-        oldDto.setTemplate(oldTemplate);
-        oldDto.setVariants(oldVariants);
-
-        // =====================================================
-        // 8️⃣ Deserialize NEW payload → FULL DTO
-        // =====================================================
-        ReportTemplateDto newDto;
-        try {
-            newDto = objectMapper.readValue(
-                    request.getPayload(),
-                    ReportTemplateDto.class
-            );
-        } catch (Exception ex) {
-            log.error("Failed to deserialize request payload", ex);
-            throw new IllegalStateException("Invalid request payload JSON");
-        }
-
-        // =====================================================
-        // 9️⃣ Perform FULL DIFF (ALL SECTIONS)
-        // =====================================================
-        List<SectionDiffDto> diffs =
-                ReportTemplateDiffEngine.diff(oldDto, newDto);
-
-        // =====================================================
-        // 🔟 Build final response
-        // =====================================================
-        return RequestDiffResponseDto.builder()
-                .requestId(String.valueOf(requestId))
-                .changeType(request.getChangeType().name())
-                .diffs(diffs)
-                .build();
-    }
-
-    // =========================================================
-    // 🔁 HELPER: Convert Variant Entity → Variant DTO
-    // =========================================================
-    private ReportTemplateDto.ReportTemplateVariantDto mapVariantEntityToDto(
-            ReportTemplateVariant entity
+    public TemplateSideBySideDiffDto diff(
+            String oldPayload,
+            String newPayload,
+            String changeType,
+            String requestId
     ) {
-        return ReportTemplateDto.ReportTemplateVariantDto.builder()
-                .variantCode(entity.getVariantCode())
-                .variantName(entity.getVariantName())
-                .description(entity.getDescription())
-                .status(entity.getStatus())
-                // ⭐ params & filterRules can be added later
-                .build();
+
+        if (!"UPDATE".equals(changeType)) {
+            throw new IllegalArgumentException("Diff allowed only for UPDATE");
+        }
+
+        try {
+            Map<String, Object> oldMap = objectMapper.readValue(oldPayload, Map.class);
+            Map<String, Object> newMap = objectMapper.readValue(newPayload, Map.class);
+
+            return TemplateSideBySideDiffDto.builder()
+                    .changeType(changeType)
+                    .requestId(requestId)
+                    .oldTemplate(oldMap)
+                    .newTemplate(newMap)
+                    .diffs(engine.diffTemplate(
+                            (Map<String, Object>) oldMap.get("template"),
+                            (Map<String, Object>) newMap.get("template")))
+                    .build();
+
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Invalid JSON payload", e);
+        }
     }
 }
+
 
 
 
@@ -377,27 +498,24 @@ public class RequestDiffService {
 // controller/RequestDiffController.java
 // --------------------------------------
 
-package com.tcs.fincore.CommonRequestService.controller;
+@PostMapping("/template/diff")
+public ApiResponse<TemplateSideBySideDiffDto> diffTemplate(
+        @RequestBody TemplateDiffRequestDto request
+) {
 
-import com.tcs.fincore.CommonRequestService.dto.diff.RequestDiffResponseDto;
-import com.tcs.fincore.CommonRequestService.service.RequestDiffService;
-import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.*;
-
-@RestController
-@RequestMapping("/api")
-@RequiredArgsConstructor
-public class RequestDiffController {
-
-    private final RequestDiffService diffService;
-
-    /**
-     * ⭐ COMMENT:
-     * Used by checker to view OLD vs NEW data
-     */
-    @GetMapping("/request-diff/{requestId}")
-    public RequestDiffResponseDto getDiff(@PathVariable Long requestId)
-            throws Exception {
-        return diffService.getDiff(requestId);
+    if (!"UPDATE".equals(request.getChangeType())) {
+        throw new IllegalArgumentException(
+                "Diff allowed only for UPDATE changeType."
+        );
     }
+
+    return ApiResponse.success(
+            templateDiffService.diff(
+                    request.getOldPayload(),
+                    request.getNewPayload(),
+                    request.getChangeType(),
+                    request.getRequestId()
+            )
+    );
 }
+
