@@ -815,241 +815,221 @@ export default ViewRequestDialog;
 
 
 
+// ======================================================================
+// DiffUtils.js
+// ======================================================================
 
-// ‐------------------------------------------------------
-// src/pages/template/CompareRequestDialog.jsx
-// -------------------------------------------------------
+export const DiffType = {
+  ADDED: "ADDED",
+  REMOVED: "REMOVED",
+  MODIFIED: "MODIFIED"
+};
+
+export function getCellPath(rowId, cellIndex) {
+  return `row[${rowId}].cell[${cellIndex}].expression`;
+}
+
+export function getDiffForPath(diffs, path) {
+  return diffs.find(d => d.fieldPath === path);
+}
 
 
- 
-                  
-import React, { useEffect, useState } from "react";
+
+
+// =========================================================================
+// diffStyles.js
+// =========================================================================
+
+export const diffBg = {
+  ADDED: "#e8f5e9",
+  REMOVED: "#ffebee",
+  MODIFIED: "#fff8e1"
+};
+
+export const diffBorder = {
+  ADDED: "2px solid #2e7d32",
+  REMOVED: "2px solid #c62828",
+  MODIFIED: "2px solid #f9a825"
+};
+
+
+
+// ===========================================================================
+// ReportPreview.jsx
+// ===========================================================================
+
+import {
+  Table,
+  TableHead,
+  TableRow,
+  TableCell,
+  TableBody,
+  Paper,
+  Typography
+} from "@mui/material";
+import { getCellPath, getDiffForPath } from "./DiffUtils";
+import { diffBg, diffBorder } from "./diffStyles";
+
+export default function ReportPreview({ title, template, diffs }) {
+  const columns = template?.template?.reportData?.columns || [];
+  const rows = template?.template?.reportData?.rows || [];
+
+  return (
+    <Paper variant="outlined" sx={{ p: 2, height: "100%" }}>
+      <Typography fontWeight={600} mb={1}>
+        {title}
+      </Typography>
+
+      <Table size="small">
+        <TableHead>
+          <TableRow>
+            {columns.map(col => (
+              <TableCell key={col.id} sx={{ fontWeight: 600 }}>
+                {col.name}
+              </TableCell>
+            ))}
+          </TableRow>
+        </TableHead>
+
+        <TableBody>
+          {rows.map(row => (
+            <TableRow key={row.id}>
+              {row.cells.map((cell, idx) => {
+                const path = getCellPath(row.id, idx);
+                const diff = getDiffForPath(diffs, path);
+
+                return (
+                  <TableCell
+                    key={idx}
+                    sx={{
+                      backgroundColor: diff
+                        ? diffBg[diff.diffType]
+                        : "transparent",
+                      border: diff
+                        ? diffBorder[diff.diffType]
+                        : "1px solid #e0e0e0",
+                      verticalAlign: "top"
+                    }}
+                  >
+                    {renderCell(cell)}
+                  </TableCell>
+                );
+              })}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </Paper>
+  );
+}
+
+function renderCell(cell) {
+  if (!cell) return null;
+  if (cell.type === "TEXT") return cell.value;
+  if (cell.type === "FORMULA") return cell.expression;
+  if (cell.type === "DB_COUNT")
+    return `${cell.source?.table}.${cell.source?.column}`;
+  return JSON.stringify(cell);
+}
+
+
+
+
+// =====================================================================
+// CompareTemplateDialog.jsx
+// ======================================================================
+
 import {
   Dialog,
   DialogTitle,
   DialogContent,
-  Divider,
-  Typography,
-  Box,
+  DialogActions,
+  Button,
+  Grid,
   CircularProgress,
-  IconButton,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
-  Table,
-  TableHead,
-  TableBody,
-  TableRow,
-  TableCell,
-  TableContainer,
-  Paper
+  Typography
 } from "@mui/material";
-import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import CloseIcon from "@mui/icons-material/Close";
-import useApi from "../../hooks/useApi";
+import { useEffect, useState } from "react";
+import axios from "axios";
+import ReportPreview from "./ReportPreview";
 
-/* ======================================================
-   Styles
-====================================================== */
-const styles = {
-  oldChanged: { backgroundColor: "#ffebee" },
-  newChanged: { backgroundColor: "#e8f5e9" },
-  sectionTitle: { fontWeight: 600 }
-};
-
-/* ======================================================
-   Helpers
-====================================================== */
-const isPrimitive = (v) =>
-  v === null ||
-  typeof v === "string" ||
-  typeof v === "number" ||
-  typeof v === "boolean";
-
-const renderPrimitive = (v) => (v === null ? <i>null</i> : String(v));
-
-/* ======================================================
-   🔥 CORE NORMALIZER
-   Converts EVERYTHING into flat rows
-====================================================== */
-const normalizeFields = (fields = []) => {
-  const rows = [];
-
-  fields.forEach(({ field, oldValue, newValue }) => {
-    /* ---------- 1. Primitive ---------- */
-    if (isPrimitive(oldValue) && isPrimitive(newValue)) {
-      rows.push({
-        field,
-        oldValue,
-        newValue,
-        changed: oldValue !== newValue
-      });
-      return;
-    }
-
-    /* ---------- 2. Object ---------- */
-    if (
-      (oldValue && typeof oldValue === "object" && !Array.isArray(oldValue)) ||
-      (newValue && typeof newValue === "object" && !Array.isArray(newValue))
-    ) {
-      const keys = new Set([
-        ...Object.keys(oldValue || {}),
-        ...Object.keys(newValue || {})
-      ]);
-
-      keys.forEach((k) => {
-        rows.push({
-          field: k, // 🔥 no OBJECT.k
-          oldValue: oldValue?.[k] ?? null,
-          newValue: newValue?.[k] ?? null,
-          changed:
-            JSON.stringify(oldValue?.[k]) !==
-            JSON.stringify(newValue?.[k])
-        });
-      });
-      return;
-    }
-
-    /* ---------- 3. Array (cells / params / filterRules) ---------- */
-    if (Array.isArray(oldValue) || Array.isArray(newValue)) {
-      const oldArr = oldValue || [];
-      const newArr = newValue || [];
-      const max = Math.max(oldArr.length, newArr.length);
-
-      for (let i = 0; i < max; i++) {
-        const o = oldArr[i] || {};
-        const n = newArr[i] || {};
-
-        const keys = new Set([
-          ...Object.keys(o),
-          ...Object.keys(n)
-        ]);
-
-        keys.forEach((k) => {
-          rows.push({
-            field: k, // 🔥 looks like ROW fields
-            oldValue: o[k] ?? null,
-            newValue: n[k] ?? null,
-            changed:
-              JSON.stringify(o[k]) !==
-              JSON.stringify(n[k])
-          });
-        });
-      }
-    }
-  });
-
-  return rows;
-};
-
-/* ======================================================
-   Table
-====================================================== */
-const DiffTable = ({ fields }) => (
-  <TableContainer component={Paper} variant="outlined">
-    <Table size="small">
-      <TableHead>
-        <TableRow>
-          <TableCell><b>Field</b></TableCell>
-          <TableCell><b>Old Value</b></TableCell>
-          <TableCell><b>New Value</b></TableCell>
-        </TableRow>
-      </TableHead>
-
-      <TableBody>
-        {fields.map((f, i) => (
-          <TableRow key={i}>
-            <TableCell>{f.field}</TableCell>
-
-            <TableCell sx={f.changed ? styles.oldChanged : {}}>
-              {renderPrimitive(f.oldValue)}
-            </TableCell>
-
-            <TableCell sx={f.changed ? styles.newChanged : {}}>
-              {renderPrimitive(f.newValue)}
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  </TableContainer>
-);
-
-/* ======================================================
-   Section Accordion
-====================================================== */
-const SectionAccordion = ({ section }) => {
-  const normalized = normalizeFields(section.fields);
-
-  return (
-    <Accordion defaultExpanded>
-      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-        <Typography sx={styles.sectionTitle}>
-          {section.section}
-          {section.identifier ? ` : ${section.identifier}` : ""}
-        </Typography>
-      </AccordionSummary>
-
-      <AccordionDetails>
-        <DiffTable fields={normalized} />
-      </AccordionDetails>
-    </Accordion>
-  );
-};
-
-/* ======================================================
-   CompareRequestDialog
-====================================================== */
-export default function CompareRequestDialog({ open, onClose, requestId }) {
-  const { callApi } = useApi();
-  const [diffs, setDiffs] = useState([]);
+export default function CompareTemplateDialog({
+  open,
+  onClose,
+  requestId
+}) {
+  const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
 
   useEffect(() => {
     if (!open || !requestId) return;
 
-    setDiffs([]);
-    setError("");
     setLoading(true);
-
-    callApi(`/CR/api/request-diff/${requestId}`, {}, "GET")
-      .then((res) => setDiffs(res?.data?.diffs || []))
-      .catch((e) =>
-        setError(e?.response?.data?.message || "Unable to load diff")
-      )
-      .finally(() => setLoading(false));
+    axios
+      .post("/template/diff", {
+        requestId,
+        changeType: "UPDATE"
+      })
+      .then(res => {
+        setData(res.data.data);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
   }, [open, requestId]);
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="xl"
+      fullWidth
+    >
       <DialogTitle>
-        Report Change Comparison
-        <IconButton
-          onClick={onClose}
-          sx={{ position: "absolute", right: 8, top: 8 }}
-        >
-          <CloseIcon />
-        </IconButton>
+        Template Comparison (PDF-like Preview)
       </DialogTitle>
 
-      <Divider />
+      <DialogContent dividers sx={{ minHeight: 600 }}>
+        {loading && <CircularProgress />}
 
-      <DialogContent dividers>
-        {loading ? (
-          <Box textAlign="center" p={4}>
-            <CircularProgress />
-          </Box>
-        ) : error ? (
-          <Typography color="error">{error}</Typography>
-        ) : diffs.length === 0 ? (
-          <Typography>No changes detected</Typography>
-        ) : (
-          diffs.map((sec, i) => (
-            <SectionAccordion key={i} section={sec} />
-          ))
+        {!loading && data && (
+          <>
+            <Typography mb={2}>
+              Request ID: <b>{data.requestId}</b>
+            </Typography>
+
+            <Grid container spacing={2}>
+              <Grid item xs={6}>
+                <ReportPreview
+                  title="OLD VERSION"
+                  template={data.oldTemplate}
+                  diffs={data.diffs}
+                />
+              </Grid>
+
+              <Grid item xs={6}>
+                <ReportPreview
+                  title="NEW VERSION"
+                  template={data.newTemplate}
+                  diffs={data.diffs}
+                />
+              </Grid>
+            </Grid>
+          </>
         )}
       </DialogContent>
+
+      <DialogActions>
+        <Button onClick={onClose}>Close</Button>
+        <Button variant="contained" color="success">
+          Approve
+        </Button>
+        <Button variant="outlined" color="error">
+          Reject
+        </Button>
+      </DialogActions>
     </Dialog>
   );
 }
+
+
+
