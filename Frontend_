@@ -964,3 +964,167 @@ function renderCell(cell) {
 // ======================================================================
 
 
+import React, { useEffect, useState, useMemo } from "react";
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  Box,
+  Typography,
+  Divider,
+  Grid,
+  CircularProgress
+} from "@mui/material";
+import { callApi } from "@/utils/callApi";
+import { useCustomSnackbar } from "@/hooks/useCustomSnackbar";
+
+/**
+ * Props expected (based on your TemplateRequestScreen):
+ * - open
+ * - onClose
+ * - requestRow   (row object from table)
+ */
+const CompareTemplateDialog = ({ open, onClose, requestRow }) => {
+  const { showSnackbar } = useCustomSnackbar();
+
+  const [loading, setLoading] = useState(false);
+  const [oldTemplate, setOldTemplate] = useState(null);
+  const [newTemplate, setNewTemplate] = useState(null);
+
+  // -----------------------------
+  // Fetch diff ONLY for MODIFY
+  // -----------------------------
+  useEffect(() => {
+    if (!open || !requestRow) return;
+
+    if (requestRow.changeType !== "MODIFY") {
+      return;
+    }
+
+    fetchDiff();
+  }, [open, requestRow]);
+
+  const fetchDiff = async () => {
+    setLoading(true);
+    try {
+      const payload = {
+        requestType: requestRow.requestType,
+        changeType: "UPDATE",
+        requestId: requestRow.requestId,
+        oldPayload: requestRow.oldPayload,
+        newPayload: requestRow.newPayload
+      };
+
+      const res = await callApi({
+        url: "/template/diff",
+        method: "POST",
+        data: payload
+      });
+
+      setOldTemplate(res.data.oldTemplate);
+      setNewTemplate(res.data.newTemplate);
+    } catch (e) {
+      showSnackbar("Failed to load template comparison", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // -----------------------------
+  // Simple diff checker
+  // -----------------------------
+  const isDifferent = (a, b) =>
+    JSON.stringify(a) !== JSON.stringify(b);
+
+  // -----------------------------
+  // Recursive renderer (PDF-like)
+  // -----------------------------
+  const renderBlock = (label, oldVal, newVal) => {
+    const changed = isDifferent(oldVal, newVal);
+
+    return (
+      <Box
+        sx={{
+          mb: 2,
+          p: 1,
+          borderRadius: 1,
+          backgroundColor: changed ? "#fff3e0" : "transparent"
+        }}
+      >
+        <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+          {label}
+        </Typography>
+
+        <Grid container spacing={2}>
+          <Grid item xs={6}>
+            <pre>{JSON.stringify(oldVal, null, 2)}</pre>
+          </Grid>
+          <Grid item xs={6}>
+            <pre>{JSON.stringify(newVal, null, 2)}</pre>
+          </Grid>
+        </Grid>
+      </Box>
+    );
+  };
+
+  // -----------------------------
+  // UI
+  // -----------------------------
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
+      <DialogTitle>
+        Template Comparison (Previous vs Current)
+      </DialogTitle>
+
+      <DialogContent dividers>
+        {loading && (
+          <Box sx={{ textAlign: "center", mt: 4 }}>
+            <CircularProgress />
+          </Box>
+        )}
+
+        {!loading && oldTemplate && newTemplate && (
+          <>
+            {renderBlock(
+              "Template Meta",
+              oldTemplate.template?.templateMeta,
+              newTemplate.template?.templateMeta
+            )}
+
+            {renderBlock(
+              "Report Meta",
+              oldTemplate.template?.reportMeta,
+              newTemplate.template?.reportMeta
+            )}
+
+            {renderBlock(
+              "Columns",
+              oldTemplate.template?.reportData?.columns,
+              newTemplate.template?.reportData?.columns
+            )}
+
+            {renderBlock(
+              "Rows",
+              oldTemplate.template?.reportData?.rows,
+              newTemplate.template?.reportData?.rows
+            )}
+
+            {renderBlock(
+              "Variants",
+              oldTemplate.variants,
+              newTemplate.variants
+            )}
+          </>
+        )}
+
+        {!loading && !oldTemplate && (
+          <Typography color="text.secondary">
+            No comparison data available
+          </Typography>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+export default CompareTemplateDialog;
