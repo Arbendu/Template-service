@@ -835,3 +835,122 @@
     ]
   }
 }
+
+
+
+
+
+
+
+
+// ---------------------------☆☆☆☆☆☆☆☆☆☆☆☆
+
+{
+  "requestType": "RB_REPORT_TEMPLATE",
+  "changeType": "UPDATE",
+  "requestId": "REQ-1001",
+
+  "oldPayload": "{\
+\"template\": {\
+  \"templateMeta\": {\
+    \"templateId\": \"\",\
+    \"version\": \"1\",\
+    \"pageSize\": \"A4\",\
+    \"pageOrientation\": \"PORTRAIT\"\
+  },\
+  \"reportMeta\": {\
+    \"reportName\": \"Testing_v2\",\
+    \"reportId\": \"Test987\"\
+  },\
+  \"reportData\": {\
+    \"columns\": [\
+      { \"id\": \"C__1\", \"name\": \"Column 1\", \"format\": {} },\
+      { \"id\": \"C__2\", \"name\": \"L01A\", \"format\": {} }\
+    ],\
+    \"rows\": []\
+  }\
+},\
+\"variants\": [\
+  {\
+    \"variantCode\": \"BRANCH_DATE\",\
+    \"variantName\": \"Branch Wise\",\
+    \"status\": \"ACTIVE\",\
+    \"params\": [],\
+    \"filterRules\": []\
+  }\
+]\
+}",
+
+  "newPayload": "{\
+\"template\": {\
+  \"templateMeta\": {\
+    \"templateId\": \"\",\
+    \"version\": \"1\",\
+    \"pageSize\": \"A4\",\
+    \"pageOrientation\": \"LANDSCAPE\"\
+  },\
+  \"reportMeta\": {\
+    \"reportName\": \"Testing_v3\",\
+    \"reportId\": \"Test987\",\
+    \"extras\": [\
+      { \"name\": \"Report Date\", \"value\": \"2025-12-19\" }\
+    ]\
+  },\
+  \"reportData\": {\
+    \"columns\": [\
+      { \"id\": \"C__1\", \"name\": \"Column 1\", \"format\": {} },\
+      { \"id\": \"C__2\", \"name\": \"L01A_UPDATED\", \"format\": {} },\
+      {\
+        \"id\": \"C__3\",\
+        \"name\": \"Column 3\",\
+        \"format\": {\
+          \"type\": \"number\",\
+          \"thousandSeparator\": true,\
+          \"decimals\": 2\
+        }\
+      },\
+      { \"id\": \"C__4\", \"name\": \"Column 4\", \"format\": {} }\
+    ],\
+    \"rows\": []\
+  }\
+},\
+\"variants\": [\
+  {\
+    \"variantCode\": \"BRANCH_DATE\",\
+    \"variantName\": \"Branch Wise v2\",\
+    \"status\": \"ACTIVE\",\
+    \"params\": [\
+      {\
+        \"paramName\": \"DT\",\
+        \"label\": \"Date\",\
+        \"paramType\": \"DATE\",\
+        \"required\": true\
+      },\
+      {\
+        \"paramName\": \"BR\",\
+        \"label\": \"BRANCH_TEST\",\
+        \"paramType\": \"STRING\",\
+        \"required\": false\
+      }\
+    ],\
+    \"filterRules\": [\
+      {\
+        \"paramName\": \"BR\",\
+        \"dbColumn\": \"BRANCH_CODE\",\
+        \"operator\": \"=\"\
+      },\
+      {\
+        \"paramName\": \"DT_TEST\",\
+        \"dbColumn\": \"BALANCE_DATE\",\
+        \"operator\": \"=\"\
+      },\
+      {\
+        \"paramName\": \"DT_FROM_TEST\",\
+        \"dbColumn\": \"BALANCE_DATE\",\
+        \"operator\": \">=\"\
+      }\
+    ]\
+  }\
+]\
+}"
+}
