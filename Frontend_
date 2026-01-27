@@ -35,6 +35,8 @@ import ViewRequestDialog from "./ViewRequestDailog";
 import { timeStampFormatter } from "../../utils/CommonUtilities";
 import { styles } from "./TemplateRequestScreenStyles";
 import LoadingOverlay from "../../utils/LoadingOverlay";
+// import CompareRequestDialog from "./CompareTemplateDialog";
+import CompareTemplateDialog from "./CompareTemplateDialog";
 
 export default function TemplateRequestScreen() {
   const selectedMenuItem = useSelector((s) => s.menus.selectedMenuItem);
@@ -50,6 +52,8 @@ export default function TemplateRequestScreen() {
   const [remarks, setRemarks] = useState("");
   const [viewOpen, setViewOpen] = useState(false);
   const [viewData, setViewData] = useState(null);
+  const [compareOpen, setCompareOpen] = useState(false);
+  const [selectedRequestId, setSelectedRequestId] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState({
     open: false,
     type: null,
@@ -61,7 +65,7 @@ export default function TemplateRequestScreen() {
     if (!requestType) return;
     try {
       const response = await callApi(
-        "/CR/api/pending-requests",
+        "/CR/pending-requests",
         { requestType },
         "POST"
       );
@@ -112,7 +116,7 @@ export default function TemplateRequestScreen() {
           confirmDialog.type === "reject" ? remarks.trim() : "No Remarks",
       };
 
-      const res = await callApi("/CR/api/update-request", payload, "PATCH");
+      const res = await callApi("/CR/update-request", payload, "PATCH");
 
       if (res?.success || res) {
         showSnackBar(
@@ -135,9 +139,15 @@ export default function TemplateRequestScreen() {
   };
 
   const handleViewClick = (data) => {
-    const view = data;
-    setViewData(view);
-    setViewOpen(true);
+    if(data.changeType === "UPDATE"){
+      // UPDATE -> open comparison dialog.
+      setSelectedRequestId(data.id);
+      setCompareOpen(true);
+    } else{
+      // ADD / DELETE -> open normal view dialog.
+      setViewData(data);
+      setViewOpen(true);
+    }
   };
 
   const openConfirmDialog = (type, id) =>
@@ -293,8 +303,21 @@ export default function TemplateRequestScreen() {
       {/* View Dialog */}
       <ViewRequestDialog
         open={viewOpen}
-        handleClose={() => setViewOpen(false)}
+        handleClose={() => {
+          setViewOpen(false);
+          setViewData(null);
+        }}
         data={viewData}
+      />
+
+      {/* Compare dialog for UPDATE */}
+      <CompareTemplateDialog 
+        open={compareOpen}
+        requestId={selectedRequestId}
+        onClose={() => {
+          setCompareOpen(false);
+          setSelectedRequestId(null);
+        }}
       />
 
       {/* Confirm Dialog */}
@@ -356,6 +379,7 @@ export default function TemplateRequestScreen() {
     </Box>
   );
 }
+
 
 
 
