@@ -149,7 +149,131 @@ public class DiffUtil {
 // service/diff/ReportTemplateDiffEngine.java
 // ------------------------------------------
 
+package com.tcs.fincore.CommonRequestService.service.diff;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.tcs.fincore.CommonRequestService.dto.diff.*;
+import org.springframework.stereotype.Component;
+
+import java.util.*;
+
+@Component
+public class TemplateDiffEngine {
+
+    public TemplateSideBySideDiffDto diff(
+            JsonNode oldNode,
+            JsonNode newNode,
+            String requestId,
+            String requestType,
+            String changeType
+    ) {
+
+        List<SectionDiffDto> sections = new ArrayList<>();
+
+        sections.add(compareSection(
+                "TEMPLATE_META",
+                oldNode.at("/template/templateMeta"),
+                newNode.at("/template/templateMeta")
+        ));
+
+        sections.add(compareSection(
+                "REPORT_META",
+                oldNode.at("/template/reportMeta"),
+                newNode.at("/template/reportMeta")
+        ));
+
+        sections.add(compareSection(
+                "REPORT_DATA",
+                oldNode.at("/template/reportData"),
+                newNode.at("/template/reportData")
+        ));
+
+        sections.add(compareSection(
+                "VARIANTS",
+                oldNode.at("/variants"),
+                newNode.at("/variants")
+        ));
+
+        return TemplateSideBySideDiffDto.builder()
+                .requestId(requestId)
+                .requestType(requestType)
+                .changeType(changeType)
+                .oldTemplate(oldNode)
+                .newTemplate(newNode)
+                .sections(sections)
+                .build();
+    }
+
+    private SectionDiffDto compareSection(
+            String sectionName,
+            JsonNode oldNode,
+            JsonNode newNode
+    ) {
+
+        List<FieldDiffDto> diffs = new ArrayList<>();
+        compareJson("", oldNode, newNode, diffs);
+
+        return SectionDiffDto.builder()
+                .section(sectionName)
+                .diffs(diffs)
+                .build();
+    }
+
+    private void compareJson(
+            String path,
+            JsonNode oldNode,
+            JsonNode newNode,
+            List<FieldDiffDto> diffs
+    ) {
+
+        if (oldNode == null || oldNode.isMissingNode()) {
+            diffs.add(FieldDiffDto.builder()
+                    .fieldPath(path)
+                    .diffType(DiffType.ADDED)
+                    .oldValue(null)
+                    .newValue(newNode)
+                    .build());
+            return;
+        }
+
+        if (newNode == null || newNode.isMissingNode()) {
+            diffs.add(FieldDiffDto.builder()
+                    .fieldPath(path)
+                    .diffType(DiffType.REMOVED)
+                    .oldValue(oldNode)
+                    .newValue(null)
+                    .build());
+            return;
+        }
+
+        if (oldNode.equals(newNode)) {
+            return;
+        }
+
+        if (oldNode.isValueNode() && newNode.isValueNode()) {
+            diffs.add(FieldDiffDto.builder()
+                    .fieldPath(path)
+                    .diffType(DiffType.MODIFIED)
+                    .oldValue(oldNode.asText())
+                    .newValue(newNode.asText())
+                    .build());
+            return;
+        }
+
+        Set<String> fieldNames = new HashSet<>();
+        oldNode.fieldNames().forEachRemaining(fieldNames::add);
+        newNode.fieldNames().forEachRemaining(fieldNames::add);
+
+        for (String field : fieldNames) {
+            compareJson(
+                    path.isEmpty() ? field : path + "." + field,
+                    oldNode.get(field),
+                    newNode.get(field),
+                    diffs
+            );
+        }
+    }
+}
 
 
 
