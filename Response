@@ -772,7 +772,7 @@
               {
                 "type": "DB_COUNT",
                 "source": {
-                  "table": "GL_TRANSACTIONS_TEST",
+                  "table": "GL_TRANSACTIONS",
                   "column": "TRANSACTION_ID",
                   "filters": {}
                 }
