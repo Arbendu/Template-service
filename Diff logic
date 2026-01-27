@@ -314,125 +314,129 @@ public class TemplateDiffEngine {
             Map<String, Object> newRow,
             String rowId
     ) {
-        List<FieldDiffDto> diffs = new ArrayList<>();
+package com.tcs.fincore.CommonRequestService.service.diff;
 
-        List<Map<String, Object>> oldCells =
-                oldRow != null ? (List<Map<String, Object>>) oldRow.get("cells") : List.of();
-        List<Map<String, Object>> newCells =
-                newRow != null ? (List<Map<String, Object>>) newRow.get("cells") : List.of();
+import com.fasterxml.jackson.databind.JsonNode;
+import com.tcs.fincore.CommonRequestService.dto.diff.*;
+import org.springframework.stereotype.Component;
 
-        int max = Math.max(oldCells.size(), newCells.size());
+import java.util.*;
 
-        for (int i = 0; i < max; i++) {
-            Map<String, Object> o = i < oldCells.size() ? oldCells.get(i) : null;
-            Map<String, Object> n = i < newCells.size() ? newCells.get(i) : null;
+@Component
+public class TemplateDiffEngine {
 
-            if (!Objects.equals(o, n)) {
-                diffs.add(field(
-                        "row[" + rowId + "].cell[" + i + "]",
-                        o, n,
-                        diffType(o, n)
-                ));
-            }
-        }
-        return diffs;
-    }
-
-    /* =========================
-       VARIANT / PARAM / FILTER
-    ========================== */
-
-    private void diffVariants(
-            List<SectionDiffDto> sections,
-            List<Map<String, Object>> oldVars,
-            List<Map<String, Object>> newVars
+    public TemplateSideBySideDiffDto diff(
+            JsonNode oldNode,
+            JsonNode newNode,
+            String requestId,
+            String requestType,
+            String changeType
     ) {
-        Map<String, Map<String, Object>> oldMap = index(oldVars, "variantCode");
-        Map<String, Map<String, Object>> newMap = index(newVars, "variantCode");
 
-        for (String code : union(oldMap, newMap)) {
-            Map<String, Object> o = oldMap.get(code);
-            Map<String, Object> n = newMap.get(code);
+        List<SectionDiffDto> sections = new ArrayList<>();
 
-            List<FieldDiffDto> diffs = new ArrayList<>();
-            diffs.addAll(diffFields("variant[" + code + "]", o, n));
-            diffs.addAll(diffBySubIdentity("param", "paramName", o, n));
-            diffs.addAll(diffBySubIdentity("filterRule", "paramName", o, n));
+        sections.add(compareSection(
+                "TEMPLATE_META",
+                oldNode.at("/template/templateMeta"),
+                newNode.at("/template/templateMeta")
+        ));
 
-            if (!diffs.isEmpty()) {
-                sections.add(SectionDiffDto.builder()
-                        .section("VARIANT")
-                        .identifier(code)
-                        .fields(diffs)
-                        .build());
-            }
-        }
-    }
+        sections.add(compareSection(
+                "REPORT_META",
+                oldNode.at("/template/reportMeta"),
+                newNode.at("/template/reportMeta")
+        ));
 
-    /* =========================
-       UTILITIES
-    ========================== */
+        sections.add(compareSection(
+                "REPORT_DATA",
+                oldNode.at("/template/reportData"),
+                newNode.at("/template/reportData")
+        ));
 
-    private List<FieldDiffDto> diffFields(String base, Map<String, Object> o, Map<String, Object> n) {
-        List<FieldDiffDto> diffs = new ArrayList<>();
-        Set<String> keys = union(o, n);
-        for (String k : keys) {
-            Object ov = o != null ? o.get(k) : null;
-            Object nv = n != null ? n.get(k) : null;
-            if (!Objects.equals(ov, nv)) {
-                diffs.add(field(base + "." + k, ov, nv, diffType(ov, nv)));
-            }
-        }
-        return diffs;
-    }
+        sections.add(compareSection(
+                "VARIANTS",
+                oldNode.at("/variants"),
+                newNode.at("/variants")
+        ));
 
-    private List<FieldDiffDto> diffBySubIdentity(
-            String name,
-            String idKey,
-            Map<String, Object> o,
-            Map<String, Object> n
-    ) {
-        Map<String, Map<String, Object>> om =
-                index(o != null ? (List<Map<String, Object>>) o.get(name + "s") : null, idKey);
-        Map<String, Map<String, Object>> nm =
-                index(n != null ? (List<Map<String, Object>>) n.get(name + "s") : null, idKey);
-
-        List<FieldDiffDto> diffs = new ArrayList<>();
-        for (String id : union(om, nm)) {
-            diffs.addAll(diffFields(name + "[" + id + "]", om.get(id), nm.get(id)));
-        }
-        return diffs;
-    }
-
-    private FieldDiffDto field(String path, Object o, Object n, DiffType t) {
-        return FieldDiffDto.builder()
-                .fieldPath(path)
-                .oldValue(o)
-                .newValue(n)
-                .diffType(t)
+        return TemplateSideBySideDiffDto.builder()
+                .requestId(requestId)
+                .requestType(requestType)
+                .changeType(changeType)
+                .oldTemplate(oldNode)
+                .newTemplate(newNode)
+                .sections(sections)
                 .build();
     }
 
-    private DiffType diffType(Object o, Object n) {
-        if (o == null && n != null) return DiffType.ADDED;
-        if (o != null && n == null) return DiffType.REMOVED;
-        return DiffType.MODIFIED;
+    private SectionDiffDto compareSection(
+            String sectionName,
+            JsonNode oldNode,
+            JsonNode newNode
+    ) {
+
+        List<FieldDiffDto> diffs = new ArrayList<>();
+        compareJson("", oldNode, newNode, diffs);
+
+        return SectionDiffDto.builder()
+                .section(sectionName)
+                .diffs(diffs)
+                .build();
     }
 
-    private Map<String, Map<String, Object>> index(List<Map<String, Object>> list, String key) {
-        Map<String, Map<String, Object>> map = new HashMap<>();
-        if (list == null) return map;
-        for (Map<String, Object> m : list) {
-            map.put(String.valueOf(m.get(key)), m);
+    private void compareJson(
+            String path,
+            JsonNode oldNode,
+            JsonNode newNode,
+            List<FieldDiffDto> diffs
+    ) {
+
+        if (oldNode == null || oldNode.isMissingNode()) {
+            diffs.add(FieldDiffDto.builder()
+                    .fieldPath(path)
+                    .diffType(DiffType.ADDED)
+                    .oldValue(null)
+                    .newValue(newNode)
+                    .build());
+            return;
         }
-        return map;
-    }
 
-    private Set<String> union(Map<String, ?> a, Map<String, ?> b) {
-        Set<String> s = new HashSet<>();
-        if (a != null) s.addAll(a.keySet());
-        if (b != null) s.addAll(b.keySet());
-        return s;
+        if (newNode == null || newNode.isMissingNode()) {
+            diffs.add(FieldDiffDto.builder()
+                    .fieldPath(path)
+                    .diffType(DiffType.REMOVED)
+                    .oldValue(oldNode)
+                    .newValue(null)
+                    .build());
+            return;
+        }
+
+        if (oldNode.equals(newNode)) {
+            return;
+        }
+
+        if (oldNode.isValueNode() && newNode.isValueNode()) {
+            diffs.add(FieldDiffDto.builder()
+                    .fieldPath(path)
+                    .diffType(DiffType.MODIFIED)
+                    .oldValue(oldNode.asText())
+                    .newValue(newNode.asText())
+                    .build());
+            return;
+        }
+
+        Set<String> fieldNames = new HashSet<>();
+        oldNode.fieldNames().forEachRemaining(fieldNames::add);
+        newNode.fieldNames().forEachRemaining(fieldNames::add);
+
+        for (String field : fieldNames) {
+            compareJson(
+                    path.isEmpty() ? field : path + "." + field,
+                    oldNode.get(field),
+                    newNode.get(field),
+                    diffs
+            );
+        }
     }
 }
 
