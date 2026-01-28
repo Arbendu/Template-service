@@ -987,7 +987,7 @@ import useCustomSnackbar from "../../utils/useCustomSnackbar";
  */
 const CompareTemplateDialog = ({ open, onClose, requestRow }) => {
   const { callApi } = useApi();
-  const { showSnackbar } = useCustomSnackbar();
+  const snackbar = useCustomSnackbar();
 
   const [loading, setLoading] = useState(false);
   const [oldTemplate, setOldTemplate] = useState(null);
@@ -1008,16 +1008,20 @@ const CompareTemplateDialog = ({ open, onClose, requestRow }) => {
     setOldTemplate(null);
     setNewTemplate(null);
 
+    console.log("Open", open);
+    
+    console.log("Compare dialog effect fired", requestRow);
+    
     fetchDiff();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, requestRow]);
 
   // --------------------------------------------------
   // API call
   // --------------------------------------------------
   const fetchDiff = useCallback(async () => {
     if (!requestRow?.oldPayload || !requestRow?.newPayload) {
-      showSnackbar("Comparison data not available", "warning");
+      snackbar("Comparison data not available", "warning");
       return;
     }
 
@@ -1027,26 +1031,34 @@ const CompareTemplateDialog = ({ open, onClose, requestRow }) => {
       const payload = {
         requestType: requestRow.requestType,
         changeType: requestRow.changeType,
-        requestId: requestRow.requestId,
+        requestId: requestRow.id,
         oldPayload: requestRow.oldPayload,
         newPayload: requestRow.newPayload
       };
 
-      const res = await callApi({
-        url: "/CR/template/diff",
-        method: "POST",
-        data: payload
-      });
+      const res = await callApi(
+        "/CR/template/diff",
+        payload,
+        "POST",
+      );
+      console.log("Diff response", res);
+      
+      const result = res?.data || [];
+
+      const data = result.map((row) => ({
+        ...row,
+        ...(typeof row.payload === "object" ? row.payload : {}),
+      }));
 
       setOldTemplate(res?.data?.oldTemplate || null);
       setNewTemplate(res?.data?.newTemplate || null);
     } catch (err) {
       console.error("Diff API error", err);
-      showSnackbar("Failed to load template comparison", "error");
+      snackbar("Failed to load template comparison", "error");
     } finally {
       setLoading(false);
     }
-  }, [callApi, requestRow, showSnackbar]);
+  }, [callApi, requestRow, snackbar]);
 
   // --------------------------------------------------
   // Simple deep comparison
