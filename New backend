@@ -164,16 +164,14 @@ public interface TemplateRequestRepository
 // service/TemplateDiffService.java
 
 
-package com.tcs.fincore.CommonRequestService.service;
+package com.tcs.fincore.commonrequestservice.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.tcs.fincore.CommonRequestService.diff.JsonDiffEngine;
-import com.tcs.fincore.CommonRequestService.dto.diff.ModifiedFieldDto;
-import com.tcs.fincore.CommonRequestService.dto.diff.TemplateDiffResponseDto;
-import com.tcs.fincore.CommonRequestService.entity.TemplateRequestEntity;
-import com.tcs.fincore.CommonRequestService.exception.ValidationException;
-import com.tcs.fincore.CommonRequestService.repository.TemplateRequestRepository;
+import com.tcs.fincore.commonrequestservice.diff.JsonDiffEngine;
+import com.tcs.fincore.commonrequestservice.dto.TemplateDiffResponseDto;
+import com.tcs.fincore.commonrequestservice.dto.ModifiedFieldDto;
+import com.tcs.fincore.commonrequestservice.exception.ValidationException;
+
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -183,40 +181,32 @@ import java.util.List;
 @RequiredArgsConstructor
 public class TemplateDiffService {
 
-    private final TemplateRequestRepository repository;
-    private final ObjectMapper objectMapper;
+    private final TemplateRequestFetchService templateRequestFetchService; 
+    private final JsonDiffEngine jsonDiffEngine;
 
     public TemplateDiffResponseDto diffByRequestId(Long requestId) {
 
-        TemplateRequestEntity entity = repository.findById(requestId)
-                .orElseThrow(() ->
-                        new ValidationException("Request not found: " + requestId));
+        // 🔹 Fetch request using EXISTING logic (NO repository)
+        var requestDto = templateRequestFetchService.getRequestById(requestId);
 
-        if (!"UPDATE".equals(entity.getChangeType())) {
-            throw new ValidationException(
-                    "Diff allowed only for UPDATE requests");
+        if (!"UPDATE".equals(requestDto.getChangeType())) {
+            throw new ValidationException("Diff allowed only for UPDATE requests");
         }
 
-        try {
-            JsonNode oldPayload =
-                    objectMapper.readTree(entity.getOldPayload());
+        JsonNode oldPayload = requestDto.getOldPayload();
+        JsonNode newPayload = requestDto.getNewPayload();
 
-            JsonNode newPayload =
-                    objectMapper.readTree(entity.getPayload());
-
-            List<ModifiedFieldDto> diffs =
-                    JsonDiffEngine.diff(oldPayload, newPayload);
-
-            return TemplateDiffResponseDto.builder()
-                    .requestId(requestId)
-                    .changeType(entity.getChangeType())
-                    .modifiedFields(diffs)
-                    .build();
-
-        } catch (Exception e) {
-            throw new ValidationException(
-                    "Failed to diff template for requestId " + requestId);
+        if (oldPayload == null || newPayload == null) {
+            throw new ValidationException("Payload missing for diff comparison");
         }
+
+        List<ModifiedFieldDto> modifiedFields =
+                jsonDiffEngine.findDifferences(oldPayload, newPayload);
+
+        return TemplateDiffResponseDto.builder()
+                .requestId(requestId)
+                .modifiedFields(modifiedFields)
+                .build();
     }
 }
 
