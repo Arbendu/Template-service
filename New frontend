@@ -112,7 +112,71 @@ export default function CompareTemplateDialog({ open, requestId, onClose }) {
 
 
 
+export default function TemplatePdfPreview({ title, template }) {
+  if (!template) return null;
 
+  const reportMeta = template?.reportMeta || {};
+  const columns = template?.reportData?.columns || [];
+
+  return (
+    <Paper
+      elevation={3}
+      sx={{
+        p: 2,
+        height: "100%",
+        backgroundColor: "#fafafa",
+        border: "1px solid #ccc",
+        overflow: "auto"
+      }}
+    >
+      {/* Header */}
+      <Box sx={{ mb: 2 }}>
+        <Typography fontWeight={700}>{title}</Typography>
+
+        <Typography variant="body2">
+          Report Name: <b>{reportMeta.reportName}</b>
+        </Typography>
+
+        <Typography variant="body2">
+          Report ID: {reportMeta.reportId}
+        </Typography>
+      </Box>
+
+      {/* Column Definition Table */}
+      <Table size="small">
+        <TableHead>
+          <TableRow>
+            <TableCell sx={{ fontWeight: 600 }}>Column ID</TableCell>
+            <TableCell sx={{ fontWeight: 600 }}>Column Name</TableCell>
+            <TableCell sx={{ fontWeight: 600 }}>Type</TableCell>
+            <TableCell sx={{ fontWeight: 600 }}>Format</TableCell>
+          </TableRow>
+        </TableHead>
+
+        <TableBody>
+          {columns.map((col) => (
+            <TableRow key={col.id}>
+              <TableCell>{col.id}</TableCell>
+              <TableCell>{col.name}</TableCell>
+              <TableCell>{col.format?.type || "-"}</TableCell>
+              <TableCell>
+                {renderFormat(col.format)}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </Paper>
+  );
+}
+
+function renderFormat(format = {}) {
+  if (!format.type) return "-";
+  if (format.type === "number") {
+    return `Decimals: ${format.decimals}, Thousand Sep: ${format.thousandSeparator}`;
+  }
+  return JSON.stringify(format);
+}
 
 
 
