@@ -964,4 +964,189 @@ function renderCell(cell) {
 // ======================================================================
 
 
+import React, { useEffect, useState, useCallback } from "react";
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  Box,
+  Typography,
+  Grid,
+  CircularProgress
+} from "@mui/material";
+import useApi from "../../hooks/useApi";
+import useCustomSnackbar from "../../utils/useCustomSnackbar";
 
+/**
+ * Props:
+ * - open
+ * - onClose
+ * - requestRow  (FULL row object from TemplateRequestScreen)
+ */
+const CompareTemplateDialog = ({ open, onClose, requestRow }) => {
+  const { callApi } = useApi();
+  const { showSnackbar } = useCustomSnackbar();
+
+  const [loading, setLoading] = useState(false);
+  const [oldTemplate, setOldTemplate] = useState(null);
+  const [newTemplate, setNewTemplate] = useState(null);
+
+  // --------------------------------------------------
+  // Call diff API ONLY when dialog opens for UPDATE
+  // --------------------------------------------------
+  useEffect(() => {
+    if (!open) return;
+    if (!requestRow) return;
+
+    if (requestRow.changeType !== "UPDATE") {
+      return;
+    }
+
+    // reset previous state when opening dialog
+    setOldTemplate(null);
+    setNewTemplate(null);
+
+    fetchDiff();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // --------------------------------------------------
+  // API call
+  // --------------------------------------------------
+  const fetchDiff = useCallback(async () => {
+    if (!requestRow?.oldPayload || !requestRow?.newPayload) {
+      showSnackbar("Comparison data not available", "warning");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const payload = {
+        requestType: requestRow.requestType,
+        changeType: requestRow.changeType,
+        requestId: requestRow.requestId,
+        oldPayload: requestRow.oldPayload,
+        newPayload: requestRow.newPayload
+      };
+
+      const res = await callApi({
+        url: "/CR/template/diff",
+        method: "POST",
+        data: payload
+      });
+
+      setOldTemplate(res?.data?.oldTemplate || null);
+      setNewTemplate(res?.data?.newTemplate || null);
+    } catch (err) {
+      console.error("Diff API error", err);
+      showSnackbar("Failed to load template comparison", "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [callApi, requestRow, showSnackbar]);
+
+  // --------------------------------------------------
+  // Simple deep comparison
+  // --------------------------------------------------
+  const isDifferent = (a, b) =>
+    JSON.stringify(a) !== JSON.stringify(b);
+
+  // --------------------------------------------------
+  // PDF-like block renderer
+  // --------------------------------------------------
+  const renderBlock = (title, oldVal, newVal) => {
+    const changed = isDifferent(oldVal, newVal);
+
+    return (
+      <Box
+        sx={{
+          mb: 3,
+          p: 2,
+          borderRadius: 1,
+          border: "1px solid #ddd",
+          backgroundColor: changed ? "#fff7e6" : "#fafafa"
+        }}
+      >
+        <Typography
+          variant="subtitle1"
+          sx={{ fontWeight: 600, mb: 1 }}
+        >
+          {title}
+        </Typography>
+
+        <Grid container spacing={2}>
+          <Grid item xs={6}>
+            <Typography variant="caption">Previous</Typography>
+            <pre>{JSON.stringify(oldVal, null, 2)}</pre>
+          </Grid>
+          <Grid item xs={6}>
+            <Typography variant="caption">Current</Typography>
+            <pre>{JSON.stringify(newVal, null, 2)}</pre>
+          </Grid>
+        </Grid>
+      </Box>
+    );
+  };
+
+  // --------------------------------------------------
+  // UI
+  // --------------------------------------------------
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
+      <DialogTitle>
+        Template Comparison (Previous vs Current)
+      </DialogTitle>
+
+      <DialogContent dividers>
+        {loading && (
+          <Box sx={{ textAlign: "center", mt: 4 }}>
+            <CircularProgress />
+          </Box>
+        )}
+
+        {!loading && oldTemplate && newTemplate && (
+          <>
+            {renderBlock(
+              "Template Meta",
+              oldTemplate.template?.templateMeta,
+              newTemplate.template?.templateMeta
+            )}
+
+            {renderBlock(
+              "Report Meta",
+              oldTemplate.template?.reportMeta,
+              newTemplate.template?.reportMeta
+            )}
+
+            {renderBlock(
+              "Columns",
+              oldTemplate.template?.reportData?.columns,
+              newTemplate.template?.reportData?.columns
+            )}
+
+            {renderBlock(
+              "Rows",
+              oldTemplate.template?.reportData?.rows,
+              newTemplate.template?.reportData?.rows
+            )}
+
+            {renderBlock(
+              "Variants",
+              oldTemplate.variants,
+              newTemplate.variants
+            )}
+          </>
+        )}
+
+        {!loading && (!oldTemplate || !newTemplate) && (
+          <Typography color="text.secondary">
+            No comparison data available
+          </Typography>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+export default CompareTemplateDialog;
