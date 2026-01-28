@@ -1,0 +1,254 @@
+// ----------‐---------------------
+// dto/diff/ModifiedFieldDto.java
+// --------------------------------
+
+package com.tcs.fincore.CommonRequestService.dto.diff;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import lombok.*;
+
+@Getter
+@Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ModifiedFieldDto {
+
+    private String fieldPath;   // JSON path of modified field
+    private JsonNode oldValue;  // value before modification
+    private JsonNode newValue;  // value after modification
+}
+
+
+
+
+// -----------------------------------
+// dto/diff/TemplateDiffResponseDto.java
+// ------------------------------------
+
+package com.tcs.fincore.CommonRequestService.dto.diff;
+
+import lombok.*;
+
+import java.util.List;
+
+@Getter
+@Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class TemplateDiffResponseDto {
+
+    private Long requestId;
+    private String changeType; // UPDATE
+    private List<ModifiedFieldDto> modifiedFields;
+}
+
+
+
+
+// -------------------------------------
+// diff/JsonDiffEngine.java
+// --------------------------------------
+
+package com.tcs.fincore.CommonRequestService.diff;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.tcs.fincore.CommonRequestService.dto.diff.ModifiedFieldDto;
+
+import java.util.*;
+
+public final class JsonDiffEngine {
+
+    private JsonDiffEngine() {}
+
+    public static List<ModifiedFieldDto> diff(
+            JsonNode oldNode,
+            JsonNode newNode
+    ) {
+        List<ModifiedFieldDto> diffs = new ArrayList<>();
+        compare("", oldNode, newNode, diffs);
+        return diffs;
+    }
+
+    private static void compare(
+            String path,
+            JsonNode oldNode,
+            JsonNode newNode,
+            List<ModifiedFieldDto> diffs
+    ) {
+
+        if (oldNode == null && newNode == null) return;
+
+        if (oldNode == null || newNode == null) {
+            diffs.add(buildDiff(path, oldNode, newNode));
+            return;
+        }
+
+        if (!oldNode.getNodeType().equals(newNode.getNodeType())) {
+            diffs.add(buildDiff(path, oldNode, newNode));
+            return;
+        }
+
+        switch (oldNode.getNodeType()) {
+
+            case OBJECT -> {
+                Set<String> fields = new HashSet<>();
+                oldNode.fieldNames().forEachRemaining(fields::add);
+                newNode.fieldNames().forEachRemaining(fields::add);
+
+                for (String field : fields) {
+                    compare(
+                            path + "." + field,
+                            oldNode.get(field),
+                            newNode.get(field),
+                            diffs
+                    );
+                }
+            }
+
+            case ARRAY -> {
+                int max = Math.max(oldNode.size(), newNode.size());
+                for (int i = 0; i < max; i++) {
+                    compare(
+                            path + "[" + i + "]",
+                            oldNode.path(i),
+                            newNode.path(i),
+                            diffs
+                    );
+                }
+            }
+
+            default -> {
+                if (!oldNode.equals(newNode)) {
+                    diffs.add(buildDiff(path, oldNode, newNode));
+                }
+            }
+        }
+    }
+
+    private static ModifiedFieldDto buildDiff(
+            String path,
+            JsonNode oldVal,
+            JsonNode newVal
+    ) {
+        return ModifiedFieldDto.builder()
+                .fieldPath(path.startsWith(".") ? path.substring(1) : path)
+                .oldValue(oldVal)
+                .newValue(newVal)
+                .build();
+    }
+}
+
+
+
+
+// ---‐----------------------------------
+// repository/TemplateRequestRepository.java
+// ------------------------------------------
+
+package com.tcs.fincore.CommonRequestService.repository;
+
+import com.tcs.fincore.CommonRequestService.entity.TemplateRequestEntity;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+public interface TemplateRequestRepository
+        extends JpaRepository<TemplateRequestEntity, Long> {
+}
+
+
+
+
+
+// -----------------------‐-----------
+// service/TemplateDiffService.java
+
+
+package com.tcs.fincore.CommonRequestService.service;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tcs.fincore.CommonRequestService.diff.JsonDiffEngine;
+import com.tcs.fincore.CommonRequestService.dto.diff.ModifiedFieldDto;
+import com.tcs.fincore.CommonRequestService.dto.diff.TemplateDiffResponseDto;
+import com.tcs.fincore.CommonRequestService.entity.TemplateRequestEntity;
+import com.tcs.fincore.CommonRequestService.exception.ValidationException;
+import com.tcs.fincore.CommonRequestService.repository.TemplateRequestRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+
+@Service
+@RequiredArgsConstructor
+public class TemplateDiffService {
+
+    private final TemplateRequestRepository repository;
+    private final ObjectMapper objectMapper;
+
+    public TemplateDiffResponseDto diffByRequestId(Long requestId) {
+
+        TemplateRequestEntity entity = repository.findById(requestId)
+                .orElseThrow(() ->
+                        new ValidationException("Request not found: " + requestId));
+
+        if (!"UPDATE".equals(entity.getChangeType())) {
+            throw new ValidationException(
+                    "Diff allowed only for UPDATE requests");
+        }
+
+        try {
+            JsonNode oldPayload =
+                    objectMapper.readTree(entity.getOldPayload());
+
+            JsonNode newPayload =
+                    objectMapper.readTree(entity.getPayload());
+
+            List<ModifiedFieldDto> diffs =
+                    JsonDiffEngine.diff(oldPayload, newPayload);
+
+            return TemplateDiffResponseDto.builder()
+                    .requestId(requestId)
+                    .changeType(entity.getChangeType())
+                    .modifiedFields(diffs)
+                    .build();
+
+        } catch (Exception e) {
+            throw new ValidationException(
+                    "Failed to diff template for requestId " + requestId);
+        }
+    }
+}
+
+
+
+
+
+// -----------------------------------------
+ // controller/TemplateDiffController.java
+
+
+package com.tcs.fincore.CommonRequestService.controller;
+
+import com.tcs.fincore.CommonRequestService.common.ApiResponse;
+import com.tcs.fincore.CommonRequestService.dto.diff.TemplateDiffResponseDto;
+import com.tcs.fincore.CommonRequestService.service.TemplateDiffService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/template")
+@RequiredArgsConstructor
+public class TemplateDiffController {
+
+    private final TemplateDiffService templateDiffService;
+
+    @PostMapping("/diff/{requestId}")
+    public ApiResponse<TemplateDiffResponseDto> diffTemplate(
+            @PathVariable Long requestId
+    ) {
+        return ApiResponse.success(
+                templateDiffService.diffByRequestId(requestId)
+        );
+    }
+}
