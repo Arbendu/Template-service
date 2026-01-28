@@ -964,7 +964,7 @@ function renderCell(cell) {
 // ======================================================================
 
 
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
 import {
   Dialog,
   DialogTitle,
@@ -975,8 +975,8 @@ import {
   Grid,
   CircularProgress
 } from "@mui/material";
-import { callApi } from "@/utils/callApi";
-import { useCustomSnackbar } from "@/hooks/useCustomSnackbar";
+import useApi from "../../hooks/useApi";
+import useCustomSnackbar from "../../utils/useCustomSnackbar";
 
 /**
  * Props expected (based on your TemplateRequestScreen):
@@ -985,8 +985,11 @@ import { useCustomSnackbar } from "@/hooks/useCustomSnackbar";
  * - requestRow   (row object from table)
  */
 const CompareTemplateDialog = ({ open, onClose, requestRow }) => {
-  const { showSnackbar } = useCustomSnackbar();
 
+  console.log("Compare dialog row", requestRow);
+  
+  const { callApi } = useApi();
+  const { showSnackbar } = useCustomSnackbar();
   const [loading, setLoading] = useState(false);
   const [oldTemplate, setOldTemplate] = useState(null);
   const [newTemplate, setNewTemplate] = useState(null);
@@ -997,38 +1000,40 @@ const CompareTemplateDialog = ({ open, onClose, requestRow }) => {
   useEffect(() => {
     if (!open || !requestRow) return;
 
-    if (requestRow.changeType !== "MODIFY") {
+    if (requestRow.changeType !== "UPDATE") {
       return;
     }
+    console.log("Calling diff api with: ", requestRow);
+    
 
     fetchDiff();
-  }, [open, requestRow]);
+  }, [open, requestRow?.requestId]);
 
-  const fetchDiff = async () => {
+  const fetchDiff = useCallback(async () => {
     setLoading(true);
     try {
-      const payload = {
+      const data = {
         requestType: requestRow.requestType,
-        changeType: "UPDATE",
+        changeType: requestRow.changeType,
         requestId: requestRow.requestId,
         oldPayload: requestRow.oldPayload,
         newPayload: requestRow.newPayload
       };
 
       const res = await callApi({
-        url: "/template/diff",
+        url: "/CR/template/diff",
         method: "POST",
-        data: payload
+        data: data
       });
 
-      setOldTemplate(res.data.oldTemplate);
-      setNewTemplate(res.data.newTemplate);
+      setOldTemplate(res?.data?.oldTemplate);
+      setNewTemplate(res?.data?.newTemplate);
     } catch (e) {
       showSnackbar("Failed to load template comparison", "error");
     } finally {
       setLoading(false);
     }
-  };
+  }, [callApi, showSnackbar]);
 
   // -----------------------------
   // Simple diff checker
