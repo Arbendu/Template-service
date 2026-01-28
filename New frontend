@@ -3,7 +3,94 @@
 // ============================================================================================
 
 
+import React, { useEffect, useState } from "react";
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  Grid,
+  Box,
+  Typography,
+  CircularProgress,
+  Divider
+} from "@mui/material";
+import useApi from "../../hooks/useApi";
+import TemplatePdfPreview from "./TemplatePdfPreview";
 
+export default function CompareTemplateDialog({ open, requestId, onClose }) {
+  const { callApi } = useApi();
+  const [loading, setLoading] = useState(false);
+  const [diffData, setDiffData] = useState(null);
+
+  useEffect(() => {
+    if (!open || !requestId) return;
+
+    setLoading(true);
+    callApi(
+      "/api/template-diff",
+      {
+        requestId,
+        requestType: "RB_REPORT_TEMPLATE"
+      },
+      "POST"
+    )
+      .then((res) => {
+        setDiffData(res);
+      })
+      .catch((err) => console.error(err))
+      .finally(() => setLoading(false));
+  }, [open, requestId]);
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
+      <DialogTitle>
+        Template Comparison
+        <Typography variant="caption" display="block">
+          Old vs New (PDF Preview)
+        </Typography>
+      </DialogTitle>
+
+      <Divider />
+
+      <DialogContent sx={{ minHeight: 600 }}>
+        {loading && (
+          <Box sx={{ textAlign: "center", mt: 6 }}>
+            <CircularProgress />
+            <Typography mt={2}>Loading templates...</Typography>
+          </Box>
+        )}
+
+        {!loading && diffData && (
+          <Grid container spacing={2}>
+            {/* OLD TEMPLATE */}
+            <Grid item xs={12} md={6}>
+              <TemplatePdfPreview
+                title="OLD TEMPLATE"
+                template={diffData.oldTemplate}
+              />
+            </Grid>
+
+            {/* NEW TEMPLATE */}
+            <Grid item xs={12} md={6}>
+              <TemplatePdfPreview
+                title="NEW TEMPLATE"
+                template={diffData.newTemplate}
+              />
+            </Grid>
+          </Grid>
+        )}
+      </DialogContent>
+
+      <Divider />
+
+      <DialogActions>
+        <Button onClick={onClose}>Close</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
 
 
 
@@ -22,3 +109,90 @@
 // ==============================================================================================
 // TemplatePdfPreview.jsx
 // ===============================================================================================
+
+
+
+
+
+
+
+import React from "react";
+import {
+  Paper,
+  Typography,
+  Box,
+  Table,
+  TableHead,
+  TableRow,
+  TableCell,
+  TableBody
+} from "@mui/material";
+
+export default function TemplatePdfPreview({ title, template }) {
+  if (!template) return null;
+
+  const reportMeta = template?.reportMeta || {};
+  const columns = template?.reportData?.columns || [];
+  const rows = template?.reportData?.rows || [];
+
+  return (
+    <Paper
+      elevation={3}
+      sx={{
+        p: 2,
+        height: "100%",
+        backgroundColor: "#fafafa",
+        border: "1px solid #ccc",
+        overflow: "auto"
+      }}
+    >
+      {/* Header */}
+      <Box sx={{ mb: 2 }}>
+        <Typography fontWeight={700}>{title}</Typography>
+        <Typography variant="body2">
+          Report Name: <b>{reportMeta.reportName}</b>
+        </Typography>
+        <Typography variant="body2">
+          Report ID: {reportMeta.reportId}
+        </Typography>
+      </Box>
+
+      {/* Table */}
+      <Table size="small">
+        <TableHead>
+          <TableRow>
+            {columns.map((col) => (
+              <TableCell
+                key={col.id}
+                sx={{ fontWeight: 600, backgroundColor: "#f0f0f0" }}
+              >
+                {col.name}
+              </TableCell>
+            ))}
+          </TableRow>
+        </TableHead>
+
+        <TableBody>
+          {rows.map((row) => (
+            <TableRow key={row.id}>
+              {row.cells.map((cell, idx) => (
+                <TableCell key={idx}>
+                  {renderCell(cell)}
+                </TableCell>
+              ))}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </Paper>
+  );
+}
+
+function renderCell(cell) {
+  if (!cell) return "-";
+  if (cell.type === "TEXT") return cell.value;
+  if (cell.type === "FORMULA") return cell.expression;
+  if (cell.type === "DB_COUNT")
+    return `${cell.source?.table}.${cell.source?.column}`;
+  return JSON.stringify(cell);
+}
