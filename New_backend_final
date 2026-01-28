@@ -1,0 +1,297 @@
+// =====================================================================================
+// dto/ValueDiff.java
+// ==========≈==========================================================================
+
+package com.tcs.fincore.CommonRequestService.dto;
+
+import lombok.*;
+
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class ValueDiff {
+    private Object oldValue;
+    private Object newValue;
+}
+
+
+
+
+
+// =====================================================================================
+// dto/TemplateDiffResponseDto.java
+// ==========≈==========================================================================
+
+
+package com.tcs.fincore.CommonRequestService.dto;
+
+import lombok.*;
+
+import java.util.Map;
+
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class TemplateDiffResponseDto {
+
+    private ReportTemplateDto oldTemplate;
+    private ReportTemplateDto newTemplate;
+
+    /**
+     * cellId -> (fieldName -> old/new value)
+     */
+    private Map<String, Map<String, ValueDiff>> cellDiffs;
+}
+
+
+
+
+
+// =====================================================================================
+// controller 
+// ==========≈==========================================================================
+
+
+
+package com.tcs.fincore.CommonRequestService.controller;
+
+import com.tcs.fincore.CommonRequestService.dto.ReportTemplateDto;
+import com.tcs.fincore.CommonRequestService.dto.TemplateDiffResponseDto;
+import com.tcs.fincore.CommonRequestService.service.TemplateDiffService;
+import lombok.Data;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/CR/template-diff")
+@RequiredArgsConstructor
+public class TemplateDiffController {
+
+    private final TemplateDiffService templateDiffService;
+
+    @PostMapping
+    public TemplateDiffResponseDto compareTemplates(
+            @RequestBody DiffRequest request
+    ) {
+        return templateDiffService.compare(
+                request.getOldTemplate(),
+                request.getNewTemplate()
+        );
+    }
+
+    @Data
+    public static class DiffRequest {
+        private ReportTemplateDto oldTemplate;
+        private ReportTemplateDto newTemplate;
+    }
+}
+
+
+
+
+
+
+// =====================================================================================
+// service/TemplateDiffService.java
+// ==========≈==========================================================================
+
+
+
+package com.tcs.fincore.CommonRequestService.service;
+
+import com.tcs.fincore.CommonRequestService.dto.ReportTemplateDto;
+import com.tcs.fincore.CommonRequestService.dto.TemplateDiffResponseDto;
+
+public interface TemplateDiffService {
+
+    TemplateDiffResponseDto compare(
+            ReportTemplateDto oldTemplate,
+            ReportTemplateDto newTemplate
+    );
+}
+
+
+
+
+
+
+
+// =====================================================================================
+// service/TemplateDiffServiceImpl.java
+// ==========≈==========================================================================
+
+
+
+package com.tcs.fincore.CommonRequestService.service;
+
+import com.tcs.fincore.CommonRequestService.dto.ReportTemplateDto;
+import com.tcs.fincore.CommonRequestService.dto.TemplateDiffResponseDto;
+import com.tcs.fincore.CommonRequestService.dto.ValueDiff;
+import com.tcs.fincore.CommonRequestService.util.JsonCompareUtil;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+import java.util.Map;
+
+@Service
+@RequiredArgsConstructor
+public class TemplateDiffServiceImpl implements TemplateDiffService {
+
+    private final JsonCompareUtil jsonCompareUtil;
+
+    @Override
+    public TemplateDiffResponseDto compare(
+            ReportTemplateDto oldTemplate,
+            ReportTemplateDto newTemplate
+    ) {
+
+        Map<String, Map<String, ValueDiff>> diffs =
+                jsonCompareUtil.compareTemplates(oldTemplate, newTemplate);
+
+        return TemplateDiffResponseDto.builder()
+                .oldTemplate(oldTemplate)
+                .newTemplate(newTemplate)
+                .cellDiffs(diffs)
+                .build();
+    }
+}
+
+
+
+
+
+
+
+// =====================================================================================
+// util/JsonCompareUtil.java
+// ==========≈==========================================================================
+
+
+
+
+package com.tcs.fincore.CommonRequestService.util;
+
+import com.tcs.fincore.CommonRequestService.dto.ReportTemplateDto;
+import com.tcs.fincore.CommonRequestService.dto.ValueDiff;
+import org.springframework.stereotype.Component;
+
+import java.util.*;
+
+@Component
+public class JsonCompareUtil {
+
+    public Map<String, Map<String, ValueDiff>> compareTemplates(
+            ReportTemplateDto oldTemplate,
+            ReportTemplateDto newTemplate
+    ) {
+
+        Map<String, Map<String, ValueDiff>> diffs = new HashMap<>();
+
+        Map<String, ReportTemplateDto.Cell> oldCells = flattenCells(oldTemplate);
+        Map<String, ReportTemplateDto.Cell> newCells = flattenCells(newTemplate);
+
+        // Compare new vs old (ADD / UPDATE)
+        for (String cellId : newCells.keySet()) {
+
+            ReportTemplateDto.Cell newCell = newCells.get(cellId);
+            ReportTemplateDto.Cell oldCell = oldCells.get(cellId);
+
+            if (oldCell == null) {
+                diffs.put(cellId, Map.of(
+                        "CELL_ADDED",
+                        ValueDiff.builder()
+                                .oldValue(null)
+                                .newValue(newCell)
+                                .build()
+                ));
+                continue;
+            }
+
+            Map<String, ValueDiff> fieldDiffs =
+                    compareCell(oldCell, newCell);
+
+            if (!fieldDiffs.isEmpty()) {
+                diffs.put(cellId, fieldDiffs);
+            }
+        }
+
+        // Detect deleted cells
+        for (String cellId : oldCells.keySet()) {
+            if (!newCells.containsKey(cellId)) {
+                diffs.put(cellId, Map.of(
+                        "CELL_DELETED",
+                        ValueDiff.builder()
+                                .oldValue(oldCells.get(cellId))
+                                .newValue(null)
+                                .build()
+                ));
+            }
+        }
+
+        return diffs;
+    }
+
+    private Map<String, ReportTemplateDto.Cell> flattenCells(
+            ReportTemplateDto template
+    ) {
+
+        Map<String, ReportTemplateDto.Cell> map = new HashMap<>();
+
+        if (template == null ||
+            template.getTemplate() == null ||
+            template.getTemplate().getReportData() == null ||
+            template.getTemplate().getReportData().getRows() == null) {
+            return map;
+        }
+
+        template.getTemplate()
+                .getReportData()
+                .getRows()
+                .forEach(row -> {
+                    if (row.getCells() != null) {
+                        row.getCells().forEach(cell ->
+                                map.put(cell.getId(), cell)
+                        );
+                    }
+                });
+
+        return map;
+    }
+
+    private Map<String, ValueDiff> compareCell(
+            ReportTemplateDto.Cell oldCell,
+            ReportTemplateDto.Cell newCell
+    ) {
+
+        Map<String, ValueDiff> diffs = new HashMap<>();
+
+        compare("type", oldCell.getType(), newCell.getType(), diffs);
+        compare("value", oldCell.getValue(), newCell.getValue(), diffs);
+        compare("expression", oldCell.getExpression(), newCell.getExpression(), diffs);
+        compare("variables", oldCell.getVariables(), newCell.getVariables(), diffs);
+        compare("source", oldCell.getSource(), newCell.getSource(), diffs);
+        compare("render", oldCell.getRender(), newCell.getRender(), diffs);
+
+        return diffs;
+    }
+
+    private void compare(
+            String field,
+            Object oldVal,
+            Object newVal,
+            Map<String, ValueDiff> diffs
+    ) {
+        if (!Objects.equals(oldVal, newVal)) {
+            diffs.put(field,
+                    ValueDiff.builder()
+                            .oldValue(oldVal)
+                            .newValue(newVal)
+                            .build()
+            );
+        }
+    }
+}
