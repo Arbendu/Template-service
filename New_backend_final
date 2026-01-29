@@ -139,6 +139,7 @@ import com.tcs.fincore.CommonRequestService.util.JsonCompareUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.Map;
 
 @Service
@@ -153,53 +154,83 @@ public class TemplateDiffServiceImpl implements TemplateDiffService {
     @Override
     public TemplateDiffResponseDto compareByRequestId(Long requestId) {
 
-        // 1️⃣ Fetch request (NEW TEMPLATE)
+        // 1️⃣ Fetch NEW template from request payload
         CommonReq req = commonRequestRepository.findById(requestId)
                 .orElseThrow(() ->
                         new IllegalArgumentException("Request not found: " + requestId));
 
-        ReportTemplateDto newTemplate;
-        try {
-            newTemplate = objectMapper.readValue(
-                    req.getPayload(),
-                    ReportTemplateDto.class
-            );
-        } catch (Exception ex) {
-            throw new IllegalStateException("Invalid request payload JSON", ex);
-        }
+        ReportTemplateDto newTemplate =
+                parseTemplate(req.getPayload(), "request payload");
 
-        // 2️⃣ Extract reportId
-        String reportId = newTemplate
-                .getTemplate()
+        // 2️⃣ Extract reportId safely
+        String reportId = newTemplate.getTemplate()
                 .getReportMeta()
                 .getReportId();
 
-        // 3️⃣ Fetch ACTIVE OLD TEMPLATE from DB
-        String oldTemplateEntity =
-                String.valueOf(reportTemplateRepository
-                        .findFirstByReportIdAndStatus(reportId, "ACTIVE")
-                        .orElseThrow(() ->
-                                new IllegalStateException("Active template not found for reportId: " + reportId)));
+        // 3️⃣ Fetch OLD ACTIVE template JSON from DB
+        String oldTemplateJson = reportTemplateRepository
+                .findFirstByReportIdAndStatus(reportId, "ACTIVE")
+                .map(rt -> rt.getTemplateJson()) // IMPORTANT: JSON string
+                .orElseThrow(() ->
+                        new IllegalStateException(
+                                "Active template not found for reportId: " + reportId));
 
-        ReportTemplateDto oldTemplate;
-        try {
-            oldTemplate = objectMapper.readValue(
-                    oldTemplateEntity,
-                    ReportTemplateDto.class
-            );
-        } catch (Exception ex) {
-            throw new IllegalStateException("Invalid stored template JSON", ex);
-        }
+        ReportTemplateDto oldTemplate =
+                parseTemplate(oldTemplateJson, "stored template");
 
-        // 4️⃣ Run existing diff logic (UNCHANGED)
+        // 4️⃣ Run diff logic
         Map<String, Map<String, ValueDiff>> diffs =
                 jsonCompareUtil.compareTemplates(oldTemplate, newTemplate);
 
+        // 5️⃣ Response
         return TemplateDiffResponseDto.builder()
                 .oldTemplate(oldTemplate)
                 .newTemplate(newTemplate)
                 .cellDiffs(diffs)
                 .build();
+    }
+
+    /**
+     * Handles BOTH payload shapes:
+     * 1) Wrapped { "template": { ... } }
+     * 2) Flat { "templateMeta", "reportMeta", "reportData" }
+     */
+    private ReportTemplateDto parseTemplate(String json, String source) {
+        try {
+            // Try normal DTO parse
+            ReportTemplateDto dto =
+                    objectMapper.readValue(json, ReportTemplateDto.class);
+
+            if (dto.getTemplate() != null) {
+                return dto;
+            }
+
+            // Fallback: wrap flat JSON into Template
+            Map<String, Object> raw =
+                    objectMapper.readValue(json, Map.class);
+
+            ReportTemplateDto.Template template =
+                    ReportTemplateDto.Template.builder()
+                            .templateMeta(objectMapper.convertValue(
+                                    raw.get("templateMeta"),
+                                    ReportTemplateDto.TemplateMeta.class))
+                            .reportMeta(objectMapper.convertValue(
+                                    raw.get("reportMeta"),
+                                    ReportTemplateDto.ReportMeta.class))
+                            .reportData(objectMapper.convertValue(
+                                    raw.get("reportData"),
+                                    ReportTemplateDto.ReportData.class))
+                            .build();
+
+            return ReportTemplateDto.builder()
+                    .template(template)
+                    .variants(List.of())
+                    .build();
+
+        } catch (Exception e) {
+            throw new IllegalStateException(
+                    "Invalid " + source + " JSON", e);
+        }
     }
 }
 
