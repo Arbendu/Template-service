@@ -231,109 +231,93 @@ public class JsonCompareUtil {
             ReportTemplateDto newTemplate
     ) {
 
-        Map<String, Map<String, ValueDiff>> diffs = new HashMap<>();
+        Map<String, Map<String, ValueDiff>> diffs = new LinkedHashMap<>();
 
-        Map<String, ReportTemplateDto.Cell> oldCells = flattenCells(oldTemplate);
-        Map<String, ReportTemplateDto.Cell> newCells = flattenCells(newTemplate);
+        List<ReportTemplateDto.Row> oldRows =
+                oldTemplate.getTemplate().getReportData().getRows();
+        List<ReportTemplateDto.Row> newRows =
+                newTemplate.getTemplate().getReportData().getRows();
 
-        // Compare new vs old (ADD / UPDATE)
-        for (String cellId : newCells.keySet()) {
+        for (int r = 0; r < Math.max(oldRows.size(), newRows.size()); r++) {
 
-            ReportTemplateDto.Cell newCell = newCells.get(cellId);
-            ReportTemplateDto.Cell oldCell = oldCells.get(cellId);
+            ReportTemplateDto.Row oldRow = r < oldRows.size() ? oldRows.get(r) : null;
+            ReportTemplateDto.Row newRow = r < newRows.size() ? newRows.get(r) : null;
 
-            if (oldCell == null) {
-                diffs.put(cellId, Map.of(
-                        "CELL_ADDED",
-                        ValueDiff.builder()
-                                .oldValue(null)
-                                .newValue(newCell)
-                                .build()
-                ));
-                continue;
-            }
+            if (oldRow == null || newRow == null) continue;
 
-            Map<String, ValueDiff> fieldDiffs =
-                    compareCell(oldCell, newCell);
+            List<ReportTemplateDto.Cell> oldCells = oldRow.getCells();
+            List<ReportTemplateDto.Cell> newCells = newRow.getCells();
 
-            if (!fieldDiffs.isEmpty()) {
-                diffs.put(cellId, fieldDiffs);
-            }
-        }
+            for (int c = 0; c < Math.max(oldCells.size(), newCells.size()); c++) {
 
-        // Detect deleted cells
-        for (String cellId : oldCells.keySet()) {
-            if (!newCells.containsKey(cellId)) {
-                diffs.put(cellId, Map.of(
-                        "CELL_DELETED",
-                        ValueDiff.builder()
-                                .oldValue(oldCells.get(cellId))
-                                .newValue(null)
-                                .build()
-                ));
+                ReportTemplateDto.Cell oldCell = c < oldCells.size() ? oldCells.get(c) : null;
+                ReportTemplateDto.Cell newCell = c < newCells.size() ? newCells.get(c) : null;
+
+                if (oldCell == null || newCell == null) continue;
+
+                // ✅ ALWAYS NON-NULL KEY
+                String cellKey = buildCellKey(oldCell, newCell, r, c);
+
+                Map<String, ValueDiff> fieldDiffs = compareCell(oldCell, newCell);
+
+                if (!fieldDiffs.isEmpty()) {
+                    diffs.put(cellKey, fieldDiffs);
+                }
             }
         }
 
         return diffs;
     }
 
-    private Map<String, ReportTemplateDto.Cell> flattenCells(
-            ReportTemplateDto template
-    ) {
-
-        Map<String, ReportTemplateDto.Cell> map = new HashMap<>();
-
-        if (template == null ||
-            template.getTemplate() == null ||
-            template.getTemplate().getReportData() == null ||
-            template.getTemplate().getReportData().getRows() == null) {
-            return map;
-        }
-
-        template.getTemplate()
-                .getReportData()
-                .getRows()
-                .forEach(row -> {
-                    if (row.getCells() != null) {
-                        row.getCells().forEach(cell ->
-                                map.put(cell.getId(), cell)
-                        );
-                    }
-                });
-
-        return map;
-    }
+    // --------------------------------------------------------
 
     private Map<String, ValueDiff> compareCell(
             ReportTemplateDto.Cell oldCell,
             ReportTemplateDto.Cell newCell
     ) {
+        Map<String, ValueDiff> diffs = new LinkedHashMap<>();
 
-        Map<String, ValueDiff> diffs = new HashMap<>();
-
-        compare("type", oldCell.getType(), newCell.getType(), diffs);
-        compare("value", oldCell.getValue(), newCell.getValue(), diffs);
-        compare("expression", oldCell.getExpression(), newCell.getExpression(), diffs);
-        compare("variables", oldCell.getVariables(), newCell.getVariables(), diffs);
-        compare("source", oldCell.getSource(), newCell.getSource(), diffs);
-        compare("render", oldCell.getRender(), newCell.getRender(), diffs);
+        compareField("type", oldCell.getType(), newCell.getType(), diffs);
+        compareField("value", oldCell.getValue(), newCell.getValue(), diffs);
+        compareField("expression", oldCell.getExpression(), newCell.getExpression(), diffs);
+        compareField("variables", oldCell.getVariables(), newCell.getVariables(), diffs);
+        compareField("source", oldCell.getSource(), newCell.getSource(), diffs);
+        compareField("render", oldCell.getRender(), newCell.getRender(), diffs);
 
         return diffs;
     }
 
-    private void compare(
+    private void compareField(
             String field,
             Object oldVal,
             Object newVal,
             Map<String, ValueDiff> diffs
     ) {
         if (!Objects.equals(oldVal, newVal)) {
-            diffs.put(field,
-                    ValueDiff.builder()
-                            .oldValue(oldVal)
-                            .newValue(newVal)
-                            .build()
-            );
+            diffs.put(field, new ValueDiff(oldVal, newVal));
         }
+    }
+
+    // --------------------------------------------------------
+
+    /**
+     * 🔐 GUARANTEED NON-NULL KEY
+     * Used by frontend to locate the exact cell
+     */
+    private String buildCellKey(
+            ReportTemplateDto.Cell oldCell,
+            ReportTemplateDto.Cell newCell,
+            int rowIndex,
+            int colIndex
+    ) {
+        if (newCell.getId() != null) {
+            return newCell.getId();
+        }
+        if (oldCell.getId() != null) {
+            return oldCell.getId();
+        }
+
+        // deterministic fallback (VERY IMPORTANT)
+        return "R" + rowIndex + "C" + colIndex;
     }
 }
