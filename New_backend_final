@@ -128,9 +128,14 @@ public interface TemplateDiffService {
 
 package com.tcs.fincore.CommonRequestService.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tcs.fincore.CommonRequestService.dto.ReportTemplateDto;
 import com.tcs.fincore.CommonRequestService.dto.TemplateDiffResponseDto;
 import com.tcs.fincore.CommonRequestService.dto.ValueDiff;
+import com.tcs.fincore.CommonRequestService.entity.CommonReq;
+import com.tcs.fincore.CommonRequestService.entity.ReportTemplateEntity;
+import com.tcs.fincore.CommonRequestService.repository.CommonRequestRepository;
+import com.tcs.fincore.CommonRequestService.repository.ReportTemplateRepository;
 import com.tcs.fincore.CommonRequestService.util.JsonCompareUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -141,14 +146,53 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class TemplateDiffServiceImpl implements TemplateDiffService {
 
+    private final CommonRequestRepository commonRequestRepository;
+    private final ReportTemplateRepository reportTemplateRepository;
     private final JsonCompareUtil jsonCompareUtil;
+    private final ObjectMapper objectMapper;
 
     @Override
-    public TemplateDiffResponseDto compare(
-            ReportTemplateDto oldTemplate,
-            ReportTemplateDto newTemplate
-    ) {
+    public TemplateDiffResponseDto compareByRequestId(Long requestId) {
 
+        // 1️⃣ Fetch request (NEW TEMPLATE)
+        CommonReq req = commonRequestRepository.findById(requestId)
+                .orElseThrow(() ->
+                        new IllegalArgumentException("Request not found: " + requestId));
+
+        ReportTemplateDto newTemplate;
+        try {
+            newTemplate = objectMapper.readValue(
+                    req.getPayload(),
+                    ReportTemplateDto.class
+            );
+        } catch (Exception ex) {
+            throw new IllegalStateException("Invalid request payload JSON", ex);
+        }
+
+        // 2️⃣ Extract reportId
+        String reportId = newTemplate
+                .getTemplate()
+                .getReportMeta()
+                .getReportId();
+
+        // 3️⃣ Fetch ACTIVE OLD TEMPLATE from DB
+        ReportTemplateEntity oldTemplateEntity =
+                reportTemplateRepository
+                        .findFirstByReportIdAndStatus(reportId, "ACTIVE")
+                        .orElseThrow(() ->
+                                new IllegalStateException("Active template not found for reportId: " + reportId));
+
+        ReportTemplateDto oldTemplate;
+        try {
+            oldTemplate = objectMapper.readValue(
+                    oldTemplateEntity.getTemplateJson(),
+                    ReportTemplateDto.class
+            );
+        } catch (Exception ex) {
+            throw new IllegalStateException("Invalid stored template JSON", ex);
+        }
+
+        // 4️⃣ Run existing diff logic (UNCHANGED)
         Map<String, Map<String, ValueDiff>> diffs =
                 jsonCompareUtil.compareTemplates(oldTemplate, newTemplate);
 
