@@ -7,9 +7,6 @@
     "success": true,
     "message": "Operation completed successfully.",
     "data": {
-        "requestType": "RB_REPORT_TEMPLATE",
-        "changeType": "UPDATE",
-        "requestId": "2193",
         "oldTemplate": {
             "template": {
                 "templateMeta": {
@@ -17,120 +14,12 @@
                     "version": "1",
                     "description": null,
                     "pageSize": "A4",
-                    "pageOrientation": "PORTRAIT",
-                    "headerLayout": null,
-                    "status": null
-                },
-                "reportMeta": {
-                    "reportName": "Testing_v2",
-                    "reportId": "Test987",
-                    "extras": [
-                        {
-                            "name": "Report Date",
-                            "value": "2025-12-18"
-                        }
-                    ]
-                },
-                "reportData": {
-                    "columns": [
-                        {
-                            "id": "C__1",
-                            "name": "Column 1",
-                            "format": {}
-                        },
-                        {
-                            "id": "C__2",
-                            "name": "L01A",
-                            "format": {}
-                        },
-                        {
-                            "id": "C__3",
-                            "name": "Column 3",
-                            "format": {
-                                "type": "number",
-                                "thousandSeparator": true,
-                                "decimals": 2
-                            }
-                        }
-                    ],
-                    "rows": [
-                        {
-                            "rowType": "DATA",
-                            "id": "R__1",
-                            "cells": [
-                                {
-                                    "type": "TEXT",
-                                    "value": "L01A"
-                                },
-                                {
-                                    "type": "FORMULA",
-                                    "value": "",
-                                    "expression": "Normal_Balance_CGL_LIST+cell_R__1_C__1",
-                                    "variables": {
-                                        "Normal_Balance_CGL_LIST": {
-                                            "type": "DB_SUM",
-                                            "table": "GL_BALANCE",
-                                            "column": "BALANCE",
-                                            "filters": {}
-                                        }
-                                    }
-                                },
-                                {
-                                    "type": "DB_COUNT",
-                                    "source": {
-                                        "table": "GL_TRANSACTIONS",
-                                        "column": "TRANSACTION_ID",
-                                        "filters": {}
-                                    }
-                                }
-                            ]
-                        }
-                    ]
-                }
-            },
-            "variants": [
-                {
-                    "variantCode": "BRANCH_DATE",
-                    "variantName": "Branch Wise",
-                    "description": null,
-                    "status": "ACTIVE",
-                    "params": [
-                        {
-                            "paramName": "DT",
-                            "label": "Date",
-                            "paramType": "DATE",
-                            "required": false,
-                            "multiValued": false,
-                            "uiHint": "date",
-                            "validation": null
-                        }
-                    ],
-                    "filterRules": [
-                        {
-                            "scopeType": "ALL_DB",
-                            "scopeValue": null,
-                            "paramName": "DT",
-                            "dbColumn": "BALANCE_DATE",
-                            "operator": "="
-                        }
-                    ]
-                }
-            ]
-        },
-        "newTemplate": {
-            "template": {
-                "templateMeta": {
-                    "templateId": "",
-                    "version": "1",
-                    "description": null,
-                    "pageSize": "A4",
                     "pageOrientation": "LANDSCAPE",
-                    "headerLayout": null,
-                    "status": null
+                    "headerLayout": null
                 },
                 "reportMeta": {
                     "reportName": "Testing_v3",
-                    "reportId": "Test987",
+                    "reportId": "Test988",
                     "extras": [
                         {
                             "name": "Report Date",
@@ -167,14 +56,21 @@
                     ],
                     "rows": [
                         {
-                            "rowType": "DATA",
                             "id": "R__1",
+                            "rowType": "DATA",
+                            "rowTitle": null,
                             "cells": [
                                 {
+                                    "id": null,
                                     "type": "TEXT",
-                                    "value": "L01A"
+                                    "value": "L01A",
+                                    "expression": null,
+                                    "variables": null,
+                                    "source": null,
+                                    "render": null
                                 },
                                 {
+                                    "id": null,
                                     "type": "FORMULA",
                                     "value": "",
                                     "expression": "Normal_Balance_CGL_LIST+cell_R__1_C__1",
@@ -185,40 +81,151 @@
                                             "column": "BALANCE",
                                             "filters": {}
                                         }
-                                    }
+                                    },
+                                    "source": null,
+                                    "render": null
                                 },
                                 {
+                                    "id": null,
                                     "type": "DB_COUNT",
+                                    "value": null,
+                                    "expression": null,
+                                    "variables": null,
                                     "source": {
                                         "table": "GL_TRANSACTIONS",
                                         "column": "TRANSACTION_ID",
                                         "filters": {}
-                                    }
+                                    },
+                                    "render": null
                                 }
-                            ]
+                            ],
+                            "dynamicConfig": null
+                        }
+                    ]
+                }
+            },
+            "variants": []
+        },
+        "newTemplate": {
+            "template": {
+                "templateMeta": {
+                    "templateId": "",
+                    "version": "1",
+                    "description": null,
+                    "pageSize": "A4",
+                    "pageOrientation": "LANDSCAPE",
+                    "headerLayout": null
+                },
+                "reportMeta": {
+                    "reportName": "Testing_v2",
+                    "reportId": "Test988",
+                    "extras": [
+                        {
+                            "name": "Report Date",
+                            "value": "2025-12-19"
+                        }
+                    ]
+                },
+                "reportData": {
+                    "columns": [
+                        {
+                            "id": "C__1",
+                            "name": "Column 1",
+                            "format": {}
+                        },
+                        {
+                            "id": "C__2",
+                            "name": "L01A_UPDATED",
+                            "format": {}
+                        },
+                        {
+                            "id": "C__3",
+                            "name": "Column 3",
+                            "format": {
+                                "type": "number",
+                                "thousandSeparator": true,
+                                "decimals": 2
+                            }
+                        },
+                        {
+                            "id": "C__10",
+                            "name": "Column 10",
+                            "format": {}
+                        }
+                    ],
+                    "rows": [
+                        {
+                            "id": "R__1",
+                            "rowType": "DATA",
+                            "rowTitle": null,
+                            "cells": [
+                                {
+                                    "id": null,
+                                    "type": "TEXT",
+                                    "value": "L01A_UPDATED",
+                                    "expression": null,
+                                    "variables": null,
+                                    "source": null,
+                                    "render": null
+                                },
+                                {
+                                    "id": null,
+                                    "type": "FORMULA",
+                                    "value": "",
+                                    "expression": "Normal_Balance_CGL_LIST+cell_R__1_C__1",
+                                    "variables": {
+                                        "Normal_Balance_CGL_LIST": {
+                                            "type": "DB_SUM",
+                                            "table": "GL_BALANCE",
+                                            "column": "BALANCE",
+                                            "filters": {}
+                                        }
+                                    },
+                                    "source": null,
+                                    "render": null
+                                },
+                                {
+                                    "id": null,
+                                    "type": "DB_COUNT",
+                                    "value": null,
+                                    "expression": null,
+                                    "variables": null,
+                                    "source": {
+                                        "table": "GL_BALANCE",
+                                        "column": "BALANCE",
+                                        "filters": {}
+                                    },
+                                    "render": null
+                                }
+                            ],
+                            "dynamicConfig": null
                         }
                     ]
                 }
             },
             "variants": [
                 {
-                    "variantCode": "BRANCH_DATE",
+                    "variantCode": "BRANCH",
                     "variantName": "Branch Wise v2",
                     "description": null,
                     "status": "ACTIVE",
                     "params": [
                         {
+                            "paramId": null,
+                            "variantId": null,
                             "paramName": "DT",
                             "label": "Date",
                             "paramType": "DATE",
                             "required": true,
                             "multiValued": false,
-                            "uiHint": "date",
+                            "uiHint": "text",
                             "validation": null
                         },
                         {
+                            "paramId": null,
+                            "variantId": null,
                             "paramName": "BR",
-                            "label": "BRANCH_TEST",
+                            "label": "BRANCH",
                             "paramType": "STRING",
                             "required": false,
                             "multiValued": false,
@@ -228,23 +235,29 @@
                     ],
                     "filterRules": [
                         {
+                            "ruleId": null,
+                            "variantId": null,
                             "scopeType": "ALL_DB",
                             "scopeValue": null,
                             "paramName": "BR",
-                            "dbColumn": "BRANCH_CODE",
+                            "dbColumn": "BRANCH_CODE_Test",
                             "operator": "="
                         },
                         {
+                            "ruleId": null,
+                            "variantId": null,
                             "scopeType": "ALL_DB",
                             "scopeValue": null,
-                            "paramName": "DT_TEST",
+                            "paramName": "DT",
                             "dbColumn": "BALANCE_DATE",
                             "operator": "="
                         },
                         {
+                            "ruleId": null,
+                            "variantId": null,
                             "scopeType": "ALL_DB",
                             "scopeValue": null,
-                            "paramName": "DT_FROM_TEST",
+                            "paramName": "DT_FROM",
                             "dbColumn": "BALANCE_DATE",
                             "operator": ">="
                         }
@@ -252,9 +265,30 @@
                 }
             ]
         },
-        "diffs": null
+        "cellDiffs": {
+            "R0C0": {
+                "value": {
+                    "oldValue": "L01A",
+                    "newValue": "L01A_UPDATED"
+                }
+            },
+            "R0C2": {
+                "source": {
+                    "oldValue": {
+                        "table": "GL_TRANSACTIONS",
+                        "column": "TRANSACTION_ID",
+                        "filters": {}
+                    },
+                    "newValue": {
+                        "table": "GL_BALANCE",
+                        "column": "BALANCE",
+                        "filters": {}
+                    }
+                }
+            }
+        }
     },
-    "timestamp": "2026-01-27T10:06:35.543314800Z"
+    "timestamp": "2026-01-29T08:23:46.162812900Z"
 }
 
 
