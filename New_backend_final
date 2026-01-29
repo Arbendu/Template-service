@@ -59,35 +59,168 @@ public class TemplateDiffResponseDto {
 
 package com.tcs.fincore.CommonRequestService.controller;
 
-import com.tcs.fincore.CommonRequestService.dto.ReportTemplateDto;
-import com.tcs.fincore.CommonRequestService.dto.TemplateDiffResponseDto;
+import java.util.List;
+import java.util.Map;
+
+import com.tcs.fincore.CommonRequestService.dto.*;
 import com.tcs.fincore.CommonRequestService.service.TemplateDiffService;
+import jakarta.validation.ValidationException;
 import lombok.Data;
-import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fincore.commonutilities.jwt.JwtUtil;
+import com.tcs.fincore.CommonRequestService.model.CommonReq;
+import com.tcs.fincore.CommonRequestService.service.RequestService;
+
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * RequestController :-
+ *
+ * This controller handles API requests related to creating, retrieving, and processing common requests within the FinCore Application.
+ * It provides endpoints for users to manage their requests, view pending items, and for approvers to update request statuses.
+ *
+ * @author Shubhankar [v1018405]
+ * @version 1.0
+ * @since 2025-10-01
+ */
 @RestController
-@RequestMapping("/CR/template-diff")
 @RequiredArgsConstructor
-public class TemplateDiffController {
+@Slf4j
+@RequestMapping("/api")
+public class RequestController {
+
+	private final RequestService requestService;
+    private final JwtUtil jwtUtil;
+
+
+    /**
+     * Creates a new request initiated by a user (maker).
+     *
+     * @param createRequestDto The data transfer object containing the details of the new request.
+     * @param token The authorization token used to identify the user making the request.
+     * @return The created CommonReq entity.
+     * @throws JsonProcessingException If there is an issue processing the request data.
+     */
+	@PostMapping("/create-request")
+	@ResponseStatus(HttpStatus.CREATED)
+	public CommonReq createRequest(
+			@Valid @RequestBody CreateRequestDto createRequestDto,
+			@RequestHeader("Authorization") String token
+	) throws JsonProcessingException {
+		String userId = jwtUtil.getUserIdFromToken(token);
+		log.info("Received request creation call from user: {}", userId);
+		return requestService.createRequest(createRequestDto, userId, token);
+	}
+
+    /**
+     * Fetches requests created by the current user (maker). Requests can be filtered by `requestType`.
+     *
+     * @param token The authorization token of the user.
+     * @param filterDto An object that may contain a `requestType` for filtering (e.g., `{"requestType": "SEGMENT_CODE"}`).
+     * @return A list of CommonReq entities matching the criteria.
+     */
+	// tab2 master screen
+	@PostMapping("/my-requests")
+	public List<CommonReq> getMyRequests(
+			@RequestHeader("Authorization") String token,
+			@RequestBody MyRequestFilterDto filterDto
+	) {
+		String userId = jwtUtil.getUserIdFromToken(token);
+		log.info(
+				"Received request for fetch data for the user: {} and request type: {}", userId,
+				filterDto.getRequestType()
+		);
+		return requestService.getMyRequests(userId, filterDto.getRequestType());
+	}
+
+    /**
+     * Retrieves a list of requests that are pending approval for the current user (excluding the own requests).
+     *
+     * @param authorizationHeader The authorization token of the user.
+     * @param filterDto An object that contain a `requestType` for filtering pending requests.
+     * @return A list of pending CommonReq entities excluding the own requests.
+     */
+	// accept
+	@PostMapping("/pending-requests")
+	public List<CommonReq> getPendingRequests(
+			@RequestHeader("Authorization") String authorizationHeader,
+			@RequestBody MyRequestFilterDto filterDto
+	) {
+		String userId = jwtUtil.getUserIdFromToken(authorizationHeader);
+		log.info("Received request for pending data for the request type: {}", filterDto.getRequestType());
+		return requestService.getPendingRequests(userId, filterDto.getRequestType());
+	}
+
+    /**
+     * Retrieves all requests present in the system (intended for admin/supervisory roles).
+     *
+     * @param authorizationHeader The authorization token.
+     * @return A list of all CommonReq entities.
+     */
+	@GetMapping("/all-requests")
+	public List<CommonReq> getAllRequests(@RequestHeader("Authorization") String authorizationHeader) {
+		return requestService.getAllRequests();
+	}
+
+
+    /**
+     * Updates the status of a request (Accepts/Rejects) by a checker (approver role).
+     *
+     * @param token The authorization token of the executor (checker).
+     * @param processRequestDto The DTO containing the request ID, new status, and any remarks.
+     * @return The updated CommonReq entity.
+     * @throws JsonProcessingException If there is an issue processing the request data.
+     */
+	@PatchMapping("/update-request")
+	public CommonReq updateRequestStatus(
+			@RequestHeader("Authorization") String token,
+			@RequestBody ProcessRequestDto processRequestDto
+	) throws JsonProcessingException {
+		String executorId = jwtUtil.getUserIdFromToken(token);
+		// The service layer throws a ResourceNotFoundException if the optional is
+		// empty,
+		// which is caught by the GlobalExceptionHandler.
+		return requestService.updateRequestStatus(processRequestDto, executorId).get();
+	}
+
+
+    /**
+     * Cancels a pending request initiated by the user.
+     *
+     * @param token The authorization token of the user (must be the creator).
+     * @param cancelRequestDto The DTO containing the request ID and optional remarks.
+     * @return The updated CommonReq entity with status CANCELLED.
+     */
+    @PatchMapping("/cancel-request")
+    public CommonReq cancelRequest(
+            @RequestHeader("Authorization") String token,
+            @Valid @RequestBody CancelRequestDto cancelRequestDto
+    ) {
+        String userId = jwtUtil.getUserIdFromToken(token);
+        log.info("Received cancellation request for request ID: {} from user: {}", cancelRequestDto.getRequestId(), userId);
+        return requestService.cancelRequest(cancelRequestDto, userId);
+    }
+
 
     private final TemplateDiffService templateDiffService;
 
-    @PostMapping
+    @PostMapping("/template-diff")
     public TemplateDiffResponseDto compareTemplates(
-            @RequestBody DiffRequest request
+            @RequestBody TemplateDiffRequest request
     ) {
-        return templateDiffService.compare(
-                request.getOldTemplate(),
-                request.getNewTemplate()
-        );
+        return templateDiffService.compareByRequestId(request.getRequestId());
     }
 
     @Data
-    public static class DiffRequest {
-        private ReportTemplateDto oldTemplate;
-        private ReportTemplateDto newTemplate;
+    public static class TemplateDiffRequest {
+        private Long requestId;
     }
+
 }
 
 
