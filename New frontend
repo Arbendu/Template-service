@@ -201,72 +201,327 @@ function renderCell(cell) {
 // ===============================================================================================
 
 
+import React, { useEffect, useState, useMemo } from "react";
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  Box,
+  Typography,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
+  Paper,
+  CircularProgress,
+  Tooltip,
+  IconButton,
+  Divider,
+  Alert,
+} from "@mui/material";
+import { Close, ArrowRightAlt, Info } from "@mui/icons-material";
+import useApi from "../../hooks/useApi"; [cite_start]// Assuming this hook exists based on TemplateRequestScreen[span_5](end_span)
 
-export default function TemplatePdfPreview({ title, template }) {
-  if (!template) return null;
+// =============================================================================
+// Helper: Key Generation Logic
+[span_6](start_span)// MUST match backend JsonCompareUtil.buildCellKey [cite: 80-83]
+// =============================================================================
+const getCellKey = (cell, rowIndex, colIndex) => {
+  if (cell?.id) return cell.id;
+  // Deterministic fallback as per backend logic
+  return `R${rowIndex}C${colIndex}`;
+};
 
-  const reportMeta = template?.reportMeta || {};
-  const columns = template?.reportData?.columns || [];
+// =============================================================================
+// Sub-Component: Diff Cell (The atomic unit of comparison)
+// =============================================================================
+const DiffCell = ({ cell, diffData, side }) => {
+  [cite_start]// DiffData is the Map<String, ValueDiff> for this specific cell[span_6](end_span)
+  const hasDiff = !!diffData;
 
-  return (
-    <Paper
-      elevation={3}
+  // Visual Styles based on side (Old = Red/Delete, New = Green/Add)
+  let bgProps = {};
+  if (hasDiff) {
+    if (side === "OLD") {
+      bgProps = { bgcolor: "#ffebee", border: "1px solid #ef9a9a" }; // Red-ish
+    } else {
+      bgProps = { bgcolor: "#e8f5e9", border: "1px solid #a5d6a7" }; // Green-ish
+    }
+  } else {
+    bgProps = { border: "1px solid #eee" };
+  }
+
+  // Render content safely
+  const renderValue = () => {
+    if (!cell) return <Typography variant="caption" color="text.disabled">N/A</Typography>;
+    if (cell.type === "DB_COUNT" || cell.type === "DB_SUM") {
+       // Simplify complex objects for the grid view
+       return <Typography variant="caption" fontWeight="bold">[{cell.type}]</Typography>;
+    }
+    return cell.value || cell.expression || "";
+  };
+
+  [span_7](start_span)// Tooltip Content: Shows field-level breakdown of changes[span_7](end_span)
+  const tooltipContent = hasDiff ? (
+    <Box sx={{ p: 1 }}>
+      <Typography variant="subtitle2" sx={{ borderBottom: 1, mb: 1, pb: 0.5 }}>
+        Changes Detected:
+      </Typography>
+      {Object.entries(diffData).map(([field, valueDiff]) => (
+        <Box key={field} sx={{ mb: 1, fontSize: "0.8rem" }}>
+          <Typography variant="caption" sx={{ fontWeight: "bold", textTransform: "uppercase" }}>
+            {field}:
+          </Typography>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Typography
+              variant="caption"
+              sx={{ color: "#ef5350", textDecoration: "line-through", maxWidth: 100, overflow: "hidden", textOverflow:"ellipsis" }}
+            >
+              {JSON.stringify(valueDiff.oldValue)}
+            </Typography>
+            <ArrowRightAlt fontSize="small" color="action" />
+            <Typography
+              variant="caption"
+              sx={{ color: "#66bb6a", fontWeight: "bold", maxWidth: 100, overflow: "hidden", textOverflow:"ellipsis" }}
+            >
+              {JSON.stringify(valueDiff.newValue)}
+            </Typography>
+          </Box>
+        </Box>
+      ))}
+    </Box>
+  ) : null;
+
+  const CellContent = (
+    <TableCell
+      align="center"
       sx={{
-        p: 2,
-        height: "100%",
-        backgroundColor: "#fafafa",
-        border: "1px solid #ccc",
-        overflow: "auto"
+        ...bgProps,
+        minWidth: 100,
+        height: 40,
+        p: 0.5,
+        fontSize: "0.85rem",
+        position: "relative",
+        cursor: hasDiff ? "help" : "default",
       }}
     >
-      {/* Header */}
-      <Box sx={{ mb: 2 }}>
-        <Typography fontWeight={700}>{title}</Typography>
+      {renderValue()}
+      {hasDiff && (
+        <Box
+          sx={{
+            position: "absolute",
+            top: 0,
+            right: 0,
+            width: 0,
+            height: 0,
+            borderStyle: "solid",
+            borderWidth: "0 10px 10px 0",
+            borderColor: `transparent ${side === "OLD" ? "#e57373" : "#66bb6a"} transparent transparent`,
+          }}
+        />
+      )}
+    </TableCell>
+  );
 
-        <Typography variant="body2">
-          Report Name: <b>{reportMeta.reportName}</b>
-        </Typography>
+  return hasDiff ? (
+    <Tooltip title={tooltipContent} arrow placement="top">
+      {CellContent}
+    </Tooltip>
+  ) : (
+    CellContent
+  );
+};
 
-        <Typography variant="body2">
-          Report ID: {reportMeta.reportId}
-        </Typography>
-      </Box>
+// =============================================================================
+// Sub-Component: Template Table
+// =============================================================================
+const TemplateTable = ({ templateData, diffMap, side, maxRows, maxCols }) => {
+  const rows = templateData?.rows || [];
 
-      {/* Column Definition Table */}
-      <Table size="small">
-        <TableHead>
-          <TableRow>
-            <TableCell sx={{ fontWeight: 600 }}>Column ID</TableCell>
-            <TableCell sx={{ fontWeight: 600 }}>Column Name</TableCell>
-            <TableCell sx={{ fontWeight: 600 }}>Type</TableCell>
-            <TableCell sx={{ fontWeight: 600 }}>Format</TableCell>
-          </TableRow>
-        </TableHead>
+  return (
+    <Table size="small" sx={{ tableLayout: "fixed" }}>
+      <TableBody>
+        {/* Render rows up to maxRows to ensure alignment between Old and New tables */}
+        {Array.from({ length: maxRows }).map((_, rIndex) => {
+          const row = rows[rIndex]; // Might be null if row deleted/added
 
-        <TableBody>
-          {columns.map((col) => (
-            <TableRow key={col.id}>
-              <TableCell>{col.id}</TableCell>
-              <TableCell>{col.name}</TableCell>
-              <TableCell>{col.format?.type || "-"}</TableCell>
-              <TableCell>
-                {renderFormat(col.format)}
-              </TableCell>
+          return (
+            <TableRow key={rIndex} sx={{ height: 45 }}>
+              {Array.from({ length: maxCols }).map((_, cIndex) => {
+                const cell = row?.cells?.[cIndex] || null;
+                
+                [span_8](start_span)// Generate Key strictly matching backend logic [cite: 80-83]
+                // Even if cell is null, we need the coordinate key to check for diffs (e.g. cell addition)
+                const tempCellForId = cell || { id: null }; 
+                const cellKey = getCellKey(tempCellForId, rIndex, cIndex);
+                
+                [cite_start]// Lookup Diff[span_8](end_span)
+                const diffData = diffMap ? diffMap[cellKey] : null;
+
+                return (
+                  <DiffCell
+                    key={`${side}-${rIndex}-${cIndex}`}
+                    cell={cell}
+                    diffData={diffData}
+                    side={side}
+                  />
+                );
+              })}
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </Paper>
+          );
+        })}
+      </TableBody>
+    </Table>
+  );
+};
+
+// =============================================================================
+// Main Dialog Component
+// =============================================================================
+export default function CompareTemplateDialog({ open, onClose, requestId }) {
+  const { callApi } = useApi(); [span_9](start_span)// Reusing the hook from TemplateRequestScreen[span_9](end_span)
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [diffResponse, setDiffResponse] = useState(null);
+
+  // Fetch Logic
+  useEffect(() => {
+    if (open && requestId) {
+      setLoading(true);
+      setError(null);
+      
+      [span_10](start_span)// Using the endpoint defined in RequestController[span_10](end_span)
+      callApi("/template-diff", { requestId }, "POST")
+        .then((response) => {
+           // Handle wrapped response if necessary, assuming response.data is the DTO
+           const result = response.data || response; 
+           setDiffResponse(result);
+        })
+        .catch((err) => {
+          console.error("Diff Fetch Error", err);
+          setError("Failed to load comparison data.");
+        })
+        .finally(() => setLoading(false));
+    } else {
+      setDiffResponse(null);
+    }
+  }, [open, requestId, callApi]);
+
+  [span_11](start_span)[span_12](start_span)// Calculate Grid Dimensions[span_11](end_span)[span_12](end_span)
+  // We need the matrix dimensions to be equal on both sides for visual alignment
+  const { maxRows, maxCols } = useMemo(() => {
+    if (!diffResponse) return { maxRows: 0, maxCols: 0 };
+    
+    const oldR = diffResponse.oldTemplate?.template?.reportData?.rows || [];
+    const newR = diffResponse.newTemplate?.template?.reportData?.rows || [];
+    
+    const maxR = Math.max(oldR.length, newR.length);
+    
+    // Calculate max columns by scanning all rows
+    let maxC = 0;
+    [...oldR, ...newR].forEach(r => {
+        if(r.cells && r.cells.length > maxC) maxC = r.cells.length;
+    });
+
+    return { maxRows: maxR, maxCols: maxC };
+  }, [diffResponse]);
+
+  // Clean close handler
+  const handleClose = () => {
+    setDiffResponse(null);
+    onClose();
+  };
+
+  return (
+    <Dialog open={open} onClose={handleClose} maxWidth="xl" fullWidth>
+      <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", p: 2 }}>
+        <Box>
+          <Typography variant="h6">Template Difference Comparison</Typography>
+          <Typography variant="caption" color="text.secondary">
+            Request ID: {requestId}
+          </Typography>
+        </Box>
+        <IconButton onClick={handleClose}>
+          <Close />
+        </IconButton>
+      </DialogTitle>
+
+      <Divider />
+
+      <DialogContent sx={{ bgcolor: "#f5f5f5", p: 2, minHeight: "60vh" }}>
+        {loading && (
+          <Box display="flex" justifyContent="center" alignItems="center" height="100%">
+            <CircularProgress />
+          </Box>
+        )}
+
+        {error && (
+          <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>
+        )}
+
+        {!loading && diffResponse && (
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 2, height: "100%" }}>
+            
+            {/* Legend / Info Bar */}
+            <Paper sx={{ p: 1, display: "flex", gap: 3, alignItems: "center" }}>
+               <Info fontSize="small" color="primary" />
+               <Typography variant="caption">Hover over highlighted cells to view detailed property changes.</Typography>
+               <Box display="flex" gap={1} alignItems="center">
+                  <Box sx={{ width: 16, height: 16, bgcolor: "#ffebee", border: "1px solid #ef9a9a" }} />
+                  <Typography variant="caption">Previous Version (Modified/Removed)</Typography>
+               </Box>
+               <Box display="flex" gap={1} alignItems="center">
+                  <Box sx={{ width: 16, height: 16, bgcolor: "#e8f5e9", border: "1px solid #a5d6a7" }} />
+                  <Typography variant="caption">Current Version (Added/Updated)</Typography>
+               </Box>
+            </Paper>
+
+            {/* Split View Container */}
+            <Box sx={{ display: "flex", gap: 2, flex: 1, overflow: "auto" }}>
+              
+              {/* LEFT: OLD TEMPLATE */}
+              <Paper sx={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                <Box sx={{ p: 1, bgcolor: "#ffebee", borderBottom: "1px solid #ffcdd2", color: "#c62828", fontWeight: "bold", textAlign: "center" }}>
+                   PREVIOUS VERSION
+                </Box>
+                <Box sx={{ overflow: "auto", flex: 1, p: 1 }}>
+                  <TemplateTable
+                    templateData={diffResponse.oldTemplate?.template?.reportData}
+                    [span_13](start_span)diffMap={diffResponse.cellDiffs} //[span_13](end_span)
+                    side="OLD"
+                    maxRows={maxRows}
+                    maxCols={maxCols}
+                  />
+                </Box>
+              </Paper>
+
+              {/* RIGHT: NEW TEMPLATE */}
+              <Paper sx={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                <Box sx={{ p: 1, bgcolor: "#e8f5e9", borderBottom: "1px solid #c8e6c9", color: "#2e7d32", fontWeight: "bold", textAlign: "center" }}>
+                   CURRENT (REQUESTED) VERSION
+                </Box>
+                <Box sx={{ overflow: "auto", flex: 1, p: 1 }}>
+                  <TemplateTable
+                    templateData={diffResponse.newTemplate?.template?.reportData}
+                    [span_14](start_span)diffMap={diffResponse.cellDiffs} //[span_14](end_span)
+                    side="NEW"
+                    maxRows={maxRows}
+                    maxCols={maxCols}
+                  />
+                </Box>
+              </Paper>
+
+            </Box>
+          </Box>
+        )}
+      </DialogContent>
+
+      <DialogActions sx={{ p: 2 }}>
+        <Button onClick={handleClose} variant="outlined">Close</Button>
+      </DialogActions>
+    </Dialog>
   );
 }
-
-function renderFormat(format = {}) {
-  if (!format.type) return "-";
-  if (format.type === "number") {
-    return `Decimals: ${format.decimals}, Thousand Sep: ${format.thousandSeparator}`;
-  }
-  return JSON.stringify(format);
-}
-
-
-
