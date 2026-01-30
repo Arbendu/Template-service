@@ -1,205 +1,6 @@
 // ===========================================================================================
-// CompareTemplateDialog.jsx
+// CompareTemplateDialog.jsx                   ------------------------ Here you can see hover efffect, like when you hover on any modified field then you can saw the previous field and modified field
 // ============================================================================================
-
-import React, { useEffect, useState } from "react";
-import {
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Button,
-  Grid,
-  Paper,
-  Table,
-  TableHead,
-  TableRow,
-  TableCell,
-  TableBody,
-  Typography,
-  Box,
-  Drawer,
-  Divider,
-  CircularProgress
-} from "@mui/material";
-import useApi from "../../hooks/useApi";
-
-/**
- * Cell key format must match backend:
- * R{rowId}.C{colId}
- */
-
-export default function CompareTemplateDialog({ open, requestId, onClose }) {
-  const { callApi } = useApi();
-  const [loading, setLoading] = useState(false);
-  const [diffData, setDiffData] = useState(null);
-  const [selectedCellDiff, setSelectedCellDiff] = useState(null);
-
-  useEffect(() => {
-    if (!open || !requestId) return;
-
-    setLoading(true);
-    callApi("/CR/template-diff", { requestId }, "POST")
-      .then((res) => setDiffData(res))
-      .finally(() => setLoading(false));
-  }, [open, requestId]);
-
-  if (!open) return null;
-
-  return (
-    <>
-      <Dialog open={open} maxWidth="xl" fullWidth onClose={onClose}>
-        <DialogTitle>Template Comparison</DialogTitle>
-
-        <DialogContent dividers sx={{ minHeight: 600 }}>
-          {loading && <CircularProgress />}
-
-          {!loading && diffData && (
-            <Grid container spacing={2}>
-              <Grid item xs={6}>
-                <ReportTable
-                  title="OLD TEMPLATE"
-                  template={diffData.oldTemplate}
-                  cellDiffs={diffData.cellDiffs}
-                  onCellClick={setSelectedCellDiff}
-                  mode="OLD"
-                />
-              </Grid>
-
-              <Grid item xs={6}>
-                <ReportTable
-                  title="NEW TEMPLATE"
-                  template={diffData.newTemplate}
-                  cellDiffs={diffData.cellDiffs}
-                  onCellClick={setSelectedCellDiff}
-                  mode="NEW"
-                />
-              </Grid>
-            </Grid>
-          )}
-        </DialogContent>
-
-        <DialogActions>
-          <Button onClick={onClose}>Close</Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* SIDE PANEL FOR CELL DETAILS */}
-      <Drawer
-        anchor="right"
-        open={!!selectedCellDiff}
-        onClose={() => setSelectedCellDiff(null)}
-      >
-        <Box sx={{ width: 360, p: 2 }}>
-          <Typography variant="h6">Cell Changes</Typography>
-          <Divider sx={{ my: 1 }} />
-
-          {selectedCellDiff &&
-            Object.entries(selectedCellDiff).map(([field, diff]) => (
-              <Box key={field} sx={{ mb: 2 }}>
-                <Typography fontWeight={600}>{field}</Typography>
-                <Typography variant="body2">
-                  <b>Old:</b> {JSON.stringify(diff.old)}
-                </Typography>
-                <Typography variant="body2">
-                  <b>New:</b> {JSON.stringify(diff.new)}
-                </Typography>
-              </Box>
-            ))}
-        </Box>
-      </Drawer>
-    </>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* ------------------------- TABLE COMPONENT ------------------------- */
-/* ------------------------------------------------------------------ */
-
-function ReportTable({ title, template, cellDiffs, onCellClick, mode }) {
-  const columns = template?.template?.reportData?.columns || [];
-  const rows = template?.template?.reportData?.rows || [];
-
-  return (
-    <Paper variant="outlined" sx={{ p: 2, height: "100%" }}>
-      <Typography fontWeight={700} mb={1}>
-        {title}
-      </Typography>
-
-      <Table size="small">
-        <TableHead>
-          <TableRow>
-            {columns.map((c) => (
-              <TableCell key={c.id} sx={{ fontWeight: 600 }}>
-                {c.name}
-              </TableCell>
-            ))}
-          </TableRow>
-        </TableHead>
-
-        <TableBody>
-          {rows.map((row) => (
-            <TableRow key={row.id}>
-              {row.cells.map((cell, colIndex) => {
-                const cellKey = `R${row.id}.C${columns[colIndex]?.id}`;
-                const diff = cellDiffs?.[cellKey];
-
-                return (
-                  <TableCell
-                    key={colIndex}
-                    onClick={() => diff && onCellClick(diff)}
-                    sx={{
-                      cursor: diff ? "pointer" : "default",
-                      backgroundColor: diff
-                        ? mode === "NEW"
-                          ? "#fff3cd"
-                          : "#f8d7da"
-                        : "transparent",
-                      border: diff ? "2px solid #f0ad4e" : undefined
-                    }}
-                  >
-                    {renderCell(cell)}
-                  </TableCell>
-                );
-              })}
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </Paper>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* --------------------------- CELL RENDER --------------------------- */
-/* ------------------------------------------------------------------ */
-
-function renderCell(cell) {
-  if (!cell) return "-";
-  if (cell.type === "TEXT") return cell.value;
-  if (cell.type === "FORMULA") return cell.expression;
-  if (cell.type?.startsWith("DB"))
-    return `${cell.source?.table}.${cell.source?.column}`;
-  return JSON.stringify(cell);
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// ==============================================================================================
-// TemplatePdfPreview.jsx
-// ===============================================================================================
-
 
 import React, { useEffect, useState, useMemo } from "react";
 import {
@@ -223,11 +24,11 @@ import {
   Alert,
 } from "@mui/material";
 import { Close, ArrowRightAlt, Info } from "@mui/icons-material";
-import useApi from "../../hooks/useApi"; [cite_start]// Assuming this hook exists based on TemplateRequestScreen[span_5](end_span)
+import useApi from "../../hooks/useApi"; // Assuming this hook exists based on TemplateRequestScreen[span_5](end_span)
 
 // =============================================================================
 // Helper: Key Generation Logic
-[span_6](start_span)// MUST match backend JsonCompareUtil.buildCellKey [cite: 80-83]
+// MUST match backend JsonCompareUtil.buildCellKey [cite: 80-83]
 // =============================================================================
 const getCellKey = (cell, rowIndex, colIndex) => {
   if (cell?.id) return cell.id;
@@ -239,7 +40,7 @@ const getCellKey = (cell, rowIndex, colIndex) => {
 // Sub-Component: Diff Cell (The atomic unit of comparison)
 // =============================================================================
 const DiffCell = ({ cell, diffData, side }) => {
-  [cite_start]// DiffData is the Map<String, ValueDiff> for this specific cell[span_6](end_span)
+  // DiffData is the Map<String, ValueDiff> for this specific cell[span_6](end_span)
   const hasDiff = !!diffData;
 
   // Visual Styles based on side (Old = Red/Delete, New = Green/Add)
@@ -264,7 +65,7 @@ const DiffCell = ({ cell, diffData, side }) => {
     return cell.value || cell.expression || "";
   };
 
-  [span_7](start_span)// Tooltip Content: Shows field-level breakdown of changes[span_7](end_span)
+  // Tooltip Content: Shows field-level breakdown of changes[span_7](end_span)
   const tooltipContent = hasDiff ? (
     <Box sx={{ p: 1 }}>
       <Typography variant="subtitle2" sx={{ borderBottom: 1, mb: 1, pb: 0.5 }}>
@@ -353,12 +154,12 @@ const TemplateTable = ({ templateData, diffMap, side, maxRows, maxCols }) => {
               {Array.from({ length: maxCols }).map((_, cIndex) => {
                 const cell = row?.cells?.[cIndex] || null;
                 
-                [span_8](start_span)// Generate Key strictly matching backend logic [cite: 80-83]
+                // Generate Key strictly matching backend logic [cite: 80-83]
                 // Even if cell is null, we need the coordinate key to check for diffs (e.g. cell addition)
                 const tempCellForId = cell || { id: null }; 
                 const cellKey = getCellKey(tempCellForId, rIndex, cIndex);
                 
-                [cite_start]// Lookup Diff[span_8](end_span)
+                // Lookup Diff[span_8](end_span)
                 const diffData = diffMap ? diffMap[cellKey] : null;
 
                 return (
@@ -382,7 +183,7 @@ const TemplateTable = ({ templateData, diffMap, side, maxRows, maxCols }) => {
 // Main Dialog Component
 // =============================================================================
 export default function CompareTemplateDialog({ open, onClose, requestId }) {
-  const { callApi } = useApi(); [span_9](start_span)// Reusing the hook from TemplateRequestScreen[span_9](end_span)
+  const { callApi } = useApi(); // Reusing the hook from TemplateRequestScreen[span_9](end_span)
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [diffResponse, setDiffResponse] = useState(null);
@@ -393,8 +194,8 @@ export default function CompareTemplateDialog({ open, onClose, requestId }) {
       setLoading(true);
       setError(null);
       
-      [span_10](start_span)// Using the endpoint defined in RequestController[span_10](end_span)
-      callApi("/template-diff", { requestId }, "POST")
+      // Using the endpoint defined in RequestController[span_10](end_span)
+      callApi("/CR/template-diff", { requestId }, "POST")
         .then((response) => {
            // Handle wrapped response if necessary, assuming response.data is the DTO
            const result = response.data || response; 
@@ -410,7 +211,7 @@ export default function CompareTemplateDialog({ open, onClose, requestId }) {
     }
   }, [open, requestId, callApi]);
 
-  [span_11](start_span)[span_12](start_span)// Calculate Grid Dimensions[span_11](end_span)[span_12](end_span)
+  // Calculate Grid Dimensions[span_11](end_span)[span_12](end_span)
   // We need the matrix dimensions to be equal on both sides for visual alignment
   const { maxRows, maxCols } = useMemo(() => {
     if (!diffResponse) return { maxRows: 0, maxCols: 0 };
@@ -490,7 +291,7 @@ export default function CompareTemplateDialog({ open, onClose, requestId }) {
                 <Box sx={{ overflow: "auto", flex: 1, p: 1 }}>
                   <TemplateTable
                     templateData={diffResponse.oldTemplate?.template?.reportData}
-                    [span_13](start_span)diffMap={diffResponse.cellDiffs} //[span_13](end_span)
+                    diffMap={diffResponse.cellDiffs} 
                     side="OLD"
                     maxRows={maxRows}
                     maxCols={maxCols}
@@ -506,7 +307,7 @@ export default function CompareTemplateDialog({ open, onClose, requestId }) {
                 <Box sx={{ overflow: "auto", flex: 1, p: 1 }}>
                   <TemplateTable
                     templateData={diffResponse.newTemplate?.template?.reportData}
-                    [span_14](start_span)diffMap={diffResponse.cellDiffs} //[span_14](end_span)
+                    diffMap={diffResponse.cellDiffs} 
                     side="NEW"
                     maxRows={maxRows}
                     maxCols={maxCols}
@@ -525,3 +326,23 @@ export default function CompareTemplateDialog({ open, onClose, requestId }) {
     </Dialog>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ==============================================================================================
+// CompareTemplateDialog.jsx                 -------------- Here you click on modified field then you can see the previous field and modified field.
+// ===============================================================================================
+
+
+
