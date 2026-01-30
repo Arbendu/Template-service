@@ -507,3 +507,180 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
 export default CompareTemplateDialog;
 
 
+
+
+
+
+
+
+
+////////////////////////////////////// fix some ui issue
+
+
+import React, { useEffect, useState, useMemo } from "react";
+import {
+  Dialog, DialogTitle, DialogContent, DialogActions,
+  Button, Box, Typography, Table, TableBody, TableCell,
+  TableRow, Paper, CircularProgress, IconButton, Divider, Alert, TextField, Stack
+} from "@mui/material";
+import { Close, DoubleArrow, RateReview, EditNote } from "@mui/icons-material";
+import useApi from "../../hooks/useApi";
+
+const getCellKey = (cell, rowIndex, colIndex) => {
+  if (cell?.id) return cell.id;
+  return `R${rowIndex}C${colIndex}`;
+};
+
+const CompareTemplateDialog = ({ open, onClose, requestId }) => {
+  const { callApi } = useApi();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [diffResponse, setDiffResponse] = useState(null);
+  const [selectedCellKey, setSelectedCellKey] = useState(null);
+
+  useEffect(() => {
+    if (open && requestId) {
+      setLoading(true);
+      callApi("/api/template-diff", { requestId }, "POST")
+        .then(res => setDiffResponse(res.data || res))
+        .catch(() => setError("Failed to load comparison data."))
+        .finally(() => setLoading(false));
+    }
+  }, [open, requestId, callApi]);
+
+  const { maxRows, maxCols } = useMemo(() => {
+    if (!diffResponse) return { maxRows: 0, maxCols: 0 };
+    const oldR = diffResponse.oldTemplate?.template?.reportData?.rows || [];
+    const newR = diffResponse.newTemplate?.template?.reportData?.rows || [];
+    const maxR = Math.max(oldR.length, newR.length);
+    let maxC = 0;
+    [...oldR, ...newR].forEach(r => { if (r.cells?.length > maxC) maxC = r.cells.length; });
+    return { maxRows: maxR, maxCols: maxC };
+  }, [diffResponse]);
+
+  const renderTable = (templateData, side) => {
+    const rows = templateData?.rows || [];
+    return (
+      <Table size="small" sx={{ tableLayout: "fixed", border: '1px solid #ddd' }}>
+        <TableBody>
+          {Array.from({ length: maxRows }).map((_, rIndex) => (
+            <TableRow key={rIndex} sx={{ height: 35 }}>
+              {Array.from({ length: maxCols }).map((_, cIndex) => {
+                const cell = rows[rIndex]?.cells?.[cIndex];
+                const key = getCellKey(cell || { id: null }, rIndex, cIndex);
+                const hasDiff = !!diffResponse.cellDiffs[key];
+                const isSelected = selectedCellKey === key;
+                return (
+                  <TableCell
+                    key={cIndex}
+                    onClick={() => hasDiff && setSelectedCellKey(key)}
+                    sx={{
+                      border: "1px solid #eee",
+                      cursor: hasDiff ? "pointer" : "default",
+                      bgcolor: isSelected ? "#fff9c4" : (hasDiff ? (side === "OLD" ? "#ffebee" : "#e8f5e9") : "white"),
+                      textAlign: 'center', fontSize: '0.75rem', overflow: 'hidden'
+                    }}
+                  >
+                    {cell?.value || cell?.expression || (hasDiff ? "Modified" : "")}
+                  </TableCell>
+                );
+              })}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    );
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
+      <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: '#f8f9fa' }}>
+        <Typography variant="h6" fontWeight="bold">Review Template Changes</Typography>
+        <IconButton onClick={onClose}><Close /></IconButton>
+      </DialogTitle>
+      
+      <DialogContent sx={{ p: 3, display: 'flex', flexDirection: 'column', gap: 3 }}>
+        {loading && <Box sx={{ textAlign: 'center', py: 5 }}><CircularProgress /></Box>}
+        
+        {!loading && diffResponse && (
+          <>
+            {/* Grid Preview Section */}
+            <Box sx={{ display: "flex", gap: 2, height: "350px" }}>
+              <Box sx={{ flex: 1, overflow: "auto" }}>
+                <Typography variant="overline" color="error.main" fontWeight="bold">Previous Version</Typography>
+                {renderTable(diffResponse.oldTemplate?.template?.reportData, "OLD")}
+              </Box>
+              <Box sx={{ flex: 1, overflow: "auto" }}>
+                <Typography variant="overline" color="success.main" fontWeight="bold">New Version</Typography>
+                {renderTable(diffResponse.newTemplate?.template?.reportData, "NEW")}
+              </Box>
+            </Box>
+
+            {/* Change Details Section (No Internal Scrollbars) */}
+            <Box>
+              <Typography variant="subtitle2" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                <EditNote color="primary" /> Detailed Analysis & Remarks
+              </Typography>
+              
+              {!selectedCellKey ? (
+                <Alert severity="info">Please select a highlighted cell above to view its modifications.</Alert>
+              ) : (
+                <Stack spacing={3}>
+                  {/* Field Changes - Vertical List */}
+                  <Box>
+                    <Typography variant="caption" color="text.secondary" fontWeight="bold" sx={{ mb: 1, display: 'block' }}>
+                      PROPERTY CHANGES FOR CELL: {selectedCellKey}
+                    </Typography>
+                    <Stack spacing={2}>
+                      {Object.entries(diffResponse.cellDiffs[selectedCellKey] || {}).map(([field, diff]) => (
+                        <Box key={field} sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                          <Typography variant="body2" sx={{ width: 100, fontWeight: 'bold', color: 'text.primary' }}>
+                            {field.toUpperCase()}
+                          </Typography>
+                          
+                          {/* Old Value Box */}
+                          <Paper variant="outlined" sx={{ p: 1, flex: 1, bgcolor: '#fff5f5', borderColor: '#feb2b2' }}>
+                            <Typography variant="caption" color="error.dark" sx={{ display: 'block', mb: 0.5, fontWeight: 'bold' }}>OLD</Typography>
+                            <Typography variant="body2">{JSON.stringify(diff.oldValue)}</Typography>
+                          </Paper>
+
+                          <DoubleArrow sx={{ color: 'text.disabled' }} fontSize="small" />
+
+                          {/* New Value Box */}
+                          <Paper variant="outlined" sx={{ p: 1, flex: 1, bgcolor: '#f0fff4', borderColor: '#9ae6b4' }}>
+                            <Typography variant="caption" color="success.dark" sx={{ display: 'block', mb: 0.5, fontWeight: 'bold' }}>NEW</Typography>
+                            <Typography variant="body2" fontWeight="bold">{JSON.stringify(diff.newValue)}</Typography>
+                          </Paper>
+                        </Box>
+                      ))}
+                    </Stack>
+                  </Box>
+
+                  {/* Maker Remarks - Positioned Underneath */}
+                  <Box sx={{ mt: 2, pt: 2, borderTop: '1px dashed #ddd' }}>
+                    <Typography variant="caption" color="text.secondary" fontWeight="bold" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <RateReview fontSize="inherit" /> MAKER REMARKS
+                    </Typography>
+                    <Paper sx={{ p: 2, bgcolor: '#fcfcfc', borderLeft: '4px solid #1976d2' }}>
+                      <Typography variant="body2" sx={{ fontStyle: 'italic', color: 'text.secondary' }}>
+                        {diffResponse.cellDiffs[selectedCellKey]?.remark || "No specific remark was provided for this cell modification."}
+                      </Typography>
+                    </Paper>
+                  </Box>
+                </Stack>
+              )}
+            </Box>
+          </>
+        )}
+      </DialogContent>
+      
+      <DialogActions sx={{ p: 2, borderTop: '1px solid #eee' }}>
+        <Button onClick={onClose} variant="outlined" color="inherit">Cancel</Button>
+        <Button variant="contained" color="success" disableElevation>Approve Changes</Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
+export default CompareTemplateDialog;
+
