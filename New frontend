@@ -611,5 +611,244 @@ export default CompareTemplateDialog;
 // ============================================================================================================================================
 
 
+import React, { useEffect, useState, useMemo } from "react";
+import {
+  Dialog, DialogTitle, DialogContent, DialogActions,
+  Button, Box, Typography, Table, TableBody, TableCell,
+  TableRow, Paper, CircularProgress, IconButton, Divider, 
+  Alert, Stack, Chip, Avatar, Tooltip
+} from "@mui/material";
+import {
+  Close, EditNote, RateReview, Storage, Functions, 
+  SettingsSuggest, ArrowForward, HelpOutline, TextSnippet
+} from "@mui/icons-material";
+import useApi from "../../hooks/useApi";
+
+// =============================================================================
+// LOGIC: HUMAN-READABLE TRANSFORMATION COMPONENT
+// =============================================================================
+const ReadableValue = ({ value, type }) => {
+  if (value === null || value === undefined || value === "") {
+    return <Typography variant="body2" color="text.disabled"><i>None</i></Typography>;
+  }
+
+  // 1. Logic for Database Sources
+  if (type === "source" && typeof value === "object") {
+    return (
+      <Stack direction="row" spacing={1} alignItems="center">
+        <Chip 
+          size="small" 
+          icon={<Storage fontSize="small" />} 
+          label={`Table: ${value.table || 'N/A'}`} 
+          color="primary" variant="outlined" 
+        />
+        <ArrowForward sx={{ fontSize: 14, color: 'text.disabled' }} />
+        <Chip 
+          size="small" 
+          label={`Col: ${value.column || 'N/A'}`} 
+          color="secondary" variant="outlined" 
+        />
+      </Stack>
+    );
+  }
+
+  // 2. Logic for Formulas / Expressions
+  if (type === "expression") {
+    return (
+      <Box sx={{ 
+        fontFamily: 'monospace', bgcolor: '#f5f5f5', p: 1, 
+        borderRadius: 1, border: '1px solid #ddd', fontSize: '0.8rem' 
+      }}>
+        {String(value)}
+      </Box>
+    );
+  }
+
+  // 3. Logic for Complex Variables/Filters
+  if (typeof value === "object") {
+    return (
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+        {Object.entries(value).map(([k, v]) => (
+          <Tooltip title={JSON.stringify(v)} key={k}>
+            <Chip 
+              size="small" 
+              label={`${k}: ${typeof v === 'object' ? '...' : v}`} 
+              sx={{ fontSize: '0.7rem' }} 
+            />
+          </Tooltip>
+        ))}
+      </Box>
+    );
+  }
+
+  // 4. Fallback for strings/numbers
+  return <Typography variant="body2" fontWeight="medium">{String(value)}</Typography>;
+};
+
+// =============================================================================
+// MAIN COMPONENT
+// =============================================================================
+const getCellKey = (cell, r, c) => cell?.id || `R${r}C${c}`;
+
+const CompareTemplateDialog = ({ open, onClose, requestId }) => {
+  const { callApi } = useApi();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [diffResponse, setDiffResponse] = useState(null);
+  const [selectedCellKey, setSelectedCellKey] = useState(null);
+
+  useEffect(() => {
+    if (open && requestId) {
+      setLoading(true);
+      callApi("/api/template-diff", { requestId }, "POST")
+        .then((res) => setDiffResponse(res.data || res))
+        .catch(() => setError("Failed to fetch comparison data."))
+        .finally(() => setLoading(false));
+    }
+  }, [open, requestId, callApi]);
+
+  const { maxRows, maxCols } = useMemo(() => {
+    if (!diffResponse) return { maxRows: 0, maxCols: 0 };
+    const oldR = diffResponse.oldTemplate?.template?.reportData?.rows || [];
+    const newR = diffResponse.newTemplate?.template?.reportData?.rows || [];
+    const maxR = Math.max(oldR.length, newR.length);
+    let maxC = 0;
+    [...oldR, ...newR].forEach((r) => { if (r.cells?.length > maxC) maxC = r.cells.length; });
+    return { maxRows: maxR, maxCols: maxC };
+  }, [diffResponse]);
+
+  const renderTable = (templateData, side) => {
+    const rows = templateData?.rows || [];
+    return (
+      <Table size="small" sx={{ tableLayout: "fixed", border: "1px solid #ddd" }}>
+        <TableBody>
+          {Array.from({ length: maxRows }).map((_, rIndex) => (
+            <TableRow key={rIndex} sx={{ height: 35 }}>
+              {Array.from({ length: maxCols }).map((_, cIndex) => {
+                const cell = rows[rIndex]?.cells?.[cIndex];
+                const key = getCellKey(cell, rIndex, cIndex);
+                const hasDiff = !!diffResponse?.cellDiffs?.[key];
+                const isSelected = selectedCellKey === key;
+                return (
+                  <TableCell
+                    key={cIndex}
+                    onClick={() => hasDiff && setSelectedCellKey(key)}
+                    sx={{
+                      border: "1px solid #eee", cursor: hasDiff ? "pointer" : "default",
+                      bgcolor: isSelected ? "#fff9c4" : (hasDiff ? (side === "OLD" ? "#ffebee" : "#e8f5e9") : "white"),
+                      textAlign: "center", fontSize: "0.7rem", overflow: "hidden"
+                    }}
+                  >
+                    {cell?.value || (hasDiff ? "Modified" : "-")}
+                  </TableCell>
+                );
+              })}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    );
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth scroll="paper">
+      <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: '#f8f9fa' }}>
+        <Box display="flex" alignItems="center" gap={1}>
+          <SettingsSuggest color="primary" />
+          <Typography variant="h6" fontWeight="bold">Review Changes</Typography>
+        </Box>
+        <IconButton onClick={onClose}><Close /></IconButton>
+      </DialogTitle>
+
+      <DialogContent sx={{ p: 3 }}>
+        {loading ? <CircularProgress sx={{ display: 'block', m: 'auto', my: 5 }} /> : null}
+
+        {!loading && diffResponse && (
+          <Stack spacing={4}>
+            {/* Split View */}
+            <Box sx={{ display: "flex", gap: 2, height: "300px" }}>
+              <Box sx={{ flex: 1, overflow: "auto" }}>
+                <Typography variant="caption" fontWeight="bold" color="error">PREVIOUS VERSION</Typography>
+                {renderTable(diffResponse.oldTemplate?.template?.reportData, "OLD")}
+              </Box>
+              <Box sx={{ flex: 1, overflow: "auto" }}>
+                <Typography variant="caption" fontWeight="bold" color="success.main">NEW VERSION</Typography>
+                {renderTable(diffResponse.newTemplate?.template?.reportData, "NEW")}
+              </Box>
+            </Box>
+
+            {/* Analysis Section */}
+            <Box>
+              <Typography variant="subtitle2" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                <EditNote color="primary" /> Change Analysis
+              </Typography>
+
+              {!selectedCellKey ? (
+                <Alert severity="info" variant="outlined">Select a highlighted cell to analyze the data mapping changes.</Alert>
+              ) : (
+                <Stack spacing={3}>
+                  {/* Property Diff Cards */}
+                  <Box>
+                    <Typography variant="caption" sx={{ mb: 1, display: 'block', color: 'text.secondary', fontWeight: 'bold' }}>
+                      DETAILED DIFF FOR: {selectedCellKey}
+                    </Typography>
+                    
+                    <Stack spacing={2}>
+                      {Object.entries(diffResponse.cellDiffs[selectedCellKey] || {}).map(([field, diff]) => (
+                        <Paper key={field} variant="outlined" sx={{ p: 0, borderRadius: 2 }}>
+                          {/* Row Header with Icon logic */}
+                          <Box sx={{ px: 2, py: 1, bgcolor: '#fafafa', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', gap: 1 }}>
+                            {field === 'source' ? <Storage fontSize="inherit" /> : field === 'expression' ? <Functions fontSize="inherit" /> : <TextSnippet fontSize="inherit" />}
+                            <Typography variant="caption" fontWeight="bold" sx={{ textTransform: 'uppercase' }}>{field}</Typography>
+                          </Box>
+
+                          {/* Data Content */}
+                          <Box sx={{ display: 'flex', alignItems: 'stretch' }}>
+                            <Box sx={{ flex: 1, p: 2, bgcolor: '#fff5f5' }}>
+                              <Typography variant="caption" color="error" fontWeight="bold" sx={{ display: 'block', mb: 1 }}>WAS</Typography>
+                              <ReadableValue value={diff.oldValue} type={field} />
+                            </Box>
+                            
+                            <Box sx={{ display: 'flex', alignItems: 'center', px: 1, bgcolor: '#fff' }}>
+                              <ArrowForward color="disabled" />
+                            </Box>
+
+                            <Box sx={{ flex: 1, p: 2, bgcolor: '#f0fff4' }}>
+                              <Typography variant="caption" color="success.main" fontWeight="bold" sx={{ display: 'block', mb: 1 }}>NOW</Typography>
+                              <ReadableValue value={diff.newValue} type={field} />
+                            </Box>
+                          </Box>
+                        </Paper>
+                      ))}
+                    </Stack>
+                  </Box>
+
+                  {/* Remarks - Styled as a Highlighted Note */}
+                  <Box>
+                    <Typography variant="caption" fontWeight="bold" color="text.secondary">MAKER REMARKS</Typography>
+                    <Paper elevation={0} sx={{ p: 2, mt: 1, borderLeft: '5px solid #1976d2', bgcolor: '#e3f2fd' }}>
+                      <Typography variant="body2" sx={{ fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <RateReview fontSize="small" color="primary" />
+                        {diffResponse.cellDiffs[selectedCellKey]?.remark || "User provided no remark for this structural change."}
+                      </Typography>
+                    </Paper>
+                  </Box>
+                </Stack>
+              )}
+            </Box>
+          </Stack>
+        )}
+      </DialogContent>
+
+      <DialogActions sx={{ p: 2, bgcolor: '#f8f9fa' }}>
+        <Button onClick={onClose} variant="outlined">Close</Button>
+        <Box sx={{ flexGrow: 1 }} />
+        <Button variant="contained" color="success">Approve</Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
+export default CompareTemplateDialog;
 
 
