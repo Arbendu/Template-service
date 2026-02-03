@@ -109,20 +109,18 @@ public interface TemplateDiffService {
 
 
 
-
-
 package com.tcs.fincore.CommonRequestService.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.tcs.fincore.CommonRequestService.dto.*;
+import com.tcs.fincore.CommonRequestService.dto.ReportTemplateDto;
+import com.tcs.fincore.CommonRequestService.dto.TemplateDiffResponseDto;
 import com.tcs.fincore.CommonRequestService.model.CommonReq;
+import com.tcs.fincore.CommonRequestService.model.ReportTemplate;
 import com.tcs.fincore.CommonRequestService.repository.CommonRequestRepository;
 import com.tcs.fincore.CommonRequestService.repository.ReportTemplateRepository;
 import com.tcs.fincore.CommonRequestService.util.JsonCompareUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-
-import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -136,45 +134,68 @@ public class TemplateDiffServiceImpl implements TemplateDiffService {
     @Override
     public TemplateDiffResponseDto compareByRequestId(Long requestId) {
 
-        CommonReq req = commonRequestRepository.findById(requestId)
-                .orElseThrow(() -> new IllegalArgumentException("Request not found"));
+        /* =====================================================
+         * 1️⃣ Fetch PENDING request → NEW TEMPLATE
+         * ===================================================== */
+        CommonReq request = commonRequestRepository.findById(requestId)
+                .orElseThrow(() ->
+                        new IllegalArgumentException("Request not found: " + requestId));
 
         ReportTemplateDto newTemplate;
         try {
-            newTemplate = objectMapper.readValue(req.getPayload(), ReportTemplateDto.class);
-        } catch (Exception e) {
-            throw new IllegalStateException("Invalid request payload JSON", e);
+            newTemplate = objectMapper.readValue(
+                    request.getPayload(),
+                    ReportTemplateDto.class
+            );
+        } catch (Exception ex) {
+            throw new IllegalStateException("Invalid request payload JSON", ex);
         }
 
-        String reportId = newTemplate.getTemplate().getReportMeta().getReportId();
+        /* =====================================================
+         * 2️⃣ Extract reportId from NEW template
+         * ===================================================== */
+        String reportId = newTemplate
+                .getTemplate()
+                .getReportMeta()
+                .getReportId();
 
-        String oldJson = reportTemplateRepository
-                .findFirstByReportIdAndStatus(reportId, "ACTIVE")
-                .orElseThrow(() -> new IllegalStateException("Active template not found"))
-                .getTemplateJson(); // ✏️ CHANGED (must read JSON column)
+        /* =====================================================
+         * 3️⃣ Fetch ACTIVE template from DB → OLD TEMPLATE
+         * ===================================================== */
+        ReportTemplate oldTemplateEntity =
+                reportTemplateRepository
+                        .findFirstByReportIdAndStatus(reportId, "ACTIVE")
+                        .orElseThrow(() ->
+                                new IllegalStateException(
+                                        "Active template not found for reportId: " + reportId));
 
         ReportTemplateDto oldTemplate;
         try {
-            oldTemplate = objectMapper.readValue(oldJson, ReportTemplateDto.class);
-        } catch (Exception e) {
-            throw new IllegalStateException("Invalid stored template JSON", e);
+            oldTemplate = objectMapper.readValue(
+                    oldTemplateEntity.getTemplateJson(),
+                    ReportTemplateDto.class
+            );
+        } catch (Exception ex) {
+            throw new IllegalStateException("Invalid stored template JSON", ex);
         }
 
-        Map<String, Map<String, ValueDiff>> cellDiffs =
+        /* =====================================================
+         * 4️⃣ Run diff engine (CELL + COLUMN)
+         * ===================================================== */
+        JsonCompareUtil.DiffResult diff =
                 jsonCompareUtil.compareTemplates(oldTemplate, newTemplate);
 
-        Map<String, Map<String, ValueDiff>> columnDiffs =   // 🔴 NEW
-                jsonCompareUtil.compareColumnFormats(oldTemplate, newTemplate);
-
+        /* =====================================================
+         * 5️⃣ Build response (frontend-friendly)
+         * ===================================================== */
         return TemplateDiffResponseDto.builder()
                 .oldTemplate(oldTemplate)
                 .newTemplate(newTemplate)
-                .cellDiffs(cellDiffs)
-                .columnDiffs(columnDiffs) // 🔴 NEW
+                .cellDiffs(diff.cellDiffs())
+                .columnDiffs(diff.columnDiffs())
                 .build();
     }
 }
-
 
 
 
