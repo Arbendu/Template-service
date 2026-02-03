@@ -2,7 +2,7 @@
 // dto/ValueDiff.java
 // ==========≈==========================================================================
 
-package com.tcs.fincore.CommonRequestService.dto;
+package com.fincore.TemplateConfigurationService.dto;
 
 import lombok.*;
 
@@ -18,6 +18,118 @@ public class ValueDiff {
 
 
 
+// =====================================================================================
+// dto/TemplatePayload.java
+// ==========≈==========================================================================
+
+
+
+package com.fincore.TemplateConfigurationService.dto;
+
+import jakarta.validation.constraints.NotNull;
+import lombok.*;
+
+import javax.swing.*;
+import java.util.List;
+import java.util.Map;
+
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class TemplatePayload{
+
+    @NotNull
+    private Template template;
+
+    @NotNull
+    private List<VariantDto> variants;
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class Template {
+        @NotNull
+        private TemplateMeta templateMeta;
+
+        @NotNull
+        private ReportMeta reportMeta;
+
+        @NotNull
+        private ReportData reportData;
+    }
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class TemplateMeta {
+        private String templateId;
+        private String version;
+        private String description;
+        // e.g. "A4", "LETTER"; "portrait" / "landscape"
+        private String pageSize;
+        private String pageOrientation;
+        private String headerLayout;  //layout (1-col, 2-col, etc.)
+    }
+
+    @Data
+    public static class ReportMeta {
+        private String reportName;
+        private String reportId;
+        private List<Map<String, String>> extras;
+    }
+
+    @Data
+    public static class ReportData {
+        private List<ColumnDefinition> columns;
+        private List<Row> rows;
+    }
+
+    @Data
+    public static class ColumnDefinition {
+        private String id;
+        private String name;
+        private Map<String, Object> format; // flexible formatting map
+    }
+
+    @Data
+    public static class Row {
+        /**
+         * DATA|GROUP_START|GROUP_END|NOTE|BREAK|DYNAMIC (future)
+         */
+        private String id;
+        private String rowType;
+        private String rowTitle;
+        private List<Cell> cells;
+
+        // Extension point for dynamic blocks etc.
+        // Example: { "type":"DB_LIST", "table":"...", "filters":{...}, "limit":100 }
+        private Map<String, Object> dynamicConfig;
+    }
+
+    @Data
+    public static class Cell {
+        private String id;                     // assigned by TemplateProcessor (R{row}C{col})
+        private String type;                   // TEXT, DB_*, FORMULA, etc.
+        private Object value;                  // used for TEXT cells
+        private String expression;             // used for formulas
+        private Map<String, Object> variables; // formula vars (CELL_REF, DB_*, CONST, etc.)
+        private Map<String, Object> source;    // for DB_* types: { table, column, filters }
+        private Map<String, Object> render;    // { bold, colspan, rowspan, align, format, bgColor, ... }
+    }
+
+
+}
+
+
+
+
+
 
 
 // =====================================================================================
@@ -25,7 +137,7 @@ public class ValueDiff {
 // ==========≈==========================================================================
 
 
-package com.tcs.fincore.CommonRequestService.dto;
+package com.fincore.TemplateConfigurationService.dto;
 
 import lombok.*;
 
@@ -38,16 +150,19 @@ import java.util.Map;
 @Builder
 public class TemplateDiffResponseDto {
 
-    private ReportTemplateDto oldTemplate;
-    private ReportTemplateDto newTemplate;
+    private TemplatePayload oldTemplate;
+    private TemplatePayload newTemplate;
 
     /**
      * cellId -> (fieldName -> old/new value)
      */
     private Map<String, Map<String, ValueDiff>> cellDiffs;
-    private Map<String, Map<String, ValueDiff>> columnDiffs;
-}
 
+    /**
+     * cellId -> (fieldName -> old/new value)
+     */
+    //private Map<String, Map<String, ValueDiff>> columnDiffs;
+}
 
 
 
@@ -84,17 +199,13 @@ public class TemplateDiffResponseDto {
 
 
 
-package com.tcs.fincore.CommonRequestService.service;
+package com.fincore.TemplateConfigurationService.service;
 
-import com.tcs.fincore.CommonRequestService.dto.ReportTemplateDto;
-import com.tcs.fincore.CommonRequestService.dto.TemplateDiffResponseDto;
+import com.fincore.TemplateConfigurationService.dto.TemplateDiffResponseDto;
 
 public interface TemplateDiffService {
 
-    TemplateDiffResponseDto compare(
-            ReportTemplateDto oldTemplate,
-            ReportTemplateDto newTemplate
-    );
+    TemplateDiffResponseDto compareByRequestId(Long requestId);
 }
 
 
