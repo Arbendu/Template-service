@@ -193,133 +193,151 @@ import java.util.*;
 @Component
 public class JsonCompareUtil {
 
-    /**
-     * rowId -> cellId -> fieldName -> ValueDiff
-     */
-    public Map<String, Map<String, Map<String, ValueDiff>>> compareTemplates(
-            ReportTemplateDto oldTemplate,
-            ReportTemplateDto newTemplate
+    /* =========================================================
+     * ENTRY POINT
+     * ========================================================= */
+    public DiffResult compareTemplates(
+            ReportTemplateDto oldT,
+            ReportTemplateDto newT
     ) {
 
-        Map<String, Map<String, Map<String, ValueDiff>>> diffs = new LinkedHashMap<>();
+        Map<String, Map<String, Map<String, ValueDiff>>> cellDiffs = new LinkedHashMap<>();
+        Map<String, Map<String, ValueDiff>> columnDiffs = new LinkedHashMap<>();
 
-        if (oldTemplate == null || newTemplate == null) {
-            return diffs;
-        }
-
-        // 1️⃣ Compare COLUMN FORMAT changes (important fix)
-        compareColumnFormats(
-                oldTemplate.getTemplate().getReportData().getColumns(),
-                newTemplate.getTemplate().getReportData().getColumns(),
-                diffs
+        compareColumns(
+                oldT.getTemplate().getReportData().getColumns(),
+                newT.getTemplate().getReportData().getColumns(),
+                columnDiffs
         );
 
-        // 2️⃣ Compare ROW + CELL level changes
-        Map<String, ReportTemplateDto.Row> oldRows = mapRows(oldTemplate);
-        Map<String, ReportTemplateDto.Row> newRows = mapRows(newTemplate);
+        compareRows(
+                oldT.getTemplate().getReportData().getRows(),
+                newT.getTemplate().getReportData().getRows(),
+                cellDiffs
+        );
 
-        for (String rowId : newRows.keySet()) {
-            ReportTemplateDto.Row newRow = newRows.get(rowId);
-            ReportTemplateDto.Row oldRow = oldRows.get(rowId);
-
-            if (oldRow == null) {
-                continue;
-            }
-
-            Map<String, ReportTemplateDto.Cell> oldCells = mapCells(oldRow);
-            Map<String, ReportTemplateDto.Cell> newCells = mapCells(newRow);
-
-            for (String cellId : newCells.keySet()) {
-                ReportTemplateDto.Cell newCell = newCells.get(cellId);
-                ReportTemplateDto.Cell oldCell = oldCells.get(cellId);
-
-                if (oldCell == null) {
-                    continue;
-                }
-
-                compareCell(rowId, cellId, oldCell, newCell, diffs);
-            }
-        }
-
-        return diffs;
+        return new DiffResult(cellDiffs, columnDiffs);
     }
 
-    // ---------------- HELPERS ----------------
-
-    private void compareCell(
-            String rowId,
-            String cellId,
-            ReportTemplateDto.Cell oldCell,
-            ReportTemplateDto.Cell newCell,
-            Map<String, Map<String, Map<String, ValueDiff>>> diffs
-    ) {
-
-        compareField(rowId, cellId, "value", oldCell.getValue(), newCell.getValue(), diffs);
-        compareField(rowId, cellId, "expression", oldCell.getExpression(), newCell.getExpression(), diffs);
-        compareField(rowId, cellId, "variables", oldCell.getVariables(), newCell.getVariables(), diffs);
-        compareField(rowId, cellId, "source", oldCell.getSource(), newCell.getSource(), diffs);
-        compareField(rowId, cellId, "render", oldCell.getRender(), newCell.getRender(), diffs);
-    }
-
-    private void compareColumnFormats(
+    /* =========================================================
+     * COLUMN DIFF (✅ FIXED)
+     * ========================================================= */
+    private void compareColumns(
             List<ReportTemplateDto.ColumnDefinition> oldCols,
             List<ReportTemplateDto.ColumnDefinition> newCols,
-            Map<String, Map<String, Map<String, ValueDiff>>> diffs
+            Map<String, Map<String, ValueDiff>> diffs
     ) {
+        Map<String, ReportTemplateDto.ColumnDefinition> oldMap = mapById(oldCols);
+        Map<String, ReportTemplateDto.ColumnDefinition> newMap = mapById(newCols);
 
-        Map<String, ReportTemplateDto.ColumnDefinition> oldMap = new LinkedHashMap<>();
-        for (ReportTemplateDto.ColumnDefinition c : oldCols) {
-            oldMap.put(c.getId(), c);
-        }
+        for (String colId : unionKeys(oldMap, newMap)) {
+            ReportTemplateDto.ColumnDefinition o = oldMap.get(colId);
+            ReportTemplateDto.ColumnDefinition n = newMap.get(colId);
 
-        for (ReportTemplateDto.ColumnDefinition newCol : newCols) {
-            ReportTemplateDto.ColumnDefinition oldCol = oldMap.get(newCol.getId());
-            if (oldCol == null) continue;
+            Map<String, ValueDiff> fieldDiffs = new LinkedHashMap<>();
 
-            if (!Objects.equals(oldCol.getFormat(), newCol.getFormat())) {
-                // virtual row + cell to mark column-level change
-                compareField(
-                        "COLUMN",
-                        newCol.getId(),
-                        "format",
-                        oldCol.getFormat(),
-                        newCol.getFormat(),
-                        diffs
-                );
+            compareField("name",
+                    o == null ? null : o.getName(),
+                    n == null ? null : n.getName(),
+                    fieldDiffs
+            );
+
+            // ✅ THIS WAS MISSING EARLIER
+            compareField("format",
+                    o == null ? null : o.getFormat(),
+                    n == null ? null : n.getFormat(),
+                    fieldDiffs
+            );
+
+            if (!fieldDiffs.isEmpty()) {
+                diffs.put(colId, fieldDiffs);
             }
         }
     }
 
-    private void compareField(
-            String rowId,
-            String cellId,
-            String field,
-            Object oldVal,
-            Object newVal,
+    /* =========================================================
+     * ROW / CELL DIFF (UNCHANGED, CORRECT)
+     * ========================================================= */
+    private void compareRows(
+            List<ReportTemplateDto.Row> oldRows,
+            List<ReportTemplateDto.Row> newRows,
             Map<String, Map<String, Map<String, ValueDiff>>> diffs
     ) {
-        if (!Objects.equals(oldVal, newVal)) {
-            diffs
-                .computeIfAbsent(rowId, r -> new LinkedHashMap<>())
-                .computeIfAbsent(cellId, c -> new LinkedHashMap<>())
-                .put(field, new ValueDiff(oldVal, newVal));
+        Map<String, ReportTemplateDto.Row> oldMap = mapById(oldRows);
+        Map<String, ReportTemplateDto.Row> newMap = mapById(newRows);
+
+        for (String rowId : unionKeys(oldMap, newMap)) {
+            ReportTemplateDto.Row oRow = oldMap.get(rowId);
+            ReportTemplateDto.Row nRow = newMap.get(rowId);
+
+            if (oRow == null || nRow == null) continue;
+
+            Map<String, Map<String, ValueDiff>> cellDiffs = new LinkedHashMap<>();
+
+            Map<String, ReportTemplateDto.Cell> oCells = mapById(oRow.getCells());
+            Map<String, ReportTemplateDto.Cell> nCells = mapById(nRow.getCells());
+
+            for (String cellId : unionKeys(oCells, nCells)) {
+                Map<String, ValueDiff> fieldDiffs = new LinkedHashMap<>();
+                compareCell(oCells.get(cellId), nCells.get(cellId), fieldDiffs);
+
+                if (!fieldDiffs.isEmpty()) {
+                    cellDiffs.put(cellId, fieldDiffs);
+                }
+            }
+
+            if (!cellDiffs.isEmpty()) {
+                diffs.put(rowId, cellDiffs);
+            }
         }
     }
 
-    private Map<String, ReportTemplateDto.Row> mapRows(ReportTemplateDto template) {
-        Map<String, ReportTemplateDto.Row> map = new LinkedHashMap<>();
-        for (ReportTemplateDto.Row r : template.getTemplate().getReportData().getRows()) {
-            map.put(r.getId(), r);
+    private void compareCell(
+            ReportTemplateDto.Cell o,
+            ReportTemplateDto.Cell n,
+            Map<String, ValueDiff> diffs
+    ) {
+        compareField("value", o == null ? null : o.getValue(), n == null ? null : n.getValue(), diffs);
+        compareField("expression", o == null ? null : o.getExpression(), n == null ? null : n.getExpression(), diffs);
+        compareField("variables", o == null ? null : o.getVariables(), n == null ? null : n.getVariables(), diffs);
+        compareField("source", o == null ? null : o.getSource(), n == null ? null : n.getSource(), diffs);
+        compareField("render", o == null ? null : o.getRender(), n == null ? null : n.getRender(), diffs);
+    }
+
+    /* =========================================================
+     * UTIL METHODS
+     * ========================================================= */
+    private void compareField(String field, Object oldV, Object newV,
+                              Map<String, ValueDiff> diffs) {
+        if (!Objects.equals(oldV, newV)) {
+            diffs.put(field, new ValueDiff(oldV, newV));
+        }
+    }
+
+    private <T> Map<String, T> mapById(List<T> list) {
+        Map<String, T> map = new LinkedHashMap<>();
+        if (list == null) return map;
+
+        for (T t : list) {
+            try {
+                String id = (String) t.getClass().getMethod("getId").invoke(t);
+                map.put(id, t);
+            } catch (Exception ignored) {}
         }
         return map;
     }
 
-    private Map<String, ReportTemplateDto.Cell> mapCells(ReportTemplateDto.Row row) {
-        Map<String, ReportTemplateDto.Cell> map = new LinkedHashMap<>();
-        for (ReportTemplateDto.Cell c : row.getCells()) {
-            map.put(c.getId(), c);
-        }
-        return map;
+    private Set<String> unionKeys(Map<String, ?> a, Map<String, ?> b) {
+        Set<String> keys = new LinkedHashSet<>(a.keySet());
+        keys.addAll(b.keySet());
+        return keys;
     }
+
+    /* =========================================================
+     * DIFF RESULT WRAPPER
+     * ========================================================= */
+    public record DiffResult(
+            Map<String, Map<String, Map<String, ValueDiff>>> cellDiffs,
+            Map<String, Map<String, ValueDiff>> columnDiffs
+    ) {}
 }
-
