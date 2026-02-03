@@ -111,7 +111,69 @@ public interface TemplateDiffService {
 
 
 
+package com.tcs.fincore.CommonRequestService.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tcs.fincore.CommonRequestService.dto.*;
+import com.tcs.fincore.CommonRequestService.model.CommonReq;
+import com.tcs.fincore.CommonRequestService.repository.CommonRequestRepository;
+import com.tcs.fincore.CommonRequestService.repository.ReportTemplateRepository;
+import com.tcs.fincore.CommonRequestService.util.JsonCompareUtil;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+import java.util.Map;
+
+@Service
+@RequiredArgsConstructor
+public class TemplateDiffServiceImpl implements TemplateDiffService {
+
+    private final CommonRequestRepository commonRequestRepository;
+    private final ReportTemplateRepository reportTemplateRepository;
+    private final JsonCompareUtil jsonCompareUtil;
+    private final ObjectMapper objectMapper;
+
+    @Override
+    public TemplateDiffResponseDto compareByRequestId(Long requestId) {
+
+        CommonReq req = commonRequestRepository.findById(requestId)
+                .orElseThrow(() -> new IllegalArgumentException("Request not found"));
+
+        ReportTemplateDto newTemplate;
+        try {
+            newTemplate = objectMapper.readValue(req.getPayload(), ReportTemplateDto.class);
+        } catch (Exception e) {
+            throw new IllegalStateException("Invalid request payload JSON", e);
+        }
+
+        String reportId = newTemplate.getTemplate().getReportMeta().getReportId();
+
+        String oldJson = reportTemplateRepository
+                .findFirstByReportIdAndStatus(reportId, "ACTIVE")
+                .orElseThrow(() -> new IllegalStateException("Active template not found"))
+                .getTemplateJson(); // ✏️ CHANGED (must read JSON column)
+
+        ReportTemplateDto oldTemplate;
+        try {
+            oldTemplate = objectMapper.readValue(oldJson, ReportTemplateDto.class);
+        } catch (Exception e) {
+            throw new IllegalStateException("Invalid stored template JSON", e);
+        }
+
+        Map<String, Map<String, ValueDiff>> cellDiffs =
+                jsonCompareUtil.compareTemplates(oldTemplate, newTemplate);
+
+        Map<String, Map<String, ValueDiff>> columnDiffs =   // 🔴 NEW
+                jsonCompareUtil.compareColumnFormats(oldTemplate, newTemplate);
+
+        return TemplateDiffResponseDto.builder()
+                .oldTemplate(oldTemplate)
+                .newTemplate(newTemplate)
+                .cellDiffs(cellDiffs)
+                .columnDiffs(columnDiffs) // 🔴 NEW
+                .build();
+    }
+}
 
 
 
@@ -121,5 +183,155 @@ public interface TemplateDiffService {
 // ==========≈==========================================================================
 
 
+package com.tcs.fincore.CommonRequestService.util;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tcs.fincore.CommonRequestService.dto.ReportTemplateDto;
+import com.tcs.fincore.CommonRequestService.dto.ValueDiff;
+import org.springframework.stereotype.Component;
+
+import java.util.*;
+
+@Component
+public class JsonCompareUtil {
+
+    private final ObjectMapper mapper = new ObjectMapper();
+
+    /**
+     * EXISTING METHOD – unchanged signature
+     */
+    public Map<String, Map<String, ValueDiff>> compareTemplates(
+            ReportTemplateDto oldTemplate,
+            ReportTemplateDto newTemplate
+    ) {
+        Map<String, Map<String, ValueDiff>> diffs = new LinkedHashMap<>();
+
+        compareCells(oldTemplate, newTemplate, diffs);
+
+        return diffs;
+    }
+
+    /**
+     * 🔴 NEW METHOD – COLUMN FORMAT DIFF
+     */
+    public Map<String, Map<String, ValueDiff>> compareColumnFormats(
+            ReportTemplateDto oldTemplate,
+            ReportTemplateDto newTemplate
+    ) {
+        Map<String, Map<String, ValueDiff>> columnDiffs = new LinkedHashMap<>();
+
+        if (oldTemplate.getTemplate().getReportData() == null ||
+            newTemplate.getTemplate().getReportData() == null) {
+            return columnDiffs;
+        }
+
+        Map<String, ReportTemplateDto.ColumnDefinition> oldCols = mapColumns(oldTemplate);
+        Map<String, ReportTemplateDto.ColumnDefinition> newCols = mapColumns(newTemplate);
+
+        for (String colId : oldCols.keySet()) {
+            if (!newCols.containsKey(colId)) continue;
+
+            Map<String, ValueDiff> diffs = new LinkedHashMap<>();
+
+            Map<String, Object> oldFormat = oldCols.get(colId).getFormat();
+            Map<String, Object> newFormat = newCols.get(colId).getFormat();
+
+            compareMaps("format", oldFormat, newFormat, diffs);
+
+            if (!diffs.isEmpty()) {
+                columnDiffs.put(colId, diffs);
+            }
+        }
+
+        return columnDiffs;
+    }
+
+    /**
+     * EXISTING – cell diff logic (unchanged)
+     */
+    private void compareCells(
+            ReportTemplateDto oldTemplate,
+            ReportTemplateDto newTemplate,
+            Map<String, Map<String, ValueDiff>> diffs
+    ) {
+        List<ReportTemplateDto.Row> oldRows =
+                oldTemplate.getTemplate().getReportData().getRows();
+        List<ReportTemplateDto.Row> newRows =
+                newTemplate.getTemplate().getReportData().getRows();
+
+        if (oldRows == null || newRows == null) return;
+
+        Map<String, ReportTemplateDto.Row> newRowMap = new HashMap<>();
+        for (ReportTemplateDto.Row r : newRows) {
+            newRowMap.put(r.getId(), r);
+        }
+
+        for (ReportTemplateDto.Row oldRow : oldRows) {
+            ReportTemplateDto.Row newRow = newRowMap.get(oldRow.getId());
+            if (newRow == null) continue;
+
+            for (int i = 0; i < oldRow.getCells().size(); i++) {
+                var oldCell = oldRow.getCells().get(i);
+                var newCell = newRow.getCells().get(i);
+
+                Map<String, ValueDiff> cellDiff = new LinkedHashMap<>();
+                compareObjects("value", oldCell.getValue(), newCell.getValue(), cellDiff);
+                compareObjects("expression", oldCell.getExpression(), newCell.getExpression(), cellDiff);
+                compareMaps("variables", oldCell.getVariables(), newCell.getVariables(), cellDiff);
+                compareMaps("source", oldCell.getSource(), newCell.getSource(), cellDiff);
+
+                if (!cellDiff.isEmpty()) {
+                    String key = "R" + oldRow.getId() + ".C" + oldCell.getId();
+                    diffs.put(key, cellDiff);
+                }
+            }
+        }
+    }
+
+    /**
+     * 🔴 NEW – helpers
+     */
+    private Map<String, ReportTemplateDto.ColumnDefinition> mapColumns(
+            ReportTemplateDto template
+    ) {
+        Map<String, ReportTemplateDto.ColumnDefinition> map = new HashMap<>();
+        for (var col : template.getTemplate().getReportData().getColumns()) {
+            map.put(col.getId(), col);
+        }
+        return map;
+    }
+
+    private void compareMaps(
+            String prefix,
+            Map<String, Object> oldMap,
+            Map<String, Object> newMap,
+            Map<String, ValueDiff> diffs
+    ) {
+        if (oldMap == null && newMap == null) return;
+
+        Set<String> keys = new HashSet<>();
+        if (oldMap != null) keys.addAll(oldMap.keySet());
+        if (newMap != null) keys.addAll(newMap.keySet());
+
+        for (String key : keys) {
+            Object o = oldMap == null ? null : oldMap.get(key);
+            Object n = newMap == null ? null : newMap.get(key);
+            compareObjects(prefix + "." + key, o, n, diffs);
+        }
+    }
+
+    private void compareObjects(
+            String field,
+            Object oldVal,
+            Object newVal,
+            Map<String, ValueDiff> diffs
+    ) {
+        if (!Objects.equals(oldVal, newVal)) {
+            diffs.put(field, ValueDiff.builder()
+                    .oldValue(oldVal)
+                    .newValue(newVal)
+                    .build());
+        }
+    }
+}
 
