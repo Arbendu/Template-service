@@ -1,149 +1,98 @@
-
 import React, { useEffect, useState, useMemo, memo, useRef, useCallback } from "react";
 import {
   Dialog, DialogTitle, DialogContent, Box, Typography, Table, TableBody, 
   TableCell, TableRow, Paper, CircularProgress, IconButton, Divider, 
-  Stack, TableHead, TableContainer, Tooltip, Chip, Button, Switch, FormControlLabel
+  Stack, TableHead, TableContainer, Chip, Button, Switch, FormControlLabel,
+  Tooltip
 } from "@mui/material";
 import { 
-  Close, TableChart, CompareArrows, Visibility, ViewList
+  Close, TableChart, CompareArrows, Visibility, GridView, ListAlt
 } from "@mui/icons-material";
 import { useVirtualizer } from '@tanstack/react-virtual';
 import useApi from "../../hooks/useApi";
 
 // ============================================================================
-// 1. RECURSIVE DIFF TEXT COMPONENT (Existing functionality preserved)
+// 1. HELPER: DIFF VALUE DISPLAY
 // ============================================================================
-const DiffText = memo(({ value, otherValue, type }) => {
-  if (value === null || value === undefined) return <Typography variant="body2" color="text.secondary">—</Typography>;
+const DiffValue = memo(({ value, type }) => {
+  if (value === null || value === undefined) return <Typography variant="caption" color="text.disabled">NULL</Typography>;
+  
+  const isObject = typeof value === 'object';
+  const displayValue = isObject ? JSON.stringify(value, null, 2) : String(value);
 
-  if (Array.isArray(value)) {
-    const otherArr = Array.isArray(otherValue) ? otherValue : [];
-    return (
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-        {value.map((item, idx) => {
-          const existsInOther = otherArr.includes(item);
-          const isRemoved = type === 'old' && !existsInOther;
-          const isAdded = type === 'new' && !existsInOther;
-          return (
-            <Typography
-              key={idx} variant="body2" component="span"
-              sx={{
-                textDecoration: isRemoved ? "line-through" : "none",
-                color: isRemoved ? "error.main" : isAdded ? "success.main" : "text.primary",
-                fontWeight: isAdded ? "bold" : "normal",
-                bgcolor: isAdded ? "#e8f5e9" : isRemoved ? "#ffebee" : "transparent",
-                px: 0.5, borderRadius: '2px', fontSize: '0.8rem'
-              }}
-            >
-              {typeof item === 'object' ? JSON.stringify(item) : item}{idx < value.length - 1 ? ", " : ""}
-            </Typography>
-          );
-        })}
-      </Box>
-    );
-  }
-
-  if (typeof value === 'object' && value !== null) {
-    return (
-      <Box sx={{ pl: 1, borderLeft: '1px solid #eee' }}>
-        {Object.entries(value).map(([key, val]) => (
-          <Box key={key} sx={{ mb: 1 }}>
-            <Typography variant="caption" sx={{ fontWeight: 'bold', color: 'text.secondary', display: 'block' }}>
-              {key.toUpperCase()}:
-            </Typography>
-            <DiffText value={val} otherValue={otherValue ? otherValue[key] : undefined} type={type} />
-          </Box>
-        ))}
-      </Box>
-    );
-  }
-
-  const isChanged = value !== otherValue;
   return (
-    <Typography variant="body2" sx={{ 
-      color: isChanged ? (type === 'old' ? 'error.main' : 'success.main') : 'text.primary',
-      textDecoration: isChanged && type === 'old' ? 'line-through' : 'none',
-      fontWeight: isChanged && type === 'new' ? 'bold' : 'normal',
-      wordBreak: 'break-all'
-    }}>
-      {String(value)}
+    <Typography 
+      variant="body2" 
+      sx={{ 
+        color: type === 'old' ? '#c62828' : '#2e7d32',
+        bgcolor: type === 'old' ? '#ffebee' : '#e8f5e9',
+        p: 0.5, borderRadius: 1, fontSize: '0.75rem', 
+        fontFamily: isObject ? 'monospace' : 'inherit',
+        whiteSpace: 'pre-wrap', wordBreak: 'break-all'
+      }}
+    >
+      {displayValue}
     </Typography>
   );
 });
 
 // ============================================================================
-// 2. VIRTUALIZED GRID COMPONENT (Side-by-Side View)
+// 2. VIRTUALIZED GRID COMPONENT (For Full View)
 // ============================================================================
-const TemplateGrid = memo(({ gridInfo, rows, side, cellDiffs, columnDiffs, selectedCellKey, onCellClick, scrollRef, onScroll }) => {
+const VirtualizedGrid = memo(({ rows, maxCols, side, cellDiffs, columnDiffs, scrollRef, onScroll }) => {
   const parentRef = useRef();
 
-  // TanStack Virtualizer logic
   const rowVirtualizer = useVirtualizer({
-    count: gridInfo.maxRows,
+    count: rows.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 40, // Height of each row
-    overscan: 10,
+    estimateSize: () => 45,
+    overscan: 5,
   });
-
-  const getCellKey = (cell, r, c) => cell?.id || `R${r}C${c}`;
 
   return (
     <TableContainer 
       ref={(el) => { parentRef.current = el; if(scrollRef) scrollRef.current = el; }} 
-      onScroll={onScroll} 
-      sx={{ maxHeight: 550, border: "1px solid #ddd", bgcolor: 'white', position: 'relative' }}
+      onScroll={onScroll}
+      sx={{ height: 500, border: "1px solid #e0e0e0", overflow: 'auto', bgcolor: '#fff' }}
     >
-      <Table size="small" stickyHeader sx={{ tableLayout: "fixed", width: "max-content" }}>
+      <Table size="small" stickyHeader sx={{ width: 'max-content', tableLayout: 'fixed' }}>
         <TableHead>
           <TableRow>
-            <TableCell sx={{ bgcolor: "#f5f5f5", width: 60, zIndex: 11, textAlign: 'center' }}>Row</TableCell>
-            {Array.from({ length: gridInfo.maxCols }).map((_, i) => {
-              const col = gridInfo.columns[i];
-              const colKey = col?.id || `C${i}`;
-              const hasColDiff = !!columnDiffs?.[colKey];
-              return (
-                <TableCell key={i} sx={{ 
-                  bgcolor: hasColDiff ? (side === "OLD" ? "#ffebee" : "#e8f5e9") : "#f5f5f5",
-                  width: 150, textAlign: "center", fontSize: "0.7rem", fontWeight: "bold"
-                }}>
-                  {col?.name || `Col ${i + 1}`}
-                  {hasColDiff && <Box sx={{ color: 'warning.main', fontSize: '0.6rem' }}>[MODIFIED]</Box>}
-                </TableCell>
-              );
+            <TableCell sx={{ width: 50, bgcolor: '#f5f5f5', zIndex: 3 }}>#</TableCell>
+            {Array.from({ length: maxCols }).map((_, i) => {
+                const colKey = `C${i}`; 
+                const isModified = !!columnDiffs?.[colKey];
+                return (
+                    <TableCell key={i} sx={{ width: 150, bgcolor: isModified ? '#fffde7' : '#f5f5f5', zIndex: 2 }}>
+                        <Typography variant="caption" fontWeight="bold">Col {i+1}</Typography>
+                        {isModified && <Chip label="MOD" size="small" color="warning" sx={{ height: 16, fontSize: '0.6rem', ml: 1 }}/>}
+                    </TableCell>
+                );
             })}
           </TableRow>
         </TableHead>
         <TableBody style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: 'relative' }}>
           {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-            const rIdx = virtualRow.index;
-            const row = rows[rIdx];
+            const row = rows[virtualRow.index];
             return (
               <TableRow 
-                key={virtualRow.key} 
+                key={virtualRow.key}
                 style={{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${virtualRow.start}px)`, display: 'flex' }}
               >
-                <TableCell sx={{ width: 60, minWidth: 60, textAlign: 'center', bgcolor: '#fafafa', borderRight: '1px solid #eee' }}>
-                  {rIdx + 1}
-                </TableCell>
-                {Array.from({ length: gridInfo.maxCols }).map((_, cIdx) => {
-                  const cell = row?.cells?.[cIdx];
-                  const key = getCellKey(cell, rIdx, cIdx);
-                  const hasDiff = !!cellDiffs?.[key];
-                  const isSelected = selectedCellKey === key;
-                  const displayValue = cell?.value ?? cell?.expression ?? "";
-                  
+                <TableCell sx={{ width: 50, minWidth: 50, bgcolor: '#fafafa' }}>{virtualRow.index + 1}</TableCell>
+                {row?.cells?.map((cell, cIdx) => {
+                  const cellKey = cell.id || `R${virtualRow.index}C${cIdx}`;
+                  const isModified = !!cellDiffs?.[cellKey];
                   return (
                     <TableCell 
-                      key={cIdx}
-                      onClick={() => hasDiff && onCellClick(key)}
-                      sx={{ 
-                        width: 150, minWidth: 150, border: "1px solid #e0e0e0", cursor: hasDiff ? "pointer" : "default",
-                        bgcolor: isSelected ? "#fff9c4" : hasDiff ? (side === "OLD" ? "#ffebee" : "#e8f5e9") : "white",
-                        fontSize: "0.72rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
-                      }}
+                        key={cIdx} 
+                        sx={{ 
+                            width: 150, minWidth: 150,
+                            bgcolor: isModified ? (side === 'old' ? '#ffebee' : '#e8f5e9') : 'inherit',
+                            fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                        }}
                     >
-                      {String(typeof displayValue === 'object' ? JSON.stringify(displayValue) : displayValue)}
+                      {cell.value || cell.expression || "-"}
                     </TableCell>
                   );
                 })}
@@ -157,172 +106,172 @@ const TemplateGrid = memo(({ gridInfo, rows, side, cellDiffs, columnDiffs, selec
 });
 
 // ============================================================================
-// MAIN COMPONENT
+// 3. MAIN DIALOG COMPONENT
 // ============================================================================
 const CompareTemplateDialog = ({ open, onClose, requestRow }) => {
   const { callApi } = useApi();
   const [loading, setLoading] = useState(false);
   const [diffResponse, setDiffResponse] = useState(null);
-  const [selectedCellKey, setSelectedCellKey] = useState(null);
-  const [checkerMode, setCheckerMode] = useState(true); // Default: Show modified fields only
-  
-  const oldTableRef = useRef(null);
-  const newTableRef = useRef(null);
+  const [checkerMode, setCheckerMode] = useState(true); // Default to Modified Fields Only
+
+  const leftRef = useRef(null);
+  const rightRef = useRef(null);
   const isSyncing = useRef(false);
 
-  // FIX: Using requestRow.id to trigger the API call
+  // FIXED: Trigger API call using requestRow.id
   useEffect(() => {
     if (open && requestRow?.id) {
       setLoading(true);
+      // Ensure this endpoint matches your backend @PostMapping
       callApi("/TC/template-diff", { requestId: requestRow.id }, "POST")
-        .then((res) => setDiffResponse(res.data || res))
-        .catch(console.error)
+        .then((res) => {
+          setDiffResponse(res.data || res);
+        })
+        .catch(err => console.error("API Error:", err))
         .finally(() => setLoading(false));
     }
   }, [open, requestRow?.id, callApi]);
 
-  const gridInfo = useMemo(() => {
+  const gridData = useMemo(() => {
     if (!diffResponse) return null;
     const oldT = diffResponse.oldTemplate?.template?.reportData || {};
     const newT = diffResponse.newTemplate?.template?.reportData || {};
     return {
-      columns: newT.columns || oldT.columns || [],
-      rowsOld: oldT.rows || [],
-      rowsNew: newT.rows || [],
-      maxRows: Math.max(oldT.rows?.length || 0, newT.rows?.length || 0),
+      oldRows: oldT.rows || [],
+      newRows: newT.rows || [],
       maxCols: Math.max(oldT.columns?.length || 0, newT.columns?.length || 0)
     };
   }, [diffResponse]);
 
-  const handleSyncScroll = useCallback((e) => {
+  const handleScroll = useCallback((e) => {
     if (isSyncing.current) return;
     isSyncing.current = true;
     const master = e.target;
-    const slave = master === oldTableRef.current ? newTableRef.current : oldTableRef.current;
+    const slave = master === leftRef.current ? rightRef.current : leftRef.current;
     if (slave) {
-      slave.scrollLeft = master.scrollLeft;
       slave.scrollTop = master.scrollTop;
+      slave.scrollLeft = master.scrollLeft;
     }
     setTimeout(() => { isSyncing.current = false; }, 50);
   }, []);
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
-      <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: '#f8f9fa' }}>
+      <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: '#f4f6f8', borderBottom: '1px solid #ddd' }}>
         <Stack direction="row" spacing={2} alignItems="center">
-          <TableChart color="primary" />
-          <Typography variant="h6">Comparison - Request ID: {requestRow?.id}</Typography>
+          <CompareArrows color="primary" />
+          <Typography variant="h6" fontWeight="bold">Template Comparison [Request: {requestRow?.id}]</Typography>
           <Divider orientation="vertical" flexItem sx={{ mx: 2 }} />
           <FormControlLabel
-            control={<Switch checked={checkerMode} onChange={(e) => setCheckerMode(e.target.checked)} color="secondary" />}
-            label={<Typography variant="subtitle2" sx={{ fontWeight: 'bold' }}>Checker Mode (Modified Only)</Typography>}
+            control={<Switch checked={!checkerMode} onChange={() => setCheckerMode(!checkerMode)} color="primary" />}
+            label={<Typography variant="subtitle2">{checkerMode ? "View Full Template" : "View Modified Only"}</Typography>}
           />
         </Stack>
         <IconButton onClick={onClose}><Close /></IconButton>
       </DialogTitle>
 
-      <DialogContent sx={{ p: 2 }}>
+      <DialogContent sx={{ p: 3, bgcolor: '#f9fafb' }}>
         {loading ? (
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 10 }}>
-            <CircularProgress size={60} />
-            <Typography sx={{ mt: 2 }} color="text.secondary">Analyzing template differences...</Typography>
+            <CircularProgress />
+            <Typography sx={{ mt: 2 }} color="text.secondary">Fetching differences...</Typography>
           </Box>
         ) : diffResponse && (
-          <Stack spacing={3}>
-            {/* FEATURE 1: COLUMN DEFINITION DIFFS */}
+          <Stack spacing={4}>
+            
+            {/* 1. COLUMN DEFINITION CHANGES */}
             <Box>
-              <Typography variant="subtitle2" color="primary" gutterBottom sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Visibility fontSize="small" /> 1. Column Structural Changes
-              </Typography>
-              <TableContainer component={Paper} variant="outlined">
-                <Table size="small">
-                  <TableHead sx={{ bgcolor: '#fafafa' }}>
-                    <TableRow>
-                      <TableCell sx={{ width: '20%', fontWeight: 'bold' }}>Column ID</TableCell>
-                      <TableCell sx={{ width: '20%', fontWeight: 'bold' }}>Property</TableCell>
-                      <TableCell sx={{ width: '30%', fontWeight: 'bold' }}>Old Value</TableCell>
-                      <TableCell sx={{ width: '30%', fontWeight: 'bold' }}>New Value</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {Object.keys(diffResponse.columnDiffs || {}).length > 0 ? (
-                      Object.entries(diffResponse.columnDiffs).map(([colId, fields]) => 
-                        Object.entries(fields).map(([field, diff], idx) => (
-                          <TableRow key={`${colId}-${field}`}>
-                            {idx === 0 && <TableCell rowSpan={Object.keys(fields).length} sx={{ fontWeight: 'bold', verticalAlign: 'top', pt: 1.5 }}>{colId}</TableCell>}
-                            <TableCell sx={{ textTransform: 'uppercase', fontSize: '0.75rem' }}>{field}</TableCell>
-                            <TableCell><DiffText value={diff.oldValue} type="old" /></TableCell>
-                            <TableCell><DiffText value={diff.newValue} type="new" /></TableCell>
-                          </TableRow>
-                        ))
-                      )
-                    ) : (
-                      <TableRow><TableCell colSpan={4} align="center" sx={{ py: 2, color: 'text.secondary' }}>No column structural changes detected.</TableCell></TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </TableContainer>
+                <Typography variant="subtitle2" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1, fontWeight: 'bold' }}>
+                    <Visibility fontSize="small" color="primary" /> Column Definition Structure Changes
+                </Typography>
+                <TableContainer component={Paper} variant="outlined">
+                    <Table size="small">
+                        <TableHead sx={{ bgcolor: '#eee' }}>
+                            <TableRow>
+                                <TableCell sx={{ fontWeight: 'bold' }}>Column ID</TableCell>
+                                <TableCell sx={{ fontWeight: 'bold' }}>Property</TableCell>
+                                <TableCell sx={{ fontWeight: 'bold', color: 'error.main' }}>Old Value</TableCell>
+                                <TableCell sx={{ fontWeight: 'bold', color: 'success.main' }}>New Value</TableCell>
+                            </TableRow>
+                        </TableHead>
+                        <TableBody>
+                            {Object.keys(diffResponse.columnDiffs || {}).length > 0 ? (
+                                Object.entries(diffResponse.columnDiffs).map(([colId, fields]) => 
+                                    Object.entries(fields).map(([field, diff], idx) => (
+                                        <TableRow key={`${colId}-${field}`}>
+                                            {idx === 0 && <TableCell rowSpan={Object.keys(fields).length} sx={{ fontWeight: 'bold', verticalAlign: 'top', pt: 1.5 }}>{colId}</TableCell>}
+                                            <TableCell sx={{ textTransform: 'capitalize' }}>{field}</TableCell>
+                                            <TableCell><DiffValue value={diff.oldValue} type="old" /></TableCell>
+                                            <TableCell><DiffValue value={diff.newValue} type="new" /></TableCell>
+                                        </TableRow>
+                                    ))
+                                )
+                            ) : (
+                                <TableRow><TableCell colSpan={4} align="center" sx={{ py: 2, color: 'text.disabled' }}>No structural column changes</TableCell></TableRow>
+                            )}
+                        </TableBody>
+                    </Table>
+                </TableContainer>
             </Box>
 
-            {/* FEATURE 3: CHECKER VIEW TOGGLE */}
+            {/* 2. DATA CHANGES (CHECKER VS FULL VIEW) */}
             <Box>
-              <Typography variant="subtitle2" color="primary" gutterBottom sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}>
-                <CompareArrows fontSize="small" /> 2. Template Data Comparison
-              </Typography>
+                <Typography variant="subtitle2" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1, fontWeight: 'bold' }}>
+                    {checkerMode ? <ListAlt fontSize="small" color="primary" /> : <GridView fontSize="small" color="primary" />}
+                    {checkerMode ? "Modified Fields (Checker View)" : "Full Template Comparison"}
+                </Typography>
 
-              {checkerMode ? (
-                /* MODIFIED FIELDS ONLY (Simplified Checker Table) */
-                <TableContainer component={Paper} variant="outlined">
-                  <Table size="small">
-                    <TableHead sx={{ bgcolor: '#fafafa' }}>
-                      <TableRow>
-                        <TableCell sx={{ width: '20%', fontWeight: 'bold' }}>Cell Location</TableCell>
-                        <TableCell sx={{ width: '20%', fontWeight: 'bold' }}>Modified Field</TableCell>
-                        <TableCell sx={{ width: '30%', fontWeight: 'bold' }}>Previous (Active)</TableCell>
-                        <TableCell sx={{ width: '30%', fontWeight: 'bold' }}>Proposed (Pending)</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {Object.keys(diffResponse.cellDiffs || {}).length > 0 ? (
-                        Object.entries(diffResponse.cellDiffs).map(([cellId, fields]) => 
-                          Object.entries(fields).map(([field, diff], idx) => (
-                            <TableRow key={`${cellId}-${field}`}>
-                              {idx === 0 && <TableCell rowSpan={Object.keys(fields).length} sx={{ fontWeight: 'bold', verticalAlign: 'top', pt: 1.5 }}>{cellId}</TableCell>}
-                              <TableCell sx={{ textTransform: 'capitalize' }}>{field}</TableCell>
-                              <TableCell sx={{ bgcolor: '#fff5f5' }}><DiffText value={diff.oldValue} type="old" /></TableCell>
-                              <TableCell sx={{ bgcolor: '#f5fff5' }}><DiffText value={diff.newValue} type="new" /></TableCell>
-                            </TableRow>
-                          ))
-                        )
-                      ) : (
-                        <TableRow><TableCell colSpan={4} align="center" sx={{ py: 4 }}>No cell changes detected.</TableCell></TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              ) : (
-                /* FEATURE 2: FULL TEMPLATE VIEW (Side-by-Side Virtualized) */
-                <Stack direction="row" spacing={1}>
-                  <Box sx={{ flex: 1 }}>
-                    <Typography variant="caption" sx={{ fontWeight: 'bold', color: 'error.main', mb: 1, display: 'block' }}>OLD VERSION (ACTIVE)</Typography>
-                    <TemplateGrid 
-                      gridInfo={gridInfo} rows={gridInfo.rowsOld} side="OLD" 
-                      cellDiffs={diffResponse.cellDiffs} columnDiffs={diffResponse.columnDiffs}
-                      selectedCellKey={selectedCellKey} onCellClick={setSelectedCellKey}
-                      scrollRef={oldTableRef} onScroll={handleSyncScroll}
-                    />
-                  </Box>
-                  <Box sx={{ flex: 1 }}>
-                    <Typography variant="caption" sx={{ fontWeight: 'bold', color: 'success.main', mb: 1, display: 'block' }}>NEW VERSION (PROPOSED)</Typography>
-                    <TemplateGrid 
-                      gridInfo={gridInfo} rows={gridInfo.rowsNew} side="NEW" 
-                      cellDiffs={diffResponse.cellDiffs} columnDiffs={diffResponse.columnDiffs}
-                      selectedCellKey={selectedCellKey} onCellClick={setSelectedCellKey}
-                      scrollRef={newTableRef} onScroll={handleSyncScroll}
-                    />
-                  </Box>
-                </Stack>
-              )}
+                {checkerMode ? (
+                    /* CHECKER VIEW: ONLY MODIFIED CELLS */
+                    <TableContainer component={Paper} variant="outlined">
+                        <Table size="small">
+                            <TableHead sx={{ bgcolor: '#eee' }}>
+                                <TableRow>
+                                    <TableCell sx={{ fontWeight: 'bold' }}>Cell ID / Path</TableCell>
+                                    <TableCell sx={{ fontWeight: 'bold' }}>Field</TableCell>
+                                    <TableCell sx={{ fontWeight: 'bold', color: 'error.main' }}>Old Value (Left)</TableCell>
+                                    <TableCell sx={{ fontWeight: 'bold', color: 'success.main' }}>New Value (Right)</TableCell>
+                                </TableRow>
+                            </TableHead>
+                            <TableBody>
+                                {Object.keys(diffResponse.cellDiffs || {}).length > 0 ? (
+                                    Object.entries(diffResponse.cellDiffs).map(([cellId, fields]) => 
+                                        Object.entries(fields).map(([field, diff], idx) => (
+                                            <TableRow key={`${cellId}-${field}`}>
+                                                {idx === 0 && <TableCell rowSpan={Object.keys(fields).length} sx={{ fontWeight: 'bold', verticalAlign: 'top', pt: 1.5 }}>{cellId}</TableCell>}
+                                                <TableCell sx={{ textTransform: 'capitalize' }}>{field}</TableCell>
+                                                <TableCell><DiffValue value={diff.oldValue} type="old" /></TableCell>
+                                                <TableCell><DiffValue value={diff.newValue} type="new" /></TableCell>
+                                            </TableRow>
+                                        ))
+                                    )
+                                ) : (
+                                    <TableRow><TableCell colSpan={4} align="center" sx={{ py: 5 }}>No data modifications found</TableCell></TableRow>
+                                )}
+                            </TableBody>
+                        </Table>
+                    </TableContainer>
+                ) : (
+                    /* FULL VIEW: VIRTUALIZED SIDE-BY-SIDE GRIDS */
+                    <Stack direction="row" spacing={2}>
+                        <Box sx={{ flex: 1 }}>
+                            <Typography variant="caption" color="error.main" fontWeight="bold">OLD VERSION (ACTIVE)</Typography>
+                            <VirtualizedGrid 
+                                rows={gridData.oldRows} maxCols={gridData.maxCols} side="old"
+                                cellDiffs={diffResponse.cellDiffs} columnDiffs={diffResponse.columnDiffs}
+                                scrollRef={leftRef} onScroll={handleScroll}
+                            />
+                        </Box>
+                        <Box sx={{ flex: 1 }}>
+                            <Typography variant="caption" color="success.main" fontWeight="bold">NEW VERSION (PROPOSED)</Typography>
+                            <VirtualizedGrid 
+                                rows={gridData.newRows} maxCols={gridData.maxCols} side="new"
+                                cellDiffs={diffResponse.cellDiffs} columnDiffs={diffResponse.columnDiffs}
+                                scrollRef={rightRef} onScroll={handleScroll}
+                            />
+                        </Box>
+                    </Stack>
+                )}
             </Box>
           </Stack>
         )}
