@@ -901,3 +901,327 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
 export default CompareTemplateDialog;
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import React, { useEffect, useState, useMemo, memo, useRef, useCallback } from "react";
+import {
+  Dialog, DialogTitle, DialogContent, Box, Typography, Table, TableBody, 
+  TableCell, TableRow, Paper, CircularProgress, IconButton, Divider, 
+  Stack, TableHead, TableContainer, Alert, Collapse, Tooltip, Chip, Button, Switch, FormControlLabel
+} from "@mui/material";
+import { 
+  Close, EditNote, ExpandLess, ExpandMore,
+  NavigateNext, NavigateBefore, TableChart, ViewHeadline, ViewModule 
+} from "@mui/icons-material";
+import { useVirtualizer } from '@tanstack/react-virtual';
+import useApi from "../../hooks/useApi";
+
+// ============================================================================
+// 1. RECURSIVE DIFF TEXT COMPONENT
+// ============================================================================
+const DiffText = memo(({ value, otherValue, type }) => {
+  if (value === null || value === undefined) return <Typography variant="body2" color="text.secondary">—</Typography>;
+
+  if (Array.isArray(value)) {
+    const otherArr = Array.isArray(otherValue) ? otherValue : [];
+    return (
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+        {value.map((item, idx) => {
+          const existsInOther = otherArr.includes(item);
+          const isRemoved = type === 'old' && !existsInOther;
+          const isAdded = type === 'new' && !existsInOther;
+          return (
+            <Typography
+              key={idx}
+              variant="body2"
+              sx={{
+                textDecoration: isRemoved ? "line-through" : "none",
+                color: isRemoved ? "error.main" : isAdded ? "success.main" : "text.primary",
+                fontWeight: isAdded ? "bold" : "normal",
+                bgcolor: isAdded ? "#e8f5e9" : isRemoved ? "#ffebee" : "transparent",
+                px: 0.5, borderRadius: '2px', fontSize: '0.8rem'
+              }}
+            >
+              {typeof item === 'object' ? JSON.stringify(item) : item}{idx < value.length - 1 ? ", " : ""}
+            </Typography>
+          );
+        })}
+      </Box>
+    );
+  }
+
+  if (typeof value === 'object' && value !== null) {
+    return (
+      <Box sx={{ pl: 1, borderLeft: '1px solid #eee' }}>
+        {Object.entries(value).map(([key, val]) => (
+          <Box key={key} sx={{ mb: 1 }}>
+            <Typography variant="caption" sx={{ fontWeight: 'bold', color: 'text.secondary', display: 'block' }}>
+              {key.toUpperCase()}:
+            </Typography>
+            <DiffText value={val} otherValue={otherValue ? otherValue[key] : undefined} type={type} />
+          </Box>
+        ))}
+      </Box>
+    );
+  }
+
+  const isChanged = value !== otherValue;
+  return (
+    <Typography variant="body2" sx={{ 
+      color: isChanged ? (type === 'old' ? 'error.main' : 'success.main') : 'text.primary',
+      textDecoration: isChanged && type === 'old' ? 'line-through' : 'none',
+      fontWeight: isChanged && type === 'new' ? 'bold' : 'normal',
+      wordBreak: 'break-all'
+    }}>
+      {String(value)}
+    </Typography>
+  );
+});
+
+// ============================================================================
+// 2. VIRTUALIZED GRID COMPONENT
+// ============================================================================
+const TemplateGrid = memo(({ gridInfo, rows, side, cellDiffs, columnDiffs, selectedCellKey, onCellClick, scrollRef, onScroll }) => {
+  const parentRef = useRef();
+
+  // Virtualizer for Rows
+  const rowVirtualizer = useVirtualizer({
+    count: gridInfo.maxRows,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 40, // Height of row
+    overscan: 5,
+  });
+
+  const getCellKey = (cell, r, c) => cell?.id || `R${r}C${c}`;
+
+  return (
+    <TableContainer 
+      ref={(el) => { parentRef.current = el; if(scrollRef) scrollRef.current = el; }} 
+      onScroll={onScroll} 
+      sx={{ maxHeight: 500, border: "1px solid #ddd", bgcolor: 'white', position: 'relative' }}
+    >
+      <Table size="small" stickyHeader sx={{ tableLayout: "fixed", width: "max-content" }}>
+        <TableHead>
+          <TableRow>
+            <TableCell sx={{ bgcolor: "#f5f5f5", width: 60, zIndex: 10 }}>Row</TableCell>
+            {Array.from({ length: gridInfo.maxCols }).map((_, i) => {
+              const col = gridInfo.columns[i];
+              const colKey = col?.id || `C${i}`;
+              const hasColDiff = !!columnDiffs?.[colKey];
+              return (
+                <TableCell key={i} sx={{ 
+                  bgcolor: hasColDiff ? (side === "OLD" ? "#ffebee" : "#e8f5e9") : "#f5f5f5",
+                  width: 150, textAlign: "center", fontSize: "0.7rem", fontWeight: "bold"
+                }}>
+                  {col?.name || `Col ${i + 1}`}
+                  {hasColDiff && <Chip label="Changed" size="small" color="warning" sx={{ height: 16, fontSize: '0.6rem', mt: 0.5 }} />}
+                </TableCell>
+              );
+            })}
+          </TableRow>
+        </TableHead>
+        <TableBody sx={{ height: `${rowVirtualizer.getTotalSize()}px`, position: 'relative' }}>
+          {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+            const rIdx = virtualRow.index;
+            const row = rows[rIdx];
+            return (
+              <TableRow 
+                key={virtualRow.key} 
+                sx={{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${virtualRow.start}px)` }}
+              >
+                <TableCell sx={{ width: 60, textAlign: 'center', bgcolor: '#fafafa' }}>{rIdx + 1}</TableCell>
+                {Array.from({ length: gridInfo.maxCols }).map((_, cIdx) => {
+                  const cell = row?.cells?.[cIdx];
+                  const key = getCellKey(cell, rIdx, cIdx);
+                  const hasDiff = !!cellDiffs?.[key];
+                  const isSelected = selectedCellKey === key;
+                  
+                  return (
+                    <TableCell 
+                      key={cIdx}
+                      onClick={() => hasDiff && onCellClick(key)}
+                      sx={{ 
+                        width: 150, border: "1px solid #e0e0e0", cursor: hasDiff ? "pointer" : "default",
+                        bgcolor: isSelected ? "#fff9c4" : hasDiff ? (side === "OLD" ? "#ffebee" : "#e8f5e9") : "white",
+                        fontSize: "0.72rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
+                      }}
+                    >
+                      {String(cell?.value ?? cell?.expression ?? "")}
+                    </TableCell>
+                  );
+                })}
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+});
+
+// ============================================================================
+// MAIN COMPONENT
+// ============================================================================
+const CompareTemplateDialog = ({ open, onClose, requestRow }) => {
+  const { callApi } = useApi();
+  const [loading, setLoading] = useState(false);
+  const [diffResponse, setDiffResponse] = useState(null);
+  const [selectedCellKey, setSelectedCellKey] = useState(null);
+  const [isCheckerView, setIsCheckerView] = useState(true); // Default to Checker View (Modified Only)
+  
+  const oldTableRef = useRef(null);
+  const newTableRef = useRef(null);
+  const isSyncing = useRef(false);
+
+  useEffect(() => {
+    if (open && requestRow?.id) {
+      setLoading(true);
+      callApi("/TC/template-diff", { requestId: requestRow.id }, "POST")
+        .then((res) => setDiffResponse(res.data || res))
+        .catch(console.error)
+        .finally(() => setLoading(false));
+    }
+  }, [open, requestRow, callApi]);
+
+  const gridInfo = useMemo(() => {
+    if (!diffResponse) return null;
+    const oldT = diffResponse.oldTemplate?.template?.reportData || {};
+    const newT = diffResponse.newTemplate?.template?.reportData || {};
+    return {
+      columns: newT.columns || oldT.columns || [],
+      rowsOld: oldT.rows || [],
+      rowsNew: newT.rows || [],
+      maxRows: Math.max(oldT.rows?.length || 0, newT.rows?.length || 0),
+      maxCols: Math.max(oldT.columns?.length || 0, newT.columns?.length || 0)
+    };
+  }, [diffResponse]);
+
+  const handleSyncScroll = (e) => {
+    if (isSyncing.current) return;
+    isSyncing.current = true;
+    const target = e.target === oldTableRef.current ? newTableRef.current : oldTableRef.current;
+    if (target) {
+      target.scrollLeft = e.target.scrollLeft;
+      target.scrollTop = e.target.scrollTop;
+    }
+    setTimeout(() => { isSyncing.current = false; }, 50);
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} fullScreen>
+      <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: '#f8f9fa' }}>
+        <Stack direction="row" spacing={2} alignItems="center">
+          <TableChart color="primary" />
+          <Typography variant="h6">Template Comparison - ID: {requestRow?.id}</Typography>
+          <Divider orientation="vertical" flexItem />
+          <FormControlLabel
+            control={<Switch checked={!isCheckerView} onChange={() => setIsCheckerView(!isCheckerView)} />}
+            label={isCheckerView ? "Checker View (Modified Only)" : "Full Template View"}
+          />
+        </Stack>
+        <IconButton onClick={onClose}><Close /></IconButton>
+      </DialogTitle>
+
+      <DialogContent sx={{ p: 2 }}>
+        {loading ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', p: 10 }}><CircularProgress /></Box>
+        ) : diffResponse && (
+          <Stack spacing={2}>
+            {/* 1. COLUMN CHANGES SECTION */}
+            <Paper variant="outlined" sx={{ p: 2, bgcolor: '#fffde7' }}>
+              <Typography variant="subtitle2" gutterBottom fontWeight="bold">Column Definition Changes</Typography>
+              {Object.keys(diffResponse.columnDiffs || {}).length > 0 ? (
+                <Stack spacing={1}>
+                  {Object.entries(diffResponse.columnDiffs).map(([colId, fields]) => (
+                    <Box key={colId} sx={{ p: 1, border: '1px solid #e0e0e0', borderRadius: 1, bgcolor: 'white' }}>
+                      <Typography variant="caption" color="primary" fontWeight="bold">Column ID: {colId}</Typography>
+                      {Object.entries(fields).map(([field, diff]) => (
+                        <Stack key={field} direction="row" spacing={2} sx={{ mt: 1 }}>
+                          <Box sx={{ flex: 1 }}><Typography variant="caption">OLD {field}:</Typography><DiffText value={diff.oldValue} type="old" /></Box>
+                          <Box sx={{ flex: 1 }}><Typography variant="caption">NEW {field}:</Typography><DiffText value={diff.newValue} type="new" /></Box>
+                        </Stack>
+                      ))}
+                    </Box>
+                  ))}
+                </Stack>
+              ) : <Typography variant="body2" color="text.secondary">No column structural changes detected.</Typography>}
+            </Paper>
+
+            {/* 2. GRID COMPARISON SECTION */}
+            {!isCheckerView ? (
+              <Stack direction="row" spacing={1} sx={{ height: 600 }}>
+                <Box sx={{ flex: 1 }}>
+                  <Typography variant="caption" fontWeight="bold">OLD VERSION (ACTIVE)</Typography>
+                  <TemplateGrid 
+                    gridInfo={gridInfo} rows={gridInfo.rowsOld} side="OLD" 
+                    cellDiffs={diffResponse.cellDiffs} columnDiffs={diffResponse.columnDiffs}
+                    selectedCellKey={selectedCellKey} onCellClick={setSelectedCellKey}
+                    scrollRef={oldTableRef} onScroll={handleSyncScroll}
+                  />
+                </Box>
+                <Box sx={{ flex: 1 }}>
+                  <Typography variant="caption" fontWeight="bold">NEW VERSION (PENDING)</Typography>
+                  <TemplateGrid 
+                    gridInfo={gridInfo} rows={gridInfo.rowsNew} side="NEW" 
+                    cellDiffs={diffResponse.cellDiffs} columnDiffs={diffResponse.columnDiffs}
+                    selectedCellKey={selectedCellKey} onCellClick={setSelectedCellKey}
+                    scrollRef={newTableRef} onScroll={handleSyncScroll}
+                  />
+                </Box>
+              </Stack>
+            ) : (
+              /* CHECKER VIEW: ONLY MODIFIED CELLS */
+              <Box>
+                <Typography variant="subtitle2" fontWeight="bold" gutterBottom>Modified Cells Only</Typography>
+                <TableContainer component={Paper} variant="outlined">
+                  <Table size="small">
+                    <TableHead sx={{ bgcolor: '#f5f5f5' }}>
+                      <TableRow>
+                        <TableCell>Cell ID</TableCell>
+                        <TableCell>Field</TableCell>
+                        <TableCell>Old Value</TableCell>
+                        <TableCell>New Value</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {Object.entries(diffResponse.cellDiffs || {}).map(([cellId, fields]) => 
+                        Object.entries(fields).map(([field, diff], idx) => (
+                          <TableRow key={`${cellId}-${field}`}>
+                            {idx === 0 && <TableCell rowSpan={Object.keys(fields).length} sx={{ fontWeight: 'bold' }}>{cellId}</TableCell>}
+                            <TableCell sx={{ textTransform: 'capitalize' }}>{field}</TableCell>
+                            <TableCell sx={{ bgcolor: '#fff5f5' }}><DiffText value={diff.oldValue} type="old" /></TableCell>
+                            <TableCell sx={{ bgcolor: '#f5fff5' }}><DiffText value={diff.newValue} type="new" /></TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Box>
+            )}
+          </Stack>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+export default CompareTemplateDialog;
+
