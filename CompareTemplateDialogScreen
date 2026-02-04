@@ -1,7 +1,448 @@
-// ==============================================================================================
-// CompareTemplateDialog.jsx                 --------------> If you click the modified cells, then you can see the changes
-// ===============================================================================================
-// Added functionality:
+// import React, { useEffect, useState, useMemo, memo, useRef, useCallback } from "react";
+// import {
+//   Dialog, DialogTitle, DialogContent, Box, Typography, Table, TableBody, 
+//   TableCell, TableRow, Paper, CircularProgress, IconButton, Divider, 
+//   Stack, TableHead, TableContainer, Alert, Collapse, Tooltip, Chip
+// } from "@mui/material";
+// import { 
+//   Close, EditNote, ExpandLess, ExpandMore,
+//   NavigateNext, NavigateBefore, Link, TableChart 
+// } from "@mui/icons-material";
+// import useApi from "../../hooks/useApi";
+
+// // ============================================================================
+// // 1. RECURSIVE DIFF TEXT COMPONENT
+// // FIX: Recursively handles objects to prevent "Object as React Child" error
+// // ============================================================================
+// const DiffText = memo(({ value, otherValue, type }) => {
+//   if (value === null || value === undefined) return <Typography variant="body2" color="text.secondary">—</Typography>;
+
+//   // Handle Arrays
+//   if (Array.isArray(value)) {
+//     const otherArr = Array.isArray(otherValue) ? otherValue : [];
+//     return (
+//       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+//         {value.map((item, idx) => {
+//           const existsInOther = otherArr.includes(item);
+//           const isRemoved = type === 'old' && !existsInOther;
+//           const isAdded = type === 'new' && !existsInOther;
+
+//           return (
+//             <Typography
+//               key={idx}
+//               variant="body2"
+//               component="span"
+//               sx={{
+//                 textDecoration: isRemoved ? "line-through" : "none",
+//                 color: isRemoved ? "error.main" : isAdded ? "success.main" : "text.primary",
+//                 fontWeight: isAdded ? "bold" : "normal",
+//                 bgcolor: isAdded ? "#e8f5e9" : isRemoved ? "#ffebee" : "transparent",
+//                 px: 0.5, borderRadius: '2px', fontSize: '0.8rem'
+//               }}
+//             >
+//               {/* Safety: If item is object, stringify it */}
+//               {typeof item === 'object' ? JSON.stringify(item) : item}{idx < value.length - 1 ? ", " : ""}
+//             </Typography>
+//           );
+//         })}
+//       </Box>
+//     );
+//   }
+
+//   // Handle Objects (Recursive)
+//   if (typeof value === 'object' && value !== null) {
+//     return (
+//       <Box sx={{ pl: 1, borderLeft: '1px solid #eee' }}>
+//         {Object.entries(value).map(([key, val]) => (
+//           <Box key={key} sx={{ mb: 1 }}>
+//             <Typography variant="caption" sx={{ fontWeight: 'bold', color: 'text.secondary', display: 'block' }}>
+//               {key.toUpperCase()}:
+//             </Typography>
+//             <DiffText value={val} otherValue={otherValue ? otherValue[key] : undefined} type={type} />
+//           </Box>
+//         ))}
+//       </Box>
+//     );
+//   }
+
+//   // Handle Primitives (Strings/Numbers)
+//   const isChanged = value !== otherValue;
+//   return (
+//     <Typography
+//       variant="body2"
+//       sx={{
+//         color: isChanged ? (type === 'old' ? 'error.main' : 'success.main') : 'text.primary',
+//         textDecoration: isChanged && type === 'old' ? 'line-through' : 'none',
+//         fontWeight: isChanged && type === 'new' ? 'bold' : 'normal',
+//         wordBreak: 'break-all'
+//       }}
+//     >
+//       {String(value)}
+//     </Typography>
+//   );
+// });
+
+// // ============================================================================
+// // 2. HIGH-PERFORMANCE CELL
+// // FIX: Added JSON.stringify to displayValue to prevent app crash on objects
+// // ============================================================================
+// const GridCell = memo(({ cell, cellKey, hasDiff, isSelected, onCellClick, side }) => {
+//   const cellStyle = cell?.style || {}; 
+  
+//   // CRITICAL FIX: Ensure we never try to render a raw Object
+//   let rawValue = cell?.value ?? cell?.expression ?? "";
+  
+//   // If the value is an object (like a filter definition), convert to string
+//   const displayValue = (typeof rawValue === 'object' && rawValue !== null) 
+//     ? JSON.stringify(rawValue) 
+//     : String(rawValue);
+
+//   return (
+//     <TableCell
+//       onClick={() => hasDiff && onCellClick(cellKey)}
+//       colSpan={cell?.colSpan || 1}
+//       align={cell?.align?.toLowerCase() || 'center'}
+//       id={isSelected ? "selected-cell-scroll-target" : undefined}
+//       sx={{
+//         border: "1px solid #e0e0e0",
+//         cursor: hasDiff ? "pointer" : "default",
+//         bgcolor: isSelected 
+//           ? "#fff9c4" 
+//           : hasDiff 
+//             ? side === "OLD" ? "#ffebee" : "#e8f5e9"
+//             : (cellStyle.backgroundColor || "white"),
+//         color: cellStyle.color || "inherit",
+//         fontWeight: cellStyle.bold || isSelected ? "bold" : "normal",
+//         fontStyle: cellStyle.italic ? "italic" : "normal",
+//         fontSize: "0.72rem",
+//         height: 38,
+//         minWidth: 100,
+//         maxWidth: 150,
+//         boxShadow: isSelected ? "inset 0 0 0 2px #fbc02d" : "none",
+//         whiteSpace: "nowrap",
+//         overflow: "hidden",
+//         textOverflow: "ellipsis",
+//         p: 0.5
+//       }}
+//     >
+//       <Tooltip title={displayValue} placement="top" arrow>
+//         <span>{displayValue}</span>
+//       </Tooltip>
+      
+//       {hasDiff && !displayValue && (
+//         <Typography variant="caption" color="text.disabled" sx={{ fontStyle: 'italic' }}>(empty)</Typography>
+//       )}
+//     </TableCell>
+//   );
+// }, (prev, next) => {
+//   return prev.isSelected === next.isSelected && prev.hasDiff === next.hasDiff && prev.cell === next.cell;
+// });
+
+// // ============================================================================
+// // 3. ISOLATED GRID COMPONENT
+// // ============================================================================
+// const TemplateGrid = memo(({ gridInfo, rows, side, cellDiffs, selectedCellKey, onCellClick, scrollRef, onScroll }) => {
+//   const getCellKey = (cell, r, c) => cell?.id || `R${r}C${c}`;
+
+//   return (
+//     <TableContainer 
+//       ref={scrollRef}
+//       onScroll={onScroll}
+//       sx={{ maxHeight: 400, border: "1px solid #ddd", bgcolor: 'white' }}
+//     >
+//       <Table size="small" stickyHeader sx={{ tableLayout: "fixed", width: "max-content" }}>
+//         <TableHead>
+//           <TableRow>
+//             <TableCell sx={{ bgcolor: "#f5f5f5", width: 60, minWidth: 60, fontWeight: "bold", zIndex: 5, p: 0.5, textAlign: 'center' }}>
+//               Row ID
+//             </TableCell>
+//             {Array.from({ length: gridInfo.maxCols }).map((_, i) => {
+//               const col = gridInfo.columns[i];
+//               return (
+//                 <TableCell key={i} sx={{ bgcolor: "#f5f5f5", fontWeight: "bold", textAlign: "center", fontSize: "0.7rem", width: 120, minWidth: 120, p: 0.5, whiteSpace: "normal", wordBreak: "break-word", lineHeight: 1.1 }}>
+//                   <span>{col?.name || `Col ${i + 1}`}</span>
+//                   <Typography variant="caption" color="text.secondary" display="block" sx={{ fontSize: '0.6rem' }}>
+//                     {col?.id ? `(${col.id})` : ''}
+//                   </Typography>
+//                 </TableCell>
+//               );
+//             })}
+//           </TableRow>
+//         </TableHead>
+//         <TableBody>
+//           {Array.from({ length: gridInfo.maxRows }).map((_, rIdx) => {
+//             const row = rows[rIdx];
+//             return (
+//               <TableRow key={rIdx}>
+//                 <TableCell sx={{ bgcolor: "#fafafa", textAlign: "center", fontWeight: "bold", fontSize: '0.7rem', color: 'text.secondary' }}>
+//                   {row?.rowId || row?.id || rIdx + 1}
+//                 </TableCell>
+//                 {Array.from({ length: gridInfo.maxCols }).map((_, cIdx) => {
+//                   const cell = row?.cells?.[cIdx];
+//                   const key = getCellKey(cell, rIdx, cIdx);
+//                   const hasDiff = !!cellDiffs?.[key];
+//                   return (
+//                     <GridCell
+//                       key={cIdx}
+//                       cell={cell}
+//                       cellKey={key}
+//                       hasDiff={hasDiff}
+//                       isSelected={selectedCellKey === key}
+//                       onCellClick={onCellClick}
+//                       side={side}
+//                     />
+//                   );
+//                 })}
+//               </TableRow>
+//             );
+//           })}
+//         </TableBody>
+//       </Table>
+//     </TableContainer>
+//   );
+// });
+
+// // ============================================================================
+// // MAIN COMPONENT
+// // ============================================================================
+// const CompareTemplateDialog = ({ open, onClose, requestId }) => {
+//   const { callApi } = useApi();
+//   const [loading, setLoading] = useState(false);
+//   const [diffResponse, setDiffResponse] = useState(null);
+//   const [selectedCellKey, setSelectedCellKey] = useState(null);
+//   const [analysisExpanded, setAnalysisExpanded] = useState(true);
+  
+//   const [diffKeys, setDiffKeys] = useState([]);
+//   const [currentDiffIdx, setCurrentDiffIdx] = useState(-1);
+
+//   const oldTableRef = useRef(null);
+//   const newTableRef = useRef(null);
+//   const isSyncing = useRef(false);
+
+//   useEffect(() => {
+//     if (open && requestId) {
+//       setLoading(true);
+//       setSelectedCellKey(null);
+//       setDiffKeys([]);
+//       setCurrentDiffIdx(-1);
+      
+//       callApi("/TC/template-diff", { requestId }, "POST")
+//         .then((res) => {
+//           const data = res.data || res;
+//           setDiffResponse(data);
+//           if (data?.cellDiffs) {
+//             setDiffKeys(Object.keys(data.cellDiffs));
+//           }
+//         })
+//         .catch((err) => console.error("Error", err))
+//         .finally(() => setLoading(false));
+//     }
+//   }, [open, requestId, callApi]);
+
+//   const gridInfo = useMemo(() => {
+//     if (!diffResponse) return { maxRows: 0, maxCols: 0, columns: [], rowsOld: [], rowsNew: [] };
+    
+//     const oldTemplate = diffResponse.oldTemplate?.template?.reportData || {};
+//     const newTemplate = diffResponse.newTemplate?.template?.reportData || {};
+//     const columns = (newTemplate?.columns || oldTemplate?.columns || []);
+//     const rowsOld = oldTemplate?.rows || [];
+//     const rowsNew = newTemplate?.rows || [];
+    
+//     // Calculate max dimensions safely
+//     const maxR = Math.max(rowsOld.length, rowsNew.length);
+//     const maxC = Math.max(
+//       columns.length, 
+//       ...rowsOld.map(r => r.cells?.length || 0), 
+//       ...rowsNew.map(r => r.cells?.length || 0)
+//     );
+
+//     return { maxRows: maxR, maxCols: maxC, columns, rowsOld, rowsNew };
+//   }, [diffResponse]);
+
+//   const handleScroll = useCallback((source, target) => {
+//     if (!source.current || !target.current || isSyncing.current) return;
+//     isSyncing.current = true;
+//     requestAnimationFrame(() => {
+//       if(target.current && source.current) {
+//         target.current.scrollTop = source.current.scrollTop;
+//         target.current.scrollLeft = source.current.scrollLeft;
+//       }
+//       setTimeout(() => { isSyncing.current = false; }, 50);
+//     });
+//   }, []);
+
+//   // FIX: Ensure this is defined before usage to prevent ReferenceError
+//   const handleCellClick = useCallback((key) => {
+//     setSelectedCellKey(key);
+//     setDiffKeys((prevKeys) => {
+//       const idx = prevKeys.indexOf(key);
+//       if (idx !== -1) setCurrentDiffIdx(idx);
+//       return prevKeys; 
+//     });
+//   }, []);
+
+//   const navigateDiff = (direction) => {
+//     if (diffKeys.length === 0) return;
+//     let newIdx = direction === 'next' ? currentDiffIdx + 1 : currentDiffIdx - 1;
+//     if (newIdx >= diffKeys.length) newIdx = 0;
+//     if (newIdx < 0) newIdx = diffKeys.length - 1;
+
+//     setCurrentDiffIdx(newIdx);
+//     const key = diffKeys[newIdx];
+    
+//     // Safe call to handleCellClick
+//     handleCellClick(key);
+    
+//     setTimeout(() => {
+//       const el = document.getElementById("selected-cell-scroll-target");
+//       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+//     }, 100);
+//   };
+
+//   return (
+//     <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth scroll="paper">
+//       <DialogTitle sx={{ bgcolor: "#f8f9fa", borderBottom: "1px solid #eee", py: 1 }}>
+//         <Stack direction="row" justifyContent="space-between" alignItems="center">
+//           <Stack direction="row" spacing={2} alignItems="center">
+//             <TableChart color="primary" />
+//             <Box>
+//               <Typography variant="subtitle1" fontWeight="bold" lineHeight={1.2}>Template Audit Viewer</Typography>
+//               <Typography variant="caption" color="text.secondary">Request ID: {requestId}</Typography>
+//             </Box>
+            
+//             {!loading && diffKeys.length > 0 && (
+//               <Paper variant="outlined" sx={{ display: 'flex', alignItems: 'center', ml: 4, px: 1, py: 0.5, bgcolor: 'white' }}>
+//                 <Typography variant="caption" sx={{ mr: 1, fontWeight: 'bold' }}>
+//                   Changes: {currentDiffIdx + 1} / {diffKeys.length}
+//                 </Typography>
+//                 <Tooltip title="Previous Change"><IconButton size="small" onClick={() => navigateDiff('prev')}><NavigateBefore fontSize="small" /></IconButton></Tooltip>
+//                 <Tooltip title="Next Change"><IconButton size="small" onClick={() => navigateDiff('next')}><NavigateNext fontSize="small" /></IconButton></Tooltip>
+//               </Paper>
+//             )}
+//           </Stack>
+//           <IconButton onClick={onClose} size="small"><Close /></IconButton>
+//         </Stack>
+//       </DialogTitle>
+
+//       <DialogContent sx={{ p: 3, bgcolor: '#fbfbfb' }}>
+//         {loading ? (
+//           <Box textAlign="center" py={10}><CircularProgress size={50} /></Box>
+//         ) : (
+//           <Stack spacing={3}>
+            
+//             <Box sx={{ display: "flex", gap: 2, alignItems: "stretch" }}>
+//               <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+//                 <Typography variant="caption" color="error.main" fontWeight="bold" mb={0.5}>PREVIOUS STATE</Typography>
+//                 <TemplateGrid 
+//                   side="OLD"
+//                   rows={gridInfo.rowsOld}
+//                   gridInfo={gridInfo}
+//                   cellDiffs={diffResponse?.cellDiffs}
+//                   selectedCellKey={selectedCellKey}
+//                   onCellClick={handleCellClick}
+//                   scrollRef={oldTableRef}
+//                   onScroll={() => handleScroll(oldTableRef, newTableRef)}
+//                 />
+//               </Box>
+              
+//               <Divider orientation="vertical" flexItem sx={{ alignSelf: 'center' }}><Link fontSize="small" color="disabled" /></Divider>
+
+//               <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+//                 <Typography variant="caption" color="success.main" fontWeight="bold" mb={0.5}>NEW STATE</Typography>
+//                 <TemplateGrid 
+//                   side="NEW"
+//                   rows={gridInfo.rowsNew}
+//                   gridInfo={gridInfo}
+//                   cellDiffs={diffResponse?.cellDiffs}
+//                   selectedCellKey={selectedCellKey}
+//                   onCellClick={handleCellClick}
+//                   scrollRef={newTableRef}
+//                   onScroll={() => handleScroll(newTableRef, oldTableRef)}
+//                 />
+//               </Box>
+//             </Box>
+
+//             <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
+//               <Box 
+//                 onClick={() => setAnalysisExpanded(!analysisExpanded)}
+//                 sx={{ 
+//                   bgcolor: "#f0f2f5", px: 2, py: 1.5, cursor: "pointer", 
+//                   display: "flex", justifyContent: "space-between", alignItems: "center",
+//                   '&:hover': { bgcolor: "#e4e6e9" }
+//                 }}
+//               >
+//                 <Stack direction="row" spacing={1} alignItems="center">
+//                   <EditNote color="primary" fontSize="small" />
+//                   <Typography variant="subtitle2" fontWeight="bold">Detailed Modification Analysis</Typography>
+//                   {selectedCellKey && <Chip size="small" label={`Cell: ${selectedCellKey}`} color="primary" variant="outlined" sx={{ height: 20 }} />}
+//                 </Stack>
+//                 {analysisExpanded ? <ExpandLess /> : <ExpandMore />}
+//               </Box>
+
+//               <Collapse in={analysisExpanded}>
+//                 <Box sx={{ p: 3 }}>
+//                   {!selectedCellKey ? (
+//                     <Alert severity="info" variant="outlined" sx={{ borderStyle: "dashed", py: 0 }}>
+//                       Select a highlighted cell (Red/Green) in the tables above to view specific changes.
+//                     </Alert>
+//                   ) : (
+//                     <Stack spacing={3}>
+//                       <Box>
+//                         <Stack spacing={1.5}>
+//                           {Object.entries(diffResponse.cellDiffs[selectedCellKey] || {}).map(([field, diff]) => {
+//                             if (field === 'remark') return null;
+//                             return (
+//                               <Paper key={field} variant="outlined" sx={{ overflow: "hidden", borderRadius: 1 }}>
+//                                 <Box sx={{ bgcolor: "#fcfcfc", px: 2, py: 0.5, borderBottom: "1px solid #eee" }}>
+//                                   <Typography variant="caption" fontWeight="bold" color="primary">{field.toUpperCase()}</Typography>
+//                                 </Box>
+//                                 <Stack direction="row" divider={<Divider orientation="vertical" flexItem />} spacing={0}>
+//                                   <Box sx={{ flex: 1, p: 1.5, bgcolor: "#fff8f8" }}>
+//                                     <Typography variant="caption" color="error" display="block" gutterBottom fontWeight="bold">WAS:</Typography>
+//                                     <DiffText value={diff.oldValue} otherValue={diff.newValue} type="old" />
+//                                   </Box>
+//                                   <Box sx={{ flex: 1, p: 1.5, bgcolor: "#f8fff8" }}>
+//                                     <Typography variant="caption" color="success.main" display="block" gutterBottom fontWeight="bold">NOW:</Typography>
+//                                     <DiffText value={diff.newValue} otherValue={diff.oldValue} type="new" />
+//                                   </Box>
+//                                 </Stack>
+//                               </Paper>
+//                             );
+//                           })}
+//                         </Stack>
+//                       </Box>
+                      
+//                       <Box>
+//                         <Typography variant="caption" fontWeight="bold" color="text.secondary">MAKER REMARKS</Typography>
+//                         <Paper elevation={0} sx={{ p: 2, mt: 0.5, bgcolor: "#fffde7", borderLeft: "5px solid #fbc02d" }}>
+//                           <Typography variant="body2" sx={{ fontStyle: "italic", color: "#5d4037" }}>
+//                             {diffResponse.cellDiffs[selectedCellKey]?.remark || "No manual remarks provided."}
+//                           </Typography>
+//                         </Paper>
+//                       </Box>
+//                     </Stack>
+//                   )}
+//                 </Box>
+//               </Collapse>
+//             </Paper>
+
+//           </Stack>
+//         )}
+//       </DialogContent>
+//     </Dialog>
+//   );
+// };
+
+// export default CompareTemplateDialog;
+
+
+
+
+
+
+
+// ================================================================================================================================================================
+// Functionality Added :
 //               1. Add a button to find the green and red cells.    ✅
 //               2. Scroll in sync. If I scroll the old template, then the new template is also scrolled    ✅
 //               3. Add a collapse button for detailed modification analysis    ✅
@@ -9,480 +450,34 @@
 //               5. Display row id in place of the serial number.    ✅
 //               6. Add column id with column name.     ✅
 //               7. Maintain all the formatting like colspan, alignment, etc...   ❌
-//               8. Visualization       ❌
-
-
-import React, { useEffect, useState, useMemo, memo, useRef, useCallback } from "react";
-import {
-  Dialog, DialogTitle, DialogContent, Box, Typography, Table, TableBody, 
-  TableCell, TableRow, Paper, CircularProgress, IconButton, Divider, 
-  Stack, TableHead, TableContainer, Alert, Collapse, Tooltip, Chip
-} from "@mui/material";
-import { 
-  Close, EditNote, ExpandLess, ExpandMore,
-  NavigateNext, NavigateBefore, Link, TableChart 
-} from "@mui/icons-material";
-import useApi from "../../hooks/useApi";
-
-// ============================================================================
-// 1. RECURSIVE DIFF TEXT COMPONENT (Pure Visual)
-// ============================================================================
-const DiffText = memo(({ value, otherValue, type }) => {
-  if (value === null || value === undefined) return <Typography variant="body2" color="text.secondary">—</Typography>;
-
-  if (Array.isArray(value)) {
-    const otherArr = Array.isArray(otherValue) ? otherValue : [];
-    return (
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-        {value.map((item, idx) => {
-          const existsInOther = otherArr.includes(item);
-          const isRemoved = type === 'old' && !existsInOther;
-          const isAdded = type === 'new' && !existsInOther;
-
-          return (
-            <Typography
-              key={idx}
-              variant="body2"
-              component="span"
-              sx={{
-                textDecoration: isRemoved ? "line-through" : "none",
-                color: isRemoved ? "error.main" : isAdded ? "success.main" : "text.primary",
-                fontWeight: isAdded ? "bold" : "normal",
-                bgcolor: isAdded ? "#e8f5e9" : isRemoved ? "#ffebee" : "transparent",
-                px: 0.5, borderRadius: '2px', fontSize: '0.8rem'
-              }}
-            >
-              {item}{idx < value.length - 1 ? ", " : ""}
-            </Typography>
-          );
-        })}
-      </Box>
-    );
-  }
-
-  if (typeof value === 'object' && value !== null) {
-    return (
-      <Box sx={{ pl: 1, borderLeft: '1px solid #eee' }}>
-        {Object.entries(value).map(([key, val]) => (
-          <Box key={key} sx={{ mb: 1 }}>
-            <Typography variant="caption" sx={{ fontWeight: 'bold', color: 'text.secondary', display: 'block' }}>
-              {key}:
-            </Typography>
-            <DiffText value={val} otherValue={otherValue ? otherValue[key] : null} type={type} />
-          </Box>
-        ))}
-      </Box>
-    );
-  }
-
-  const isChanged = value !== otherValue;
-  return (
-    <Typography
-      variant="body2"
-      sx={{
-        color: isChanged ? (type === 'old' ? 'error.main' : 'success.main') : 'text.primary',
-        textDecoration: isChanged && type === 'old' ? 'line-through' : 'none',
-        fontWeight: isChanged && type === 'new' ? 'bold' : 'normal',
-        wordBreak: 'break-all'
-      }}
-    >
-      {String(value)}
-    </Typography>
-  );
-});
-
-// ============================================================================
-// 2. HIGH-PERFORMANCE CELL
-// Uses custom comparison to preventing re-renders of un-changed cells
-// ============================================================================
-const GridCell = memo(({ cell, cellKey, hasDiff, isSelected, onCellClick, side }) => {
-  const cellStyle = cell?.style || {}; 
-  const displayValue = cell?.value || cell?.expression || (typeof cell === 'object' ? '' : '');
-
-  return (
-    <TableCell
-      onClick={() => hasDiff && onCellClick(cellKey)}
-      colSpan={cell?.colSpan || 1}
-      align={cell?.align?.toLowerCase() || 'center'}
-      id={isSelected ? "selected-cell-scroll-target" : undefined}
-      sx={{
-        border: "1px solid #e0e0e0",
-        cursor: hasDiff ? "pointer" : "default",
-        bgcolor: isSelected 
-          ? "#fff9c4" 
-          : hasDiff 
-            ? side === "OLD" ? "#ffebee" : "#e8f5e9"
-            : (cellStyle.backgroundColor || "white"),
-        color: cellStyle.color || "inherit",
-        fontWeight: cellStyle.bold || isSelected ? "bold" : "normal",
-        fontStyle: cellStyle.italic ? "italic" : "normal",
-        fontSize: "0.72rem",
-        height: 38,
-        minWidth: 100, // Reduced from 120
-        maxWidth: 150, // Limit width
-        boxShadow: isSelected ? "inset 0 0 0 2px #fbc02d" : "none",
-        whiteSpace: "nowrap",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        p: 0.5
-      }}
-    >
-      {typeof displayValue === 'object' ? (
-        <Tooltip title="Complex Object"><Typography variant="caption" color="text.secondary">{'{...}'}</Typography></Tooltip>
-      ) : (
-        <Tooltip title={String(displayValue).length > 20 ? String(displayValue) : ""} placement="top" arrow>
-          <span>{displayValue}</span>
-        </Tooltip>
-      )}
-      
-      {hasDiff && !displayValue && (
-        <Typography variant="caption" color="text.disabled" sx={{ fontStyle: 'italic' }}>(empty)</Typography>
-      )}
-    </TableCell>
-  );
-}, (prev, next) => {
-  // CRITICAL PERFORMANCE OPTIMIZATION
-  // Only re-render if selection state changes OR the data itself changes
-  return (
-    prev.isSelected === next.isSelected &&
-    prev.hasDiff === next.hasDiff &&
-    prev.cell === next.cell
-  );
-});
-
-// ============================================================================
-// 3. ISOLATED GRID COMPONENT
-// Isolating this ensures that collapsing the bottom panel DOES NOT re-render the table
-// ============================================================================
-const TemplateGrid = memo(({ gridInfo, rows, side, cellDiffs, selectedCellKey, onCellClick, scrollRef, onScroll }) => {
-  
-  const getCellKey = (cell, r, c) => cell?.id || `R${r}C${c}`;
-
-  return (
-    <TableContainer 
-      ref={scrollRef}
-      onScroll={onScroll}
-      sx={{ maxHeight: 400, border: "1px solid #ddd", bgcolor: 'white' }}
-    >
-      <Table size="small" stickyHeader sx={{ tableLayout: "fixed", width: "max-content" }}>
-        <TableHead>
-          <TableRow>
-            <TableCell sx={{ bgcolor: "#f5f5f5", width: 60, minWidth: 60, fontWeight: "bold", zIndex: 5, p: 0.5, textAlign: 'center' }}>
-              Row ID
-            </TableCell>
-            {Array.from({ length: gridInfo.maxCols }).map((_, i) => {
-              const col = gridInfo.columns[i];
-              return (
-                <TableCell key={i} sx={{ bgcolor: "#f5f5f5", fontWeight: "bold", textAlign: "center", fontSize: "0.7rem", width: 120, minWidth: 120, p: 0.5, whiteSpace: "normal", wordBreak: "break-word", lineHeight: 1.1 }}>
-                  <span>{col?.name || `Col ${i + 1}`}</span>
-                  <Typography variant="caption" color="text.secondary" display="block" sx={{ fontSize: '0.6rem' }}>
-                    {col?.id ? `(${col.id})` : ''}
-                  </Typography>
-                </TableCell>
-              );
-            })}
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {Array.from({ length: gridInfo.maxRows }).map((_, rIdx) => {
-            const row = rows[rIdx];
-            return (
-              <TableRow key={rIdx}>
-                <TableCell sx={{ bgcolor: "#fafafa", textAlign: "center", fontWeight: "bold", fontSize: '0.7rem', color: 'text.secondary' }}>
-                  {row?.rowId || row?.id || rIdx + 1}
-                </TableCell>
-                
-                {Array.from({ length: gridInfo.maxCols }).map((_, cIdx) => {
-                  const cell = row?.cells?.[cIdx];
-                  const key = getCellKey(cell, rIdx, cIdx);
-                  const hasDiff = !!cellDiffs?.[key];
-
-                  return (
-                    <GridCell
-                      key={cIdx}
-                      cell={cell}
-                      cellKey={key}
-                      hasDiff={hasDiff}
-                      isSelected={selectedCellKey === key}
-                      onCellClick={onCellClick}
-                      side={side}
-                    />
-                  );
-                })}
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
-    </TableContainer>
-  );
-});
-
-// ============================================================================
-// MAIN COMPONENT
-// ============================================================================
-const CompareTemplateDialog = ({ open, onClose, requestId }) => {
-  const { callApi } = useApi();
-  const [loading, setLoading] = useState(false);
-  const [diffResponse, setDiffResponse] = useState(null);
-  const [selectedCellKey, setSelectedCellKey] = useState(null);
-  const [analysisExpanded, setAnalysisExpanded] = useState(true);
-  
-  const [diffKeys, setDiffKeys] = useState([]);
-  const [currentDiffIdx, setCurrentDiffIdx] = useState(-1);
-
-  const oldTableRef = useRef(null);
-  const newTableRef = useRef(null);
-  const isSyncing = useRef(false);
-
-  useEffect(() => {
-    if (open && requestId) {
-      setLoading(true);
-      setSelectedCellKey(null);
-      setDiffKeys([]);
-      setCurrentDiffIdx(-1);
-      
-      callApi("/CR/template-diff", { requestId }, "POST")
-        .then((res) => {
-          const data = res.data || res;
-          setDiffResponse(data);
-          if (data?.cellDiffs) {
-            setDiffKeys(Object.keys(data.cellDiffs));
-          }
-        })
-        .catch((err) => console.error("Error", err))
-        .finally(() => setLoading(false));
-    }
-  }, [open, requestId, callApi]);
-
-  const gridInfo = useMemo(() => {
-    if (!diffResponse) return { maxRows: 0, maxCols: 0, columns: [], rowsOld: [], rowsNew: [] };
-    
-    const oldTemplate = diffResponse.oldTemplate?.template?.reportData;
-    const newTemplate = diffResponse.newTemplate?.template?.reportData;
-    const columns = (newTemplate?.columns || oldTemplate?.columns || []);
-    const rowsOld = oldTemplate?.rows || [];
-    const rowsNew = newTemplate?.rows || [];
-    const maxR = Math.max(rowsOld.length, rowsNew.length);
-    const maxC = Math.max(columns.length, ...[...rowsOld, ...rowsNew].map(r => r.cells?.length || 0));
-
-    return { maxRows: maxR, maxCols: maxC, columns, rowsOld, rowsNew };
-  }, [diffResponse]);
-
-  const handleScroll = useCallback((source, target) => {
-    if (!source.current || !target.current) return;
-    if (isSyncing.current) return;
-
-    isSyncing.current = true;
-    requestAnimationFrame(() => {
-      if(target.current && source.current) {
-        target.current.scrollTop = source.current.scrollTop;
-        target.current.scrollLeft = source.current.scrollLeft;
-      }
-      setTimeout(() => { isSyncing.current = false; }, 50);
-    });
-  }, []);
-
-  // UseCallback prevents the Grid from re-rendering just because a function changed
-  const handleCellClick = useCallback((key) => {
-    setSelectedCellKey(key);
-    // Sync navigation index
-    setDiffKeys((prevKeys) => {
-      const idx = prevKeys.indexOf(key);
-      if (idx !== -1) setCurrentDiffIdx(idx);
-      return prevKeys; 
-    });
-  }, []);
-
-  const navigateDiff = (direction) => {
-    if (diffKeys.length === 0) return;
-    let newIdx = direction === 'next' ? currentDiffIdx + 1 : currentDiffIdx - 1;
-    if (newIdx >= diffKeys.length) newIdx = 0;
-    if (newIdx < 0) newIdx = diffKeys.length - 1;
-
-    setCurrentDiffIdx(newIdx);
-    const key = diffKeys[newIdx];
-    setSelectedCellKey(key);
-    
-    setTimeout(() => {
-      const el = document.getElementById("selected-cell-scroll-target");
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
-    }, 100);
-  };
-
-  return (
-    <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth scroll="paper">
-      <DialogTitle sx={{ bgcolor: "#f8f9fa", borderBottom: "1px solid #eee", py: 1 }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Stack direction="row" spacing={2} alignItems="center">
-            <TableChart color="primary" />
-            <Box>
-              <Typography variant="subtitle1" fontWeight="bold" lineHeight={1.2}>Template Audit Viewer</Typography>
-              <Typography variant="caption" color="text.secondary">Request ID: {requestId}</Typography>
-            </Box>
-            
-            {!loading && diffKeys.length > 0 && (
-              <Paper variant="outlined" sx={{ display: 'flex', alignItems: 'center', ml: 4, px: 1, py: 0.5, bgcolor: 'white' }}>
-                <Typography variant="caption" sx={{ mr: 1, fontWeight: 'bold' }}>
-                  Changes: {currentDiffIdx + 1} / {diffKeys.length}
-                </Typography>
-                <Tooltip title="Previous Change"><IconButton size="small" onClick={() => navigateDiff('prev')}><NavigateBefore fontSize="small" /></IconButton></Tooltip>
-                <Tooltip title="Next Change"><IconButton size="small" onClick={() => navigateDiff('next')}><NavigateNext fontSize="small" /></IconButton></Tooltip>
-              </Paper>
-            )}
-          </Stack>
-          <IconButton onClick={onClose} size="small"><Close /></IconButton>
-        </Stack>
-      </DialogTitle>
-
-      <DialogContent sx={{ p: 3, bgcolor: '#fbfbfb' }}>
-        {loading ? (
-          <Box textAlign="center" py={10}><CircularProgress size={50} /></Box>
-        ) : (
-          <Stack spacing={3}>
-            
-            {/* 1. SYNCED SCROLL GRIDS (Memoized) */}
-            <Box sx={{ display: "flex", gap: 2, alignItems: "stretch" }}>
-              <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                <Typography variant="caption" color="error.main" fontWeight="bold" mb={0.5}>PREVIOUS STATE</Typography>
-                <TemplateGrid 
-                  side="OLD"
-                  rows={gridInfo.rowsOld}
-                  gridInfo={gridInfo}
-                  cellDiffs={diffResponse?.cellDiffs}
-                  selectedCellKey={selectedCellKey}
-                  onCellClick={handleCellClick}
-                  scrollRef={oldTableRef}
-                  onScroll={() => handleScroll(oldTableRef, newTableRef)}
-                />
-              </Box>
-              
-              <Divider orientation="vertical" flexItem sx={{ alignSelf: 'center' }}><Link fontSize="small" color="disabled" /></Divider>
-
-              <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                <Typography variant="caption" color="success.main" fontWeight="bold" mb={0.5}>NEW STATE</Typography>
-                <TemplateGrid 
-                  side="NEW"
-                  rows={gridInfo.rowsNew}
-                  gridInfo={gridInfo}
-                  cellDiffs={diffResponse?.cellDiffs}
-                  selectedCellKey={selectedCellKey}
-                  onCellClick={handleCellClick}
-                  scrollRef={newTableRef}
-                  onScroll={() => handleScroll(newTableRef, oldTableRef)}
-                />
-              </Box>
-            </Box>
-
-            {/* 2. COLLAPSIBLE ANALYSIS SECTION */}
-            <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
-              <Box 
-                onClick={() => setAnalysisExpanded(!analysisExpanded)}
-                sx={{ 
-                  bgcolor: "#f0f2f5", px: 2, py: 1.5, cursor: "pointer", 
-                  display: "flex", justifyContent: "space-between", alignItems: "center",
-                  '&:hover': { bgcolor: "#e4e6e9" }
-                }}
-              >
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <EditNote color="primary" fontSize="small" />
-                  <Typography variant="subtitle2" fontWeight="bold">Detailed Modification Analysis</Typography>
-                  {selectedCellKey && <Chip size="small" label={`Cell: ${selectedCellKey}`} color="primary" variant="outlined" sx={{ height: 20 }} />}
-                </Stack>
-                {analysisExpanded ? <ExpandLess /> : <ExpandMore />}
-              </Box>
-
-              <Collapse in={analysisExpanded}>
-                <Box sx={{ p: 3 }}>
-                  {!selectedCellKey ? (
-                    <Alert severity="info" variant="outlined" sx={{ borderStyle: "dashed", py: 0 }}>
-                      Select a highlighted cell (Red/Green) in the tables above to view specific changes.
-                    </Alert>
-                  ) : (
-                    <Stack spacing={3}>
-                      {/* Property Changes */}
-                      <Box>
-                        <Stack spacing={1.5}>
-                          {Object.entries(diffResponse.cellDiffs[selectedCellKey] || {}).map(([field, diff]) => {
-                            if (field === 'remark') return null;
-                            return (
-                              <Paper key={field} variant="outlined" sx={{ overflow: "hidden", borderRadius: 1 }}>
-                                <Box sx={{ bgcolor: "#fcfcfc", px: 2, py: 0.5, borderBottom: "1px solid #eee" }}>
-                                  <Typography variant="caption" fontWeight="bold" color="primary">{field.toUpperCase()}</Typography>
-                                </Box>
-                                <Stack direction="row" divider={<Divider orientation="vertical" flexItem />} spacing={0}>
-                                  <Box sx={{ flex: 1, p: 1.5, bgcolor: "#fff8f8" }}>
-                                    <Typography variant="caption" color="error" display="block" gutterBottom fontWeight="bold">WAS:</Typography>
-                                    <DiffText value={diff.oldValue} otherValue={diff.newValue} type="old" />
-                                  </Box>
-                                  <Box sx={{ flex: 1, p: 1.5, bgcolor: "#f8fff8" }}>
-                                    <Typography variant="caption" color="success.main" display="block" gutterBottom fontWeight="bold">NOW:</Typography>
-                                    <DiffText value={diff.newValue} otherValue={diff.oldValue} type="new" />
-                                  </Box>
-                                </Stack>
-                              </Paper>
-                            );
-                          })}
-                        </Stack>
-                      </Box>
-                      
-                      {/* Remarks */}
-                      <Box>
-                        <Typography variant="caption" fontWeight="bold" color="text.secondary">MAKER REMARKS</Typography>
-                        <Paper elevation={0} sx={{ p: 2, mt: 0.5, bgcolor: "#fffde7", borderLeft: "5px solid #fbc02d" }}>
-                          <Typography variant="body2" sx={{ fontStyle: "italic", color: "#5d4037" }}>
-                            {diffResponse.cellDiffs[selectedCellKey]?.remark || "No manual remarks provided."}
-                          </Typography>
-                        </Paper>
-                      </Box>
-                    </Stack>
-                  )}
-                </Box>
-              </Collapse>
-            </Paper>
-
-          </Stack>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-};
-
-export default CompareTemplateDialog;
-
-
-
-
-
-
-
-// =================================================================================================================================================
-// Same code, only modified some parts.
-// =================================================================================================================================================
+//               8. Virtualization       ✅
+//               9. Checker can see the full template or only the perticular changes between old and new template.       ✅
+//              10. Add the remarks during modify the report and display the remarks in request screen.         ❌
+// ================================================================================================================================================================
 
 
 
 
 import React, { useEffect, useState, useMemo, memo, useRef, useCallback } from "react";
 import {
-  Dialog, DialogTitle, DialogContent, Box, Typography, Table, TableBody, 
-  TableCell, TableRow, Paper, CircularProgress, IconButton, Divider, 
-  Stack, TableHead, TableContainer, Alert, Collapse, Tooltip, Chip
+  Dialog, DialogTitle, DialogContent, Box, Typography, Table, TableBody,
+  TableCell, TableRow, Paper, CircularProgress, IconButton, Divider,
+  Stack, TableHead, TableContainer, Alert, Collapse, Tooltip, Chip,
+  Switch, FormControlLabel
 } from "@mui/material";
-import { 
+import {
   Close, EditNote, ExpandLess, ExpandMore,
-  NavigateNext, NavigateBefore, Link, TableChart 
+  NavigateNext, NavigateBefore, Link, TableChart,
+  ViewWeek, FilterList // New Icons
 } from "@mui/icons-material";
 import useApi from "../../hooks/useApi";
 
 // ============================================================================
 // 1. RECURSIVE DIFF TEXT COMPONENT
-// FIX: Recursively handles objects to prevent "Object as React Child" error
 // ============================================================================
 const DiffText = memo(({ value, otherValue, type }) => {
   if (value === null || value === undefined) return <Typography variant="body2" color="text.secondary">—</Typography>;
 
-  // Handle Arrays
   if (Array.isArray(value)) {
     const otherArr = Array.isArray(otherValue) ? otherValue : [];
     return (
@@ -505,7 +500,6 @@ const DiffText = memo(({ value, otherValue, type }) => {
                 px: 0.5, borderRadius: '2px', fontSize: '0.8rem'
               }}
             >
-              {/* Safety: If item is object, stringify it */}
               {typeof item === 'object' ? JSON.stringify(item) : item}{idx < value.length - 1 ? ", " : ""}
             </Typography>
           );
@@ -514,7 +508,6 @@ const DiffText = memo(({ value, otherValue, type }) => {
     );
   }
 
-  // Handle Objects (Recursive)
   if (typeof value === 'object' && value !== null) {
     return (
       <Box sx={{ pl: 1, borderLeft: '1px solid #eee' }}>
@@ -530,7 +523,6 @@ const DiffText = memo(({ value, otherValue, type }) => {
     );
   }
 
-  // Handle Primitives (Strings/Numbers)
   const isChanged = value !== otherValue;
   return (
     <Typography
@@ -548,18 +540,13 @@ const DiffText = memo(({ value, otherValue, type }) => {
 });
 
 // ============================================================================
-// 2. HIGH-PERFORMANCE CELL
-// FIX: Added JSON.stringify to displayValue to prevent app crash on objects
+// 2. GRID CELL
 // ============================================================================
 const GridCell = memo(({ cell, cellKey, hasDiff, isSelected, onCellClick, side }) => {
-  const cellStyle = cell?.style || {}; 
-  
-  // CRITICAL FIX: Ensure we never try to render a raw Object
+  const cellStyle = cell?.style || {};
   let rawValue = cell?.value ?? cell?.expression ?? "";
-  
-  // If the value is an object (like a filter definition), convert to string
-  const displayValue = (typeof rawValue === 'object' && rawValue !== null) 
-    ? JSON.stringify(rawValue) 
+  const displayValue = (typeof rawValue === 'object' && rawValue !== null)
+    ? JSON.stringify(rawValue)
     : String(rawValue);
 
   return (
@@ -571,9 +558,9 @@ const GridCell = memo(({ cell, cellKey, hasDiff, isSelected, onCellClick, side }
       sx={{
         border: "1px solid #e0e0e0",
         cursor: hasDiff ? "pointer" : "default",
-        bgcolor: isSelected 
-          ? "#fff9c4" 
-          : hasDiff 
+        bgcolor: isSelected
+          ? "#fff9c4"
+          : hasDiff
             ? side === "OLD" ? "#ffebee" : "#e8f5e9"
             : (cellStyle.backgroundColor || "white"),
         color: cellStyle.color || "inherit",
@@ -593,7 +580,6 @@ const GridCell = memo(({ cell, cellKey, hasDiff, isSelected, onCellClick, side }
       <Tooltip title={displayValue} placement="top" arrow>
         <span>{displayValue}</span>
       </Tooltip>
-      
       {hasDiff && !displayValue && (
         <Typography variant="caption" color="text.disabled" sx={{ fontStyle: 'italic' }}>(empty)</Typography>
       )}
@@ -604,28 +590,83 @@ const GridCell = memo(({ cell, cellKey, hasDiff, isSelected, onCellClick, side }
 });
 
 // ============================================================================
-// 3. ISOLATED GRID COMPONENT
+// 3. ISOLATED GRID COMPONENT WITH VIRTUALIZATION
 // ============================================================================
-const TemplateGrid = memo(({ gridInfo, rows, side, cellDiffs, selectedCellKey, onCellClick, scrollRef, onScroll }) => {
+const ROW_HEIGHT = 40; // Fixed row height for virtualization
+
+const TemplateGrid = memo(({ 
+  gridInfo, 
+  rows, 
+  side, 
+  cellDiffs, 
+  columnDiffs, // NEW: Prop for column changes
+  selectedCellKey, 
+  selectedColumnKey, // NEW: Prop for selected column
+  onCellClick, 
+  onColumnClick, // NEW: Handler
+  scrollRef, 
+  onScroll 
+}) => {
+  
+  // -- VIRTUALIZATION STATE --
+  const [scrollTop, setScrollTop] = useState(0);
+  const containerHeight = 400;
+
+  // Handle scroll to update virtualization state + sync other table
+  const handleScroll = (e) => {
+    setScrollTop(e.target.scrollTop);
+    if (onScroll) onScroll(e);
+  };
+
+  // Calculate visible range
+  const totalRows = rows.length;
+  const startIndex = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - 2); // -2 buffer
+  const endIndex = Math.min(totalRows, Math.ceil((scrollTop + containerHeight) / ROW_HEIGHT) + 2); // +2 buffer
+
+  // Create spacers
+  const topSpacerHeight = startIndex * ROW_HEIGHT;
+  const bottomSpacerHeight = Math.max(0, (totalRows - endIndex) * ROW_HEIGHT);
+
+  const visibleRows = rows.slice(startIndex, endIndex);
+
   const getCellKey = (cell, r, c) => cell?.id || `R${r}C${c}`;
 
   return (
-    <TableContainer 
+    <TableContainer
       ref={scrollRef}
-      onScroll={onScroll}
-      sx={{ maxHeight: 400, border: "1px solid #ddd", bgcolor: 'white' }}
+      onScroll={handleScroll}
+      sx={{ maxHeight: containerHeight, border: "1px solid #ddd", bgcolor: 'white', position: 'relative' }}
     >
       <Table size="small" stickyHeader sx={{ tableLayout: "fixed", width: "max-content" }}>
         <TableHead>
           <TableRow>
-            <TableCell sx={{ bgcolor: "#f5f5f5", width: 60, minWidth: 60, fontWeight: "bold", zIndex: 5, p: 0.5, textAlign: 'center' }}>
+            <TableCell sx={{  width: 60, minWidth: 60, fontWeight: "bold", zIndex: 5, p: 0.5, textAlign: 'center' }}>
               Row ID
             </TableCell>
             {Array.from({ length: gridInfo.maxCols }).map((_, i) => {
               const col = gridInfo.columns[i];
+              // NEW: Check for column diff
+              const isColChanged = columnDiffs && col?.id && columnDiffs[col.id];
+              const isColSelected = selectedColumnKey && col?.id === selectedColumnKey;
+
               return (
-                <TableCell key={i} sx={{ bgcolor: "#f5f5f5", fontWeight: "bold", textAlign: "center", fontSize: "0.7rem", width: 120, minWidth: 120, p: 0.5, whiteSpace: "normal", wordBreak: "break-word", lineHeight: 1.1 }}>
-                  <span>{col?.name || `Col ${i + 1}`}</span>
+                <TableCell 
+                  key={i} 
+                  onClick={() => isColChanged && onColumnClick(col.id)}
+                  sx={{ 
+                    bgcolor: isColSelected ? "#fff9c4" : isColChanged ? (side === "OLD" ? "#ffebee" : "#e8f5e9") : "#f5f5f5", 
+                    cursor: isColChanged ? "pointer" : "default",
+                    fontWeight: "bold", textAlign: "center", fontSize: "0.7rem", 
+                    width: 120, minWidth: 120, p: 0.5, whiteSpace: "normal", 
+                    wordBreak: "break-word", lineHeight: 1.1,
+                    boxShadow: isColSelected ? "inset 0 0 0 2px #fbc02d" : "none",
+                    borderBottom: isColChanged ? "2px solid #ccc" : "1px solid #e0e0e0"
+                  }}
+                >
+                  <Stack direction="row" alignItems="center" justifyContent="center" spacing={0.5}>
+                    <span>{col?.name || `Col ${i + 1}`}</span>
+                    {isColChanged && <ViewWeek fontSize="inherit" color={side === "OLD" ? "error" : "success"} />}
+                  </Stack>
                   <Typography variant="caption" color="text.secondary" display="block" sx={{ fontSize: '0.6rem' }}>
                     {col?.id ? `(${col.id})` : ''}
                   </Typography>
@@ -634,17 +675,25 @@ const TemplateGrid = memo(({ gridInfo, rows, side, cellDiffs, selectedCellKey, o
             })}
           </TableRow>
         </TableHead>
+        
         <TableBody>
-          {Array.from({ length: gridInfo.maxRows }).map((_, rIdx) => {
-            const row = rows[rIdx];
+          {/* Top Spacer for Virtualization */}
+          {topSpacerHeight > 0 && (
+            <TableRow style={{ height: topSpacerHeight }}>
+              <TableCell colSpan={gridInfo.maxCols + 1} style={{ padding: 0, border: 0 }} />
+            </TableRow>
+          )}
+
+          {visibleRows.map((row, index) => {
+            const actualIndex = startIndex + index; // Correct index relative to full array
             return (
-              <TableRow key={rIdx}>
-                <TableCell sx={{ bgcolor: "#fafafa", textAlign: "center", fontWeight: "bold", fontSize: '0.7rem', color: 'text.secondary' }}>
-                  {row?.rowId || row?.id || rIdx + 1}
+              <TableRow key={actualIndex} sx={{ height: ROW_HEIGHT }}>
+                <TableCell sx={{  textAlign: "center", fontWeight: "bold", fontSize: '0.7rem', color: 'text.secondary' }}>
+                  {row?.rowId || row?.id || actualIndex + 1}
                 </TableCell>
                 {Array.from({ length: gridInfo.maxCols }).map((_, cIdx) => {
                   const cell = row?.cells?.[cIdx];
-                  const key = getCellKey(cell, rIdx, cIdx);
+                  const key = getCellKey(cell, actualIndex, cIdx);
                   const hasDiff = !!cellDiffs?.[key];
                   return (
                     <GridCell
@@ -661,6 +710,13 @@ const TemplateGrid = memo(({ gridInfo, rows, side, cellDiffs, selectedCellKey, o
               </TableRow>
             );
           })}
+
+          {/* Bottom Spacer for Virtualization */}
+          {bottomSpacerHeight > 0 && (
+            <TableRow style={{ height: bottomSpacerHeight }}>
+              <TableCell colSpan={gridInfo.maxCols + 1} style={{ padding: 0, border: 0 }} />
+            </TableRow>
+          )}
         </TableBody>
       </Table>
     </TableContainer>
@@ -674,11 +730,15 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
   const { callApi } = useApi();
   const [loading, setLoading] = useState(false);
   const [diffResponse, setDiffResponse] = useState(null);
-  const [selectedCellKey, setSelectedCellKey] = useState(null);
-  const [analysisExpanded, setAnalysisExpanded] = useState(true);
   
+  // Selection States
+  const [selectedCellKey, setSelectedCellKey] = useState(null);
+  const [selectedColumnKey, setSelectedColumnKey] = useState(null); // NEW
+  
+  const [analysisExpanded, setAnalysisExpanded] = useState(true);
   const [diffKeys, setDiffKeys] = useState([]);
   const [currentDiffIdx, setCurrentDiffIdx] = useState(-1);
+  const [showChangesOnly, setShowChangesOnly] = useState(false); // NEW: Toggle State
 
   const oldTableRef = useRef(null);
   const newTableRef = useRef(null);
@@ -688,13 +748,17 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
     if (open && requestId) {
       setLoading(true);
       setSelectedCellKey(null);
+      setSelectedColumnKey(null);
       setDiffKeys([]);
       setCurrentDiffIdx(-1);
-      
-      callApi("/CR/template-diff", { requestId }, "POST")
+      setShowChangesOnly(false);
+
+      callApi("/TC/template-diff", { requestId }, "POST")
         .then((res) => {
           const data = res.data || res;
           setDiffResponse(data);
+          
+          // Combine cell and column keys for navigation if needed, currently focusing on cells
           if (data?.cellDiffs) {
             setDiffKeys(Object.keys(data.cellDiffs));
           }
@@ -706,23 +770,46 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
 
   const gridInfo = useMemo(() => {
     if (!diffResponse) return { maxRows: 0, maxCols: 0, columns: [], rowsOld: [], rowsNew: [] };
-    
+
     const oldTemplate = diffResponse.oldTemplate?.template?.reportData || {};
     const newTemplate = diffResponse.newTemplate?.template?.reportData || {};
     const columns = (newTemplate?.columns || oldTemplate?.columns || []);
-    const rowsOld = oldTemplate?.rows || [];
-    const rowsNew = newTemplate?.rows || [];
-    
-    // Calculate max dimensions safely
+    let rowsOld = oldTemplate?.rows || [];
+    let rowsNew = newTemplate?.rows || [];
+
+    // -- REQUIREMENT 3: FILTER ROWS FOR "MODIFIED ONLY" --
+    if (showChangesOnly && diffResponse.cellDiffs) {
+      // Find row indices/IDs that have changes
+      const affectedRowIds = new Set();
+      
+      // We iterate the diff keys to find which rows are touched
+      // Note: This relies on the "R{r}C{c}" or ID convention. 
+      // If using IDs, we filter by row ID. If index, we match index.
+      // Assuming keys map to rows roughly or checking cell existence.
+      // A robust way without parsing keys (if keys are IDs) is to check every row.
+      
+      const isRowModified = (row, rIdx) => {
+         if (!row || !row.cells) return false;
+         return row.cells.some((cell, cIdx) => {
+             const key = cell?.id || `R${rIdx}C${cIdx}`;
+             return diffResponse.cellDiffs[key];
+         });
+      };
+
+      // Filter arrays but keep alignment (this is tricky in diffs, usually we just filter)
+      rowsOld = rowsOld.filter((r, i) => isRowModified(r, i));
+      rowsNew = rowsNew.filter((r, i) => isRowModified(r, i));
+    }
+
     const maxR = Math.max(rowsOld.length, rowsNew.length);
     const maxC = Math.max(
-      columns.length, 
-      ...rowsOld.map(r => r.cells?.length || 0), 
+      columns.length,
+      ...rowsOld.map(r => r.cells?.length || 0),
       ...rowsNew.map(r => r.cells?.length || 0)
     );
 
     return { maxRows: maxR, maxCols: maxC, columns, rowsOld, rowsNew };
-  }, [diffResponse]);
+  }, [diffResponse, showChangesOnly]);
 
   const handleScroll = useCallback((source, target) => {
     if (!source.current || !target.current || isSyncing.current) return;
@@ -736,14 +823,20 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
     });
   }, []);
 
-  // FIX: Ensure this is defined before usage to prevent ReferenceError
   const handleCellClick = useCallback((key) => {
     setSelectedCellKey(key);
+    setSelectedColumnKey(null); // Clear column selection
     setDiffKeys((prevKeys) => {
       const idx = prevKeys.indexOf(key);
       if (idx !== -1) setCurrentDiffIdx(idx);
-      return prevKeys; 
+      return prevKeys;
     });
+  }, []);
+
+  // NEW: Handle Column Click
+  const handleColumnClick = useCallback((colId) => {
+    setSelectedColumnKey(colId);
+    setSelectedCellKey(null); // Clear cell selection
   }, []);
 
   const navigateDiff = (direction) => {
@@ -754,10 +847,8 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
 
     setCurrentDiffIdx(newIdx);
     const key = diffKeys[newIdx];
-    
-    // Safe call to handleCellClick
+
     handleCellClick(key);
-    
     setTimeout(() => {
       const el = document.getElementById("selected-cell-scroll-target");
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
@@ -774,11 +865,25 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
               <Typography variant="subtitle1" fontWeight="bold" lineHeight={1.2}>Template Audit Viewer</Typography>
               <Typography variant="caption" color="text.secondary">Request ID: {requestId}</Typography>
             </Box>
-            
+
+            {/* NEW: Toggle for Modified Only */}
+            <Box sx={{ ml: 4 }}>
+              <FormControlLabel 
+                control={
+                  <Switch 
+                    size="small" 
+                    checked={showChangesOnly} 
+                    onChange={(e) => setShowChangesOnly(e.target.checked)} 
+                  />
+                }
+                label={<Typography variant="body2" sx={{ fontSize: '0.8rem' }}>Show Changes Only</Typography>}
+              />
+            </Box>
+
             {!loading && diffKeys.length > 0 && (
-              <Paper variant="outlined" sx={{ display: 'flex', alignItems: 'center', ml: 4, px: 1, py: 0.5, bgcolor: 'white' }}>
+              <Paper variant="outlined" sx={{ display: 'flex', alignItems: 'center', px: 1, py: 0.5 }}>
                 <Typography variant="caption" sx={{ mr: 1, fontWeight: 'bold' }}>
-                  Changes: {currentDiffIdx + 1} / {diffKeys.length}
+                  Cell Changes: {currentDiffIdx + 1} / {diffKeys.length}
                 </Typography>
                 <Tooltip title="Previous Change"><IconButton size="small" onClick={() => navigateDiff('prev')}><NavigateBefore fontSize="small" /></IconButton></Tooltip>
                 <Tooltip title="Next Change"><IconButton size="small" onClick={() => navigateDiff('next')}><NavigateNext fontSize="small" /></IconButton></Tooltip>
@@ -789,49 +894,55 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
         </Stack>
       </DialogTitle>
 
-      <DialogContent sx={{ p: 3, bgcolor: '#fbfbfb' }}>
+      <DialogContent sx={{ p: 3 }}>
         {loading ? (
           <Box textAlign="center" py={10}><CircularProgress size={50} /></Box>
         ) : (
           <Stack spacing={3}>
-            
+
             <Box sx={{ display: "flex", gap: 2, alignItems: "stretch" }}>
               <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                 <Typography variant="caption" color="error.main" fontWeight="bold" mb={0.5}>PREVIOUS STATE</Typography>
-                <TemplateGrid 
+                <TemplateGrid
                   side="OLD"
                   rows={gridInfo.rowsOld}
                   gridInfo={gridInfo}
                   cellDiffs={diffResponse?.cellDiffs}
+                  columnDiffs={diffResponse?.columnDiffs} // NEW
                   selectedCellKey={selectedCellKey}
+                  selectedColumnKey={selectedColumnKey} // NEW
                   onCellClick={handleCellClick}
+                  onColumnClick={handleColumnClick} // NEW
                   scrollRef={oldTableRef}
-                  onScroll={() => handleScroll(oldTableRef, newTableRef)}
+                  onScroll={(e) => handleScroll(oldTableRef, newTableRef, e)}
                 />
               </Box>
-              
+
               <Divider orientation="vertical" flexItem sx={{ alignSelf: 'center' }}><Link fontSize="small" color="disabled" /></Divider>
 
               <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                 <Typography variant="caption" color="success.main" fontWeight="bold" mb={0.5}>NEW STATE</Typography>
-                <TemplateGrid 
+                <TemplateGrid
                   side="NEW"
                   rows={gridInfo.rowsNew}
                   gridInfo={gridInfo}
                   cellDiffs={diffResponse?.cellDiffs}
+                  columnDiffs={diffResponse?.columnDiffs} // NEW
                   selectedCellKey={selectedCellKey}
+                  selectedColumnKey={selectedColumnKey} // NEW
                   onCellClick={handleCellClick}
+                  onColumnClick={handleColumnClick} // NEW
                   scrollRef={newTableRef}
-                  onScroll={() => handleScroll(newTableRef, oldTableRef)}
+                  onScroll={(e) => handleScroll(newTableRef, oldTableRef, e)}
                 />
               </Box>
             </Box>
 
             <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
-              <Box 
+              <Box
                 onClick={() => setAnalysisExpanded(!analysisExpanded)}
-                sx={{ 
-                  bgcolor: "#f0f2f5", px: 2, py: 1.5, cursor: "pointer", 
+                sx={{
+                  bgcolor: "#f0f2f5", px: 2, py: 1.5, cursor: "pointer",
                   display: "flex", justifyContent: "space-between", alignItems: "center",
                   '&:hover': { bgcolor: "#e4e6e9" }
                 }}
@@ -840,17 +951,49 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
                   <EditNote color="primary" fontSize="small" />
                   <Typography variant="subtitle2" fontWeight="bold">Detailed Modification Analysis</Typography>
                   {selectedCellKey && <Chip size="small" label={`Cell: ${selectedCellKey}`} color="primary" variant="outlined" sx={{ height: 20 }} />}
+                  {selectedColumnKey && <Chip size="small" label={`Column: ${selectedColumnKey}`} color="secondary" variant="outlined" sx={{ height: 20 }} />}
                 </Stack>
                 {analysisExpanded ? <ExpandLess /> : <ExpandMore />}
               </Box>
 
               <Collapse in={analysisExpanded}>
                 <Box sx={{ p: 3 }}>
-                  {!selectedCellKey ? (
+                  
+                  {/* CASE 1: NO SELECTION */}
+                  {!selectedCellKey && !selectedColumnKey && (
                     <Alert severity="info" variant="outlined" sx={{ borderStyle: "dashed", py: 0 }}>
-                      Select a highlighted cell (Red/Green) in the tables above to view specific changes.
+                      Select a highlighted cell (Red/Green) or Column Header in the tables above to view specific changes.
                     </Alert>
-                  ) : (
+                  )}
+
+                  {/* CASE 2: COLUMN SELECTION (NEW) */}
+                  {selectedColumnKey && diffResponse?.columnDiffs?.[selectedColumnKey] && (
+                     <Stack spacing={3}>
+                       <Alert severity="warning" icon={<ViewWeek/>} sx={{py:0}}>Column Definition Modified</Alert>
+                       <Box>
+                        {Object.entries(diffResponse.columnDiffs[selectedColumnKey]).map(([field, diff]) => (
+                          <Paper key={field} variant="outlined" sx={{ overflow: "hidden", borderRadius: 1, mb: 1 }}>
+                             <Box sx={{  px: 2, py: 0.5, borderBottom: "1px solid #eee" }}>
+                                <Typography variant="caption" fontWeight="bold" color="primary">{field.toUpperCase()}</Typography>
+                              </Box>
+                              <Stack direction="row" divider={<Divider orientation="vertical" flexItem />} spacing={0}>
+                                <Box sx={{ flex: 1, p: 1.5 }}>
+                                  <Typography variant="caption" color="error" display="block" gutterBottom fontWeight="bold">WAS:</Typography>
+                                  <DiffText value={diff.oldValue} otherValue={diff.newValue} type="old" />
+                                </Box>
+                                <Box sx={{ flex: 1, p: 1.5 }}>
+                                  <Typography variant="caption" color="success.main" display="block" gutterBottom fontWeight="bold">NOW:</Typography>
+                                  <DiffText value={diff.newValue} otherValue={diff.oldValue} type="new" />
+                                </Box>
+                              </Stack>
+                          </Paper>
+                        ))}
+                       </Box>
+                     </Stack>
+                  )}
+
+                  {/* CASE 3: CELL SELECTION */}
+                  {selectedCellKey && diffResponse?.cellDiffs?.[selectedCellKey] && (
                     <Stack spacing={3}>
                       <Box>
                         <Stack spacing={1.5}>
@@ -876,7 +1019,7 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
                           })}
                         </Stack>
                       </Box>
-                      
+
                       <Box>
                         <Typography variant="caption" fontWeight="bold" color="text.secondary">MAKER REMARKS</Typography>
                         <Paper elevation={0} sx={{ p: 2, mt: 0.5, bgcolor: "#fffde7", borderLeft: "5px solid #fbc02d" }}>
@@ -899,28 +1042,6 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
 };
 
 export default CompareTemplateDialog;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// *************************************************************************************************************************************************************************************
 
 
 
