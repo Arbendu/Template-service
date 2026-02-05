@@ -20,12 +20,14 @@ import {
   Dialog, DialogTitle, DialogContent, Box, Typography, Table, TableBody,
   TableCell, TableRow, Paper, CircularProgress, IconButton, Divider,
   Stack, TableHead, TableContainer, Alert, Collapse, Tooltip, Chip,
-  Switch, FormControlLabel
+  Switch, FormControlLabel,
+  useTheme
 } from "@mui/material";
+import { alpha } from "@mui/material/styles";
 import {
   Close, EditNote, ExpandLess, ExpandMore,
   NavigateNext, NavigateBefore, Link, TableChart,
-  ViewWeek, FilterList // New Icons
+  ViewWeek
 } from "@mui/icons-material";
 import useApi from "../../hooks/useApi";
 
@@ -49,13 +51,18 @@ const DiffText = memo(({ value, otherValue, type }) => {
               key={idx}
               variant="body2"
               component="span"
-              sx={{
+              sx={(theme) => ({
                 textDecoration: isRemoved ? "line-through" : "none",
                 color: isRemoved ? "error.main" : isAdded ? "success.main" : "text.primary",
                 fontWeight: isAdded ? "bold" : "normal",
-                bgcolor: isAdded ? "#e8f5e9" : isRemoved ? "#ffebee" : "transparent",
-                px: 0.5, borderRadius: '2px', fontSize: '0.8rem'
-              }}
+                // Use theme alpha for backgrounds
+                bgcolor: isAdded 
+                  ? alpha(theme.palette.success.main, 0.15) 
+                  : isRemoved 
+                    ? alpha(theme.palette.error.main, 0.15) 
+                    : "transparent",
+                px: 0.5, borderRadius: 1, fontSize: '0.8rem' // Using borderRadius from shape
+              })}
             >
               {typeof item === 'object' ? JSON.stringify(item) : item}{idx < value.length - 1 ? ", " : ""}
             </Typography>
@@ -67,7 +74,7 @@ const DiffText = memo(({ value, otherValue, type }) => {
 
   if (typeof value === 'object' && value !== null) {
     return (
-      <Box sx={{ pl: 1, borderLeft: '1px solid #eee' }}>
+      <Box sx={{ pl: 1, borderLeft: (theme) => `1px solid ${theme.palette.divider}` }}>
         {Object.entries(value).map(([key, val]) => (
           <Box key={key} sx={{ mb: 1 }}>
             <Typography variant="caption" sx={{ fontWeight: 'bold', color: 'text.secondary', display: 'block' }}>
@@ -84,12 +91,12 @@ const DiffText = memo(({ value, otherValue, type }) => {
   return (
     <Typography
       variant="body2"
-      sx={{
+      sx={(theme) => ({
         color: isChanged ? (type === 'old' ? 'error.main' : 'success.main') : 'text.primary',
         textDecoration: isChanged && type === 'old' ? 'line-through' : 'none',
         fontWeight: isChanged && type === 'new' ? 'bold' : 'normal',
         wordBreak: 'break-all'
-      }}
+      })}
     >
       {String(value)}
     </Typography>
@@ -112,14 +119,16 @@ const GridCell = memo(({ cell, cellKey, hasDiff, isSelected, onCellClick, side }
       colSpan={cell?.colSpan || 1}
       align={cell?.align?.toLowerCase() || 'center'}
       id={isSelected ? "selected-cell-scroll-target" : undefined}
-      sx={{
-        border: "1px solid #e0e0e0",
+      sx={(theme) => ({
+        border: `1px solid ${theme.palette.divider}`,
         cursor: hasDiff ? "pointer" : "default",
         bgcolor: isSelected
-          ? "#fff9c4"
+          ? alpha(theme.palette.secondary.main, 0.2) // Highlight color (Gold)
           : hasDiff
-            ? side === "OLD" ? "#ffebee" : "#e8f5e9"
-            : (cellStyle.backgroundColor || "white"),
+            ? side === "OLD" 
+              ? alpha(theme.palette.error.main, 0.1) 
+              : alpha(theme.palette.success.main, 0.1)
+            : (cellStyle.backgroundColor || theme.palette.background.paper),
         color: cellStyle.color || "inherit",
         fontWeight: cellStyle.bold || isSelected ? "bold" : "normal",
         fontStyle: cellStyle.italic ? "italic" : "normal",
@@ -127,12 +136,13 @@ const GridCell = memo(({ cell, cellKey, hasDiff, isSelected, onCellClick, side }
         height: 38,
         minWidth: 100,
         maxWidth: 150,
-        boxShadow: isSelected ? "inset 0 0 0 2px #fbc02d" : "none",
+        boxShadow: isSelected ? `inset 0 0 0 2px ${theme.palette.secondary.main}` : "none",
         whiteSpace: "nowrap",
         overflow: "hidden",
         textOverflow: "ellipsis",
-        p: 0.5
-      }}
+        p: 0.5,
+        transition: "background-color 0.2s"
+      })}
     >
       <Tooltip title={displayValue} placement="top" arrow>
         <span>{displayValue}</span>
@@ -149,60 +159,63 @@ const GridCell = memo(({ cell, cellKey, hasDiff, isSelected, onCellClick, side }
 // ============================================================================
 // 3. ISOLATED GRID COMPONENT WITH VIRTUALIZATION
 // ============================================================================
-const ROW_HEIGHT = 40; // Fixed row height for virtualization
+const ROW_HEIGHT = 40; 
 
 const TemplateGrid = memo(({ 
   gridInfo, 
   rows, 
   side, 
   cellDiffs, 
-  columnDiffs, // NEW: Prop for column changes
+  columnDiffs, 
   selectedCellKey, 
-  selectedColumnKey, // NEW: Prop for selected column
+  selectedColumnKey, 
   onCellClick, 
-  onColumnClick, // NEW: Handler
+  onColumnClick, 
   scrollRef, 
   onScroll 
 }) => {
   
-  // -- VIRTUALIZATION STATE --
   const [scrollTop, setScrollTop] = useState(0);
   const containerHeight = 400;
 
-  // Handle scroll to update virtualization state + sync other table
   const handleScroll = (e) => {
     setScrollTop(e.target.scrollTop);
     if (onScroll) onScroll(e);
   };
 
-  // Calculate visible range
   const totalRows = rows.length;
-  const startIndex = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - 2); // -2 buffer
-  const endIndex = Math.min(totalRows, Math.ceil((scrollTop + containerHeight) / ROW_HEIGHT) + 2); // +2 buffer
+  const startIndex = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - 2); 
+  const endIndex = Math.min(totalRows, Math.ceil((scrollTop + containerHeight) / ROW_HEIGHT) + 2); 
 
-  // Create spacers
   const topSpacerHeight = startIndex * ROW_HEIGHT;
   const bottomSpacerHeight = Math.max(0, (totalRows - endIndex) * ROW_HEIGHT);
-
   const visibleRows = rows.slice(startIndex, endIndex);
-
   const getCellKey = (cell, r, c) => cell?.id || `R${r}C${c}`;
 
   return (
     <TableContainer
       ref={scrollRef}
       onScroll={handleScroll}
-      sx={{ maxHeight: containerHeight, border: "1px solid #ddd", bgcolor: 'white', position: 'relative' }}
+      sx={(theme) => ({ 
+        maxHeight: containerHeight, 
+        border: `1px solid ${theme.palette.divider}`, 
+        bgcolor: "background.paper", 
+        position: 'relative',
+        borderRadius: 1
+      })}
     >
       <Table size="small" stickyHeader sx={{ tableLayout: "fixed", width: "max-content" }}>
         <TableHead>
           <TableRow>
-            <TableCell sx={{  width: 60, minWidth: 60, fontWeight: "bold", zIndex: 5, p: 0.5, textAlign: 'center' }}>
+            <TableCell sx={(theme) => ({ 
+                bgcolor: theme.palette.grey[100], 
+                width: 60, minWidth: 60, fontWeight: "bold", zIndex: 5, p: 0.5, textAlign: 'center',
+                color: theme.palette.text.secondary
+            })}>
               Row ID
             </TableCell>
             {Array.from({ length: gridInfo.maxCols }).map((_, i) => {
               const col = gridInfo.columns[i];
-              // NEW: Check for column diff
               const isColChanged = columnDiffs && col?.id && columnDiffs[col.id];
               const isColSelected = selectedColumnKey && col?.id === selectedColumnKey;
 
@@ -210,15 +223,20 @@ const TemplateGrid = memo(({
                 <TableCell 
                   key={i} 
                   onClick={() => isColChanged && onColumnClick(col.id)}
-                  sx={{ 
-                    bgcolor: isColSelected ? "#fff9c4" : isColChanged ? (side === "OLD" ? "#ffebee" : "#e8f5e9") : "#f5f5f5", 
+                  sx={(theme) => ({ 
+                    bgcolor: isColSelected 
+                      ? alpha(theme.palette.secondary.main, 0.2) 
+                      : isColChanged 
+                        ? (side === "OLD" ? alpha(theme.palette.error.main, 0.1) : alpha(theme.palette.success.main, 0.1)) 
+                        : theme.palette.grey[100], 
                     cursor: isColChanged ? "pointer" : "default",
                     fontWeight: "bold", textAlign: "center", fontSize: "0.7rem", 
                     width: 120, minWidth: 120, p: 0.5, whiteSpace: "normal", 
                     wordBreak: "break-word", lineHeight: 1.1,
-                    boxShadow: isColSelected ? "inset 0 0 0 2px #fbc02d" : "none",
-                    borderBottom: isColChanged ? "2px solid #ccc" : "1px solid #e0e0e0"
-                  }}
+                    boxShadow: isColSelected ? `inset 0 0 0 2px ${theme.palette.secondary.main}` : "none",
+                    borderBottom: isColChanged ? `2px solid ${theme.palette.text.secondary}` : `1px solid ${theme.palette.divider}`,
+                    color: theme.palette.text.primary
+                  })}
                 >
                   <Stack direction="row" alignItems="center" justifyContent="center" spacing={0.5}>
                     <span>{col?.name || `Col ${i + 1}`}</span>
@@ -234,7 +252,6 @@ const TemplateGrid = memo(({
         </TableHead>
         
         <TableBody>
-          {/* Top Spacer for Virtualization */}
           {topSpacerHeight > 0 && (
             <TableRow style={{ height: topSpacerHeight }}>
               <TableCell colSpan={gridInfo.maxCols + 1} style={{ padding: 0, border: 0 }} />
@@ -242,10 +259,15 @@ const TemplateGrid = memo(({
           )}
 
           {visibleRows.map((row, index) => {
-            const actualIndex = startIndex + index; // Correct index relative to full array
+            const actualIndex = startIndex + index;
             return (
               <TableRow key={actualIndex} sx={{ height: ROW_HEIGHT }}>
-                <TableCell sx={{  textAlign: "center", fontWeight: "bold", fontSize: '0.7rem', color: 'text.secondary' }}>
+                <TableCell sx={(theme) => ({ 
+                    bgcolor: theme.palette.grey[50], 
+                    textAlign: "center", fontWeight: "bold", fontSize: '0.7rem', 
+                    color: "text.secondary",
+                    borderRight: `1px solid ${theme.palette.divider}`
+                })}>
                   {row?.rowId || row?.id || actualIndex + 1}
                 </TableCell>
                 {Array.from({ length: gridInfo.maxCols }).map((_, cIdx) => {
@@ -268,7 +290,6 @@ const TemplateGrid = memo(({
             );
           })}
 
-          {/* Bottom Spacer for Virtualization */}
           {bottomSpacerHeight > 0 && (
             <TableRow style={{ height: bottomSpacerHeight }}>
               <TableCell colSpan={gridInfo.maxCols + 1} style={{ padding: 0, border: 0 }} />
@@ -285,17 +306,16 @@ const TemplateGrid = memo(({
 // ============================================================================
 const CompareTemplateDialog = ({ open, onClose, requestId }) => {
   const { callApi } = useApi();
+  const theme = useTheme(); // Hook to access theme variables
+
   const [loading, setLoading] = useState(false);
   const [diffResponse, setDiffResponse] = useState(null);
-  
-  // Selection States
   const [selectedCellKey, setSelectedCellKey] = useState(null);
-  const [selectedColumnKey, setSelectedColumnKey] = useState(null); // NEW
-  
+  const [selectedColumnKey, setSelectedColumnKey] = useState(null);
   const [analysisExpanded, setAnalysisExpanded] = useState(true);
   const [diffKeys, setDiffKeys] = useState([]);
   const [currentDiffIdx, setCurrentDiffIdx] = useState(-1);
-  const [showChangesOnly, setShowChangesOnly] = useState(false); // NEW: Toggle State
+  const [showChangesOnly, setShowChangesOnly] = useState(false);
 
   const oldTableRef = useRef(null);
   const newTableRef = useRef(null);
@@ -314,8 +334,6 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
         .then((res) => {
           const data = res.data || res;
           setDiffResponse(data);
-          
-          // Combine cell and column keys for navigation if needed, currently focusing on cells
           if (data?.cellDiffs) {
             setDiffKeys(Object.keys(data.cellDiffs));
           }
@@ -334,17 +352,7 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
     let rowsOld = oldTemplate?.rows || [];
     let rowsNew = newTemplate?.rows || [];
 
-    // -- REQUIREMENT 3: FILTER ROWS FOR "MODIFIED ONLY" --
     if (showChangesOnly && diffResponse.cellDiffs) {
-      // Find row indices/IDs that have changes
-      const affectedRowIds = new Set();
-      
-      // We iterate the diff keys to find which rows are touched
-      // Note: This relies on the "R{r}C{c}" or ID convention. 
-      // If using IDs, we filter by row ID. If index, we match index.
-      // Assuming keys map to rows roughly or checking cell existence.
-      // A robust way without parsing keys (if keys are IDs) is to check every row.
-      
       const isRowModified = (row, rIdx) => {
          if (!row || !row.cells) return false;
          return row.cells.some((cell, cIdx) => {
@@ -352,8 +360,6 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
              return diffResponse.cellDiffs[key];
          });
       };
-
-      // Filter arrays but keep alignment (this is tricky in diffs, usually we just filter)
       rowsOld = rowsOld.filter((r, i) => isRowModified(r, i));
       rowsNew = rowsNew.filter((r, i) => isRowModified(r, i));
     }
@@ -382,7 +388,7 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
 
   const handleCellClick = useCallback((key) => {
     setSelectedCellKey(key);
-    setSelectedColumnKey(null); // Clear column selection
+    setSelectedColumnKey(null);
     setDiffKeys((prevKeys) => {
       const idx = prevKeys.indexOf(key);
       if (idx !== -1) setCurrentDiffIdx(idx);
@@ -390,10 +396,9 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
     });
   }, []);
 
-  // NEW: Handle Column Click
   const handleColumnClick = useCallback((colId) => {
     setSelectedColumnKey(colId);
-    setSelectedCellKey(null); // Clear cell selection
+    setSelectedCellKey(null);
   }, []);
 
   const navigateDiff = (direction) => {
@@ -414,7 +419,7 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth scroll="paper">
-      <DialogTitle sx={{ bgcolor: "#f8f9fa", borderBottom: "1px solid #eee", py: 1 }}>
+      <DialogTitle sx={{ bgcolor: "background.paper", borderBottom: `1px solid ${theme.palette.divider}`, py: 1 }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center">
           <Stack direction="row" spacing={2} alignItems="center">
             <TableChart color="primary" />
@@ -423,7 +428,6 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
               <Typography variant="caption" color="text.secondary">Request ID: {requestId}</Typography>
             </Box>
 
-            {/* NEW: Toggle for Modified Only */}
             <Box sx={{ ml: 4 }}>
               <FormControlLabel 
                 control={
@@ -431,6 +435,7 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
                     size="small" 
                     checked={showChangesOnly} 
                     onChange={(e) => setShowChangesOnly(e.target.checked)} 
+                    color="primary"
                   />
                 }
                 label={<Typography variant="body2" sx={{ fontSize: '0.8rem' }}>Show Changes Only</Typography>}
@@ -438,7 +443,7 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
             </Box>
 
             {!loading && diffKeys.length > 0 && (
-              <Paper variant="outlined" sx={{ display: 'flex', alignItems: 'center', px: 1, py: 0.5 }}>
+              <Paper variant="outlined" sx={{ display: 'flex', alignItems: 'center', px: 1, py: 0.5, bgcolor: 'background.paper' }}>
                 <Typography variant="caption" sx={{ mr: 1, fontWeight: 'bold' }}>
                   Cell Changes: {currentDiffIdx + 1} / {diffKeys.length}
                 </Typography>
@@ -451,7 +456,7 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
         </Stack>
       </DialogTitle>
 
-      <DialogContent sx={{ p: 3 }}>
+      <DialogContent sx={{ p: 3, bgcolor: alpha(theme.palette.grey[50], 0.5) }}>
         {loading ? (
           <Box textAlign="center" py={10}><CircularProgress size={50} /></Box>
         ) : (
@@ -465,11 +470,11 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
                   rows={gridInfo.rowsOld}
                   gridInfo={gridInfo}
                   cellDiffs={diffResponse?.cellDiffs}
-                  columnDiffs={diffResponse?.columnDiffs} // NEW
+                  columnDiffs={diffResponse?.columnDiffs}
                   selectedCellKey={selectedCellKey}
-                  selectedColumnKey={selectedColumnKey} // NEW
+                  selectedColumnKey={selectedColumnKey}
                   onCellClick={handleCellClick}
-                  onColumnClick={handleColumnClick} // NEW
+                  onColumnClick={handleColumnClick}
                   scrollRef={oldTableRef}
                   onScroll={(e) => handleScroll(oldTableRef, newTableRef, e)}
                 />
@@ -484,11 +489,11 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
                   rows={gridInfo.rowsNew}
                   gridInfo={gridInfo}
                   cellDiffs={diffResponse?.cellDiffs}
-                  columnDiffs={diffResponse?.columnDiffs} // NEW
+                  columnDiffs={diffResponse?.columnDiffs}
                   selectedCellKey={selectedCellKey}
-                  selectedColumnKey={selectedColumnKey} // NEW
+                  selectedColumnKey={selectedColumnKey}
                   onCellClick={handleCellClick}
-                  onColumnClick={handleColumnClick} // NEW
+                  onColumnClick={handleColumnClick}
                   scrollRef={newTableRef}
                   onScroll={(e) => handleScroll(newTableRef, oldTableRef, e)}
                 />
@@ -499,9 +504,11 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
               <Box
                 onClick={() => setAnalysisExpanded(!analysisExpanded)}
                 sx={{
-                  bgcolor: "#f0f2f5", px: 2, py: 1.5, cursor: "pointer",
+                  bgcolor: alpha(theme.palette.primary.main, 0.05), 
+                  px: 2, py: 1.5, cursor: "pointer",
                   display: "flex", justifyContent: "space-between", alignItems: "center",
-                  '&:hover': { bgcolor: "#e4e6e9" }
+                  '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.1) },
+                  transition: "background-color 0.2s"
                 }}
               >
                 <Stack direction="row" spacing={1} alignItems="center">
@@ -516,29 +523,28 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
               <Collapse in={analysisExpanded}>
                 <Box sx={{ p: 3 }}>
                   
-                  {/* CASE 1: NO SELECTION */}
                   {!selectedCellKey && !selectedColumnKey && (
                     <Alert severity="info" variant="outlined" sx={{ borderStyle: "dashed", py: 0 }}>
                       Select a highlighted cell (Red/Green) or Column Header in the tables above to view specific changes.
                     </Alert>
                   )}
 
-                  {/* CASE 2: COLUMN SELECTION (NEW) */}
+                  {/* COLUMN SELECTION */}
                   {selectedColumnKey && diffResponse?.columnDiffs?.[selectedColumnKey] && (
                      <Stack spacing={3}>
                        <Alert severity="warning" icon={<ViewWeek/>} sx={{py:0}}>Column Definition Modified</Alert>
                        <Box>
                         {Object.entries(diffResponse.columnDiffs[selectedColumnKey]).map(([field, diff]) => (
                           <Paper key={field} variant="outlined" sx={{ overflow: "hidden", borderRadius: 1, mb: 1 }}>
-                             <Box sx={{  px: 2, py: 0.5, borderBottom: "1px solid #eee" }}>
+                             <Box sx={{ bgcolor: "background.paper", px: 2, py: 0.5, borderBottom: `1px solid ${theme.palette.divider}` }}>
                                 <Typography variant="caption" fontWeight="bold" color="primary">{field.toUpperCase()}</Typography>
                               </Box>
                               <Stack direction="row" divider={<Divider orientation="vertical" flexItem />} spacing={0}>
-                                <Box sx={{ flex: 1, p: 1.5 }}>
+                                <Box sx={{ flex: 1, p: 1.5, bgcolor: alpha(theme.palette.error.main, 0.05) }}>
                                   <Typography variant="caption" color="error" display="block" gutterBottom fontWeight="bold">WAS:</Typography>
                                   <DiffText value={diff.oldValue} otherValue={diff.newValue} type="old" />
                                 </Box>
-                                <Box sx={{ flex: 1, p: 1.5 }}>
+                                <Box sx={{ flex: 1, p: 1.5, bgcolor: alpha(theme.palette.success.main, 0.05) }}>
                                   <Typography variant="caption" color="success.main" display="block" gutterBottom fontWeight="bold">NOW:</Typography>
                                   <DiffText value={diff.newValue} otherValue={diff.oldValue} type="new" />
                                 </Box>
@@ -549,7 +555,7 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
                      </Stack>
                   )}
 
-                  {/* CASE 3: CELL SELECTION */}
+                  {/* CELL SELECTION */}
                   {selectedCellKey && diffResponse?.cellDiffs?.[selectedCellKey] && (
                     <Stack spacing={3}>
                       <Box>
@@ -558,15 +564,15 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
                             if (field === 'remark') return null;
                             return (
                               <Paper key={field} variant="outlined" sx={{ overflow: "hidden", borderRadius: 1 }}>
-                                <Box sx={{ bgcolor: "#fcfcfc", px: 2, py: 0.5, borderBottom: "1px solid #eee" }}>
+                                <Box sx={{ bgcolor: "background.paper", px: 2, py: 0.5, borderBottom: `1px solid ${theme.palette.divider}` }}>
                                   <Typography variant="caption" fontWeight="bold" color="primary">{field.toUpperCase()}</Typography>
                                 </Box>
                                 <Stack direction="row" divider={<Divider orientation="vertical" flexItem />} spacing={0}>
-                                  <Box sx={{ flex: 1, p: 1.5, bgcolor: "#fff8f8" }}>
+                                  <Box sx={{ flex: 1, p: 1.5, bgcolor: alpha(theme.palette.error.main, 0.05) }}>
                                     <Typography variant="caption" color="error" display="block" gutterBottom fontWeight="bold">WAS:</Typography>
                                     <DiffText value={diff.oldValue} otherValue={diff.newValue} type="old" />
                                   </Box>
-                                  <Box sx={{ flex: 1, p: 1.5, bgcolor: "#f8fff8" }}>
+                                  <Box sx={{ flex: 1, p: 1.5, bgcolor: alpha(theme.palette.success.main, 0.05) }}>
                                     <Typography variant="caption" color="success.main" display="block" gutterBottom fontWeight="bold">NOW:</Typography>
                                     <DiffText value={diff.newValue} otherValue={diff.oldValue} type="new" />
                                   </Box>
@@ -579,8 +585,12 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
 
                       <Box>
                         <Typography variant="caption" fontWeight="bold" color="text.secondary">MAKER REMARKS</Typography>
-                        <Paper elevation={0} sx={{ p: 2, mt: 0.5, bgcolor: "#fffde7", borderLeft: "5px solid #fbc02d" }}>
-                          <Typography variant="body2" sx={{ fontStyle: "italic", color: "#5d4037" }}>
+                        <Paper elevation={0} sx={{ 
+                          p: 2, mt: 0.5, 
+                          bgcolor: alpha(theme.palette.warning.light, 0.1), 
+                          borderLeft: `5px solid ${theme.palette.warning.main}` 
+                        }}>
+                          <Typography variant="body2" sx={{ fontStyle: "italic", color: theme.palette.warning.dark }}>
                             {diffResponse.cellDiffs[selectedCellKey]?.remark || "No manual remarks provided."}
                           </Typography>
                         </Paper>
