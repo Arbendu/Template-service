@@ -956,6 +956,79 @@ public class ReportTemplateDto implements KeyablePayload {
 
 
 
+    // =========================================================================
+    // 9 & 10. Variant Definitions & Cross-Validation
+    // =========================================================================
+    private void validateVariants(List<ReportTemplateVariantDto> variants, Set<String> tablesUsedInTemplate, String uniqueReportId) {
+        Set<String> codesInRequest = new HashSet<>();
+
+        for (ReportTemplateVariantDto v : variants) {
+            // 1. Basic Syntax Validation
+            validateIdentifier(v.getVariantCode(), "Variant Code");
+
+            // 2. Check for duplicates within the CURRENT JSON request
+            // (e.g. User sends two variants named "V1" in the same list)
+            if (!codesInRequest.add(v.getVariantCode())) {
+                throw new BusinessRuleViolationException("Duplicate Variant Code in request: " + v.getVariantCode());
+            }
+
+            // 3. Check for duplicates against the DATABASE [Fix for ORA-00001]
+            // We use the repository to see if this code already exists for this Report ID.
+            // Note: Ensure existsByTemplateIdAndVariantCode is UNCOMMENTED in your Repository interface.
+            boolean existsInDb = reportTemplateVariantRepository.existsByTemplateIdAndVariantCode(uniqueReportId, v.getVariantCode());
+            
+            if (existsInDb) {
+                throw new BusinessRuleViolationException("Variant Code '" + v.getVariantCode() + "' already exists for Report ID " + uniqueReportId);
+            }
+
+            // 4. Validate Parameters (Params)
+            if (v.getParams() != null) {
+                for (ReportTemplateVariantParamDto p : v.getParams()) {
+                    validateIdentifier(p.getParamName(), "Param Name");
+                    
+                    if (!ALLOWED_PARAM_TYPES.contains(p.getParamType())) {
+                        throw new BusinessRuleViolationException("Invalid Param Type: " + p.getParamType() + ". Allowed: " + ALLOWED_PARAM_TYPES);
+                    }
+                    
+                    // Validate Regex Pattern if present
+                    if (p.getValidation() != null && !p.getValidation().isBlank()) {
+                        try { 
+                            Pattern.compile(p.getValidation());
+                        } catch (Exception e) { 
+                            throw new BusinessRuleViolationException("Invalid Regex pattern for param '" + p.getParamName() + "': " + e.getMessage());
+                        }
+                    }
+                }
+            }
+
+            // 5. Validate Filter Rules
+            if (v.getFilterRules() != null) {
+                for (ReportTemplateFilterRuleDto r : v.getFilterRules()) {
+                    // Scope Check
+                    if (r.getScopeType() != null && !ALLOWED_VARIANT_SCOPES.contains(r.getScopeType())) {
+                        throw new BusinessRuleViolationException("Invalid Scope Type: " + r.getScopeType() + ". Allowed: " + ALLOWED_VARIANT_SCOPES);
+                    }
+                    
+                    // Operator Check
+                    if (r.getOperator() != null && !ALLOWED_OPERATORS.contains(r.getOperator())) {
+                        throw new BusinessRuleViolationException("Invalid Rule Operator: " + r.getOperator() + ". Allowed: " + ALLOWED_OPERATORS);
+                    }
+                    
+                    validateIdentifier(r.getDbColumn(), "Variant Rule DB Column");
+
+                    // --- Cross-Validation (Rule Scope Integrity) ---
+                    // If a variant rule tries to filter a specific TABLE, we must ensure 
+                    // that the table is actually used/present in the template rows/cells.
+                    if ("TABLE".equals(r.getScopeType()) && r.getScopeValue() != null) {
+                        if (!tablesUsedInTemplate.contains(r.getScopeValue().toUpperCase())) {
+                            throw new BusinessRuleViolationException("Variant Rule references table '" + r.getScopeValue() +
+                                    "' which is NOT used in the template configuration.");
+                        }
+                    }
+                }
+            }
+        }
+    }
 
 
 
