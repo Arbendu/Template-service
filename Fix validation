@@ -955,6 +955,81 @@ public class ReportTemplateDto implements KeyablePayload {
 
 
 
+    // =========================================================================
+    // 9 & 10. Variant Definitions & Cross-Validation
+    // =========================================================================
+    // MODIFIED: Added 'changeType' parameter
+    private void validateVariants(List<ReportTemplateVariantDto> variants, Set<String> tablesUsedInTemplate, String templateId, String changeType) {
+        Set<String> codesInRequest = new HashSet<>();
+
+        for (ReportTemplateVariantDto v : variants) {
+            // 1. Basic Syntax Validation
+            validateIdentifier(v.getVariantCode(), "Variant Code");
+
+            // 2. Check for duplicates within the CURRENT JSON request
+            // (You cannot send two "V1" variants in the same update request)
+            if (!codesInRequest.add(v.getVariantCode())) {
+                throw new BusinessRuleViolationException("Duplicate Variant Code in request: " + v.getVariantCode());
+            }
+
+            // 3. Check for duplicates against the DATABASE [Fix for ORA-00001]
+            if (templateId != null) {
+                boolean existsInDb = reportTemplateVariantRepository.existsByTemplateIdAndVariantCode(templateId, v.getVariantCode());
+
+                if (existsInDb) {
+                    // LOGIC CHANGE: 
+                    // If it is an UPDATE, finding the variant in DB is GOOD (we are updating it).
+                    // If it is a CREATE, finding the variant in DB is BAD (it's a duplicate).
+                    if (!"UPDATE".equalsIgnoreCase(changeType)) {
+                        throw new BusinessRuleViolationException("Variant Code '" + v.getVariantCode() + "' already exists for Template ID " + templateId);
+                    }
+                    // If UPDATE, we silently proceed (Allowed).
+                }
+            }
+
+            // 4. Validate Parameters (Params)
+            if (v.getParams() != null) {
+                for (ReportTemplateVariantParamDto p : v.getParams()) {
+                    validateIdentifier(p.getParamName(), "Param Name");
+                    
+                    if (!ALLOWED_PARAM_TYPES.contains(p.getParamType())) {
+                        throw new BusinessRuleViolationException("Invalid Param Type: " + p.getParamType());
+                    }
+                    
+                    if (p.getValidation() != null && !p.getValidation().isBlank()) {
+                        try { 
+                            Pattern.compile(p.getValidation());
+                        } catch (Exception e) { 
+                            throw new BusinessRuleViolationException("Invalid Regex for param " + p.getParamName());
+                        }
+                    }
+                }
+            }
+
+            // 5. Validate Filter Rules
+            if (v.getFilterRules() != null) {
+                for (ReportTemplateFilterRuleDto r : v.getFilterRules()) {
+                    if (r.getScopeType() != null && !ALLOWED_VARIANT_SCOPES.contains(r.getScopeType())) {
+                        throw new BusinessRuleViolationException("Invalid Scope Type: " + r.getScopeType());
+                    }
+                    
+                    if (r.getOperator() != null && !ALLOWED_OPERATORS.contains(r.getOperator())) {
+                        throw new BusinessRuleViolationException("Invalid Rule Operator: " + r.getOperator());
+                    }
+                    
+                    validateIdentifier(r.getDbColumn(), "Variant Rule DB Column");
+
+                    // --- Cross-Validation (Rule Scope Integrity) ---
+                    if ("TABLE".equals(r.getScopeType()) && r.getScopeValue() != null) {
+                        if (!tablesUsedInTemplate.contains(r.getScopeValue().toUpperCase())) {
+                            throw new BusinessRuleViolationException("Variant Rule references table '" + r.getScopeValue() +
+                                    "' which is NOT used in the template.");
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     
 
