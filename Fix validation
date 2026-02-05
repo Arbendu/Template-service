@@ -841,3 +841,108 @@ public class ReportTemplateDto implements KeyablePayload {
 
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    // Define a set of words to ignore (JEXL keywords, reserved names, and common functions)
+    private static final Set<String> IGNORED_KEYWORDS = Set.of(
+        "null", "true", "false", "math", "abs", "min", "max", "round", "ceil", "floor", 
+        "size", "empty", "new", "and", "or", "not", "eq", "ne", "lt", "gt", "le", "ge", 
+        "div", "mod", "string"
+    );
+
+    private void validateFormulasAndCircularDependencies(ReportTemplateDto.Template t) {
+        Map<String, Set<String>> graph = new HashMap<>();
+        Set<String> allFormulaCells = new HashSet<>();
+
+        if (t.getReportData().getRows() == null) return;
+
+        for (ReportTemplateDto.Row row : t.getReportData().getRows()) {
+            if (row.getCells() == null) continue;
+
+            for (ReportTemplateDto.Cell cell : row.getCells()) {
+                if ("FORMULA".equalsIgnoreCase(cell.getType())) {
+                    String cellId = cell.getId();
+                    if (cellId == null) continue;
+
+                    allFormulaCells.add(cellId);
+                    graph.putIfAbsent(cellId, new HashSet<>());
+
+                    // Deps from Variables
+                    if (cell.getVariables() != null) {
+                        for (Object varVal : cell.getVariables().values()) {
+                            if (varVal instanceof Map m && "CELL_REF".equals(m.get("type"))) {
+                                graph.get(cellId).add((String) m.get("ref"));
+                            }
+                        }
+                    }
+
+                    String expression = cell.getExpression();
+                    if (expression != null) {
+                        // Extract all words/tokens
+                        Matcher m = Pattern.compile("[A-Za-z0-9_]+").matcher(expression);
+
+                        while (m.find()) {
+                            String variableName = m.group();
+                            Map<String, Object> variables = cell.getVariables();
+
+                            // 1. Check if it is a defined variable
+                            if (variables != null && variables.containsKey(variableName)) {
+                                graph.get(cellId).add(variableName);
+                                continue; 
+                            }
+
+                            // 2. CHECK: Is it a number? (Fix for "0", "1", "-1")
+                            if (variableName.matches("^\\d+$")) {
+                                continue; // Ignore numbers
+                            }
+
+                            // 3. CHECK: Is it a reserved keyword or function? (Fix for "math", "abs")
+                            if (IGNORED_KEYWORDS.contains(variableName.toLowerCase())) {
+                                continue; // Ignore keywords
+                            }
+
+                            // 4. Check if it is a direct Cell Reference (e.g., cell_R__1_C__2)
+                            Matcher refMatcher = CELL_REF_PATTERN.matcher(variableName);
+                            if (refMatcher.matches()) {
+                                String rowId = refMatcher.group(1);
+                                String colId = refMatcher.group(2);
+
+                                boolean exists = validateCellExists(t, rowId, colId);
+                                if (!exists) {
+                                    throw new BusinessRuleViolationException("Cell reference " + variableName + " (Row: " + rowId + ", Col: " + colId + ") does not exist in report data.");
+                                }
+                                graph.get(cellId).add(variableName);
+                            } else {
+                                // Real error: It's not a var, not a number, not a keyword, and not a cell ref.
+                                throw new BusinessRuleViolationException("Undefined reference found in expression: " + variableName);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Topological Sort / Cycle Detection
+        Set<String> visited = new HashSet<>();
+        Set<String> recursionStack = new HashSet<>();
+        for (String cellId : allFormulaCells) {
+            if (detectCycle(cellId, graph, visited, recursionStack)) {
+                throw new BusinessRuleViolationException("Circular dependency detected involving cell: " + cellId);
+            }
+        }
+    }
+
+
