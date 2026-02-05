@@ -1,0 +1,843 @@
+// *****************************************************************************************************************************************************
+// TemplateValidationService.java
+// *****************************************************************************************************************************************************
+
+package com.tcs.fincore.CommonRequestService.validation;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tcs.fincore.CommonRequestService.dto.*;
+import com.tcs.fincore.CommonRequestService.exception.BusinessRuleViolationException;
+import com.tcs.fincore.CommonRequestService.model.enums.ChangeType;
+import com.tcs.fincore.CommonRequestService.repository.SchemaMetadataRepository;
+import com.tcs.fincore.CommonRequestService.repository.ReportTemplateRepository;
+import jakarta.validation.ValidationException;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.jexl3.JexlBuilder;
+import org.apache.commons.jexl3.JexlEngine;
+import org.apache.commons.jexl3.JexlException;
+import org.springframework.stereotype.Service;
+
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+
+/**
+ * STRICT Validation Service.
+ * Enforces Security (Whitelisting), Structural Integrity, and Runtime Limits ("Doom Check").
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class TemplateValidationService {
+
+    private final SchemaMetadataRepository schemaRepo;
+    private final ReportTemplateRepository reportTemplateRepository;
+    private final ObjectMapper objectMapper;
+
+    // --- CONSTANTS & REGEX ---
+    private static final Pattern SQL_IDENTIFIER_PATTERN = Pattern.compile("^[A-Za-z0-9_]+$");
+
+    private static final Pattern ROW_ID_PATTERN = Pattern.compile("^R__[A-Za-z0-9]+$");
+
+    private static final Pattern COL_ID_PATTERN = Pattern.compile("^C__[A-Za-z0-9]+$");
+    // Matches cell references like "cell_R__1_C__2"
+    private static final Pattern CELL_REF_PATTERN = Pattern.compile("cell_(R[A-Za-z0-9_]+)_(C[A-Za-z0-9_]+)");
+
+    // Limits
+    private static final int MAX_TOTAL_SPECS = 5000; // Hard limit from AggregatorServiceImpl[span_0](end_span)
+    private static final int MAX_DYNAMIC_LIMIT = 10000;
+
+    // Whitelists
+    private static final Set<String> ALLOWED_PAGE_SIZES = Set.of("A4", "A3", "A5", "LETTER", "LEGAL");
+    private static final Set<String> ALLOWED_ORIENTATIONS = Set.of("PORTRAIT", "LANDSCAPE");
+    private static final Set<String> ALLOWED_ROW_TYPES = Set.of("DATA", "DYNAMIC", "HEADER", "FOOTER", "GROUP_START", "GROUP_END");
+    private static final Set<String> ALLOWED_CELL_TYPES = Set.of(
+            "TEXT", "FORMULA", "DB_VALUE", "DB_SUM", "DB_COUNT", "DB_AVG", "DB_MIN", "DB_MAX", "DB_DATE", "DB_TEXT"
+    );
+    private static final Set<String> ALLOWED_OPERATORS = Set.of("=", "!=", ">", "<", ">=", "<=", "LIKE", "IN", "BETWEEN");
+    private static final Set<String> ALLOWED_VARIANT_SCOPES = Set.of("ALL_DB", "TABLE", "DYNAMIC_TABLE", "TAG");
+    private static final Set<String> ALLOWED_PARAM_TYPES = Set.of("STRING", "NUMBER", "DATE", "LIST");
+    private static final Set<String> VALID_ORDER_DIRECTIONS = Set.of("ASC", "DESC");
+
+    // Syntax Checker
+    private static final JexlEngine JEXL = new JexlBuilder().silent(false).strict(true).create();
+
+    public void validate(CreateRequestDto dto) {
+        ReportTemplateDto request = objectMapper.convertValue(dto.getPayload(), ReportTemplateDto.class);
+
+        if (request == null) throw new BusinessRuleViolationException("Request body cannot be null");
+        if (request.getTemplate() == null) throw new BusinessRuleViolationException("ReportTemplate is missing");
+
+        ReportTemplateDto.Template t = request.getTemplate();
+
+        // 1. Structure & Metadata
+        validateMetadata(t);
+
+        // 2. Column Definitions
+        validateColumns(t);
+
+        validateCreateTemplateRequest(dto);
+
+        assignIds(t);
+
+        // 3-5 & 11 & 12. Rows, Cells, Dynamic Config & Doom Check
+        // We collect DB requirements here to validate against whitelist later
+        ValidationContext ctx = validateRowsAndCells(t);
+
+        // 6. Formula Logic & Circular Dependencies
+        validateFormulasAndCircularDependencies(t);
+
+        // 8. Security & Semantic Validation (The "Main Thing")
+        // Checks if tables/cols exist in DB and are allowed/filterable
+        validateSchemaPermissions(ctx.dbRequirements);
+        log.info("Validation {}", ctx.dbRequirements);
+
+        // 9 & 10. Variant Definitions & Cross-Validation
+        if (request.getVariants() != null) {
+            validateVariants(request.getVariants(), ctx.tablesUsed);
+        }
+
+        // 11. "Doom Check" (Runtime Limits)
+        if (ctx.totalEstimatedSpecs > MAX_TOTAL_SPECS) {
+            throw new BusinessRuleViolationException(String.format(
+                    "DOOM CHECK FAILED: Template is too heavy! Estimated queries: %d. Max allowed: %d. " +
+                            "Reduce dynamic row limits or split report.",
+                    ctx.totalEstimatedSpecs, MAX_TOTAL_SPECS));
+        }
+    }
+
+    // ========================================================================
+    // Validate create template request
+    // ========================================================================
+
+    public void validateCreateTemplateRequest(CreateRequestDto dto){
+        ReportTemplateDto payload = objectMapper.convertValue(dto.getPayload(), ReportTemplateDto.class);
+        String reportId = payload.getTemplate().getReportMeta().getReportId();
+        String changeType = String.valueOf(dto.getChangeType());
+
+        if("UPDATE".equals(changeType)){
+            boolean activeTemplateExists = reportTemplateRepository.existsByReportIdAndStatus(reportId, "ACTIVE");
+            if(!activeTemplateExists){
+                throw new ValidationException("Cannot create UPDATE request. " + "No ACTIVE template found for reportID: " + reportId);
+            }
+        }
+//        if(ChangeType.UPDATE.name().equals(dto.getChangeType())){
+//            boolean activeTemplateExists = reportTemplateRepository.existsByReportIdAndStatus(reportId, "ACTIVE");
+//
+//            if(!activeTemplateExists){
+//                throw new ValidationException("Cannot create UPDATE request. " + "No ACTIVE template found for reportID: " + reportId);
+//            }
+//        }
+    }
+
+
+    // =========================================================================
+    // 1. Metadata Validation
+    // =========================================================================
+    private void validateMetadata(ReportTemplateDto.Template t) {
+        if (t.getTemplateMeta() == null) throw new BusinessRuleViolationException("templateMeta is required");
+        if (t.getReportMeta() == null) throw new BusinessRuleViolationException("reportMeta is required");
+
+        //validateIdentifier(t.getTemplateMeta().getTemplateId(), "templateId");
+
+        if (isBlank(t.getReportMeta().getReportName())) throw new BusinessRuleViolationException("reportName is required");
+
+        String size = t.getTemplateMeta().getPageSize();
+        if (size != null && !ALLOWED_PAGE_SIZES.contains(size.toUpperCase())) {
+            throw new BusinessRuleViolationException("Invalid Page Size: " + size + ". Allowed: " + ALLOWED_PAGE_SIZES);
+        }
+        String orient = t.getTemplateMeta().getPageOrientation();
+        if (orient != null && !ALLOWED_ORIENTATIONS.contains(orient.toUpperCase())) {
+            throw new BusinessRuleViolationException("Invalid Orientation: " + orient + ". Allowed: " + ALLOWED_ORIENTATIONS);
+        }
+
+        if (t.getReportData() == null) throw new BusinessRuleViolationException("reportData object must be present");
+    }
+
+    // =========================================================================
+    // 2. Column Definitions
+    // =========================================================================
+    private void validateColumns(ReportTemplateDto.Template t) {
+        List<ReportTemplateDto.ColumnDefinition> cols = t.getReportData().getColumns();
+        if (cols == null || cols.isEmpty()) {
+            throw new BusinessRuleViolationException("Columns list cannot be null or empty");
+        }
+
+        Set<String> colIds = new HashSet<>();
+        for (ReportTemplateDto.ColumnDefinition c : cols) {
+
+            if(!COL_ID_PATTERN.matcher(c.getId()).matches()){
+                throw new BusinessRuleViolationException("Invalid column id: "+ c.getId());
+            }
+//            validateIdentifier(c.getId(), "Column ID");
+
+            if (!colIds.add(c.getId())) {
+                throw new BusinessRuleViolationException("Duplicate Column ID found: " + c.getId());
+            }
+            if (isBlank(c.getName())) throw new BusinessRuleViolationException("Column 'name' is mandatory for ID: " + c.getId());
+        }
+    }
+
+    // =========================================================================
+    // 3, 4, 5. Rows & Cells (Validation + Data Gathering)
+    // =========================================================================
+    private ValidationContext validateRowsAndCells(ReportTemplateDto.Template t) {
+        if (t.getReportData().getRows() == null) return new ValidationContext();
+
+        int colCount = t.getReportData().getColumns().size();
+        ValidationContext ctx = new ValidationContext();
+        int rowIdx = 0;
+
+        for (ReportTemplateDto.Row row : t.getReportData().getRows()) {
+            rowIdx++;
+
+            if(!ROW_ID_PATTERN.matcher(row.getId()).matches()){
+                throw new BusinessRuleViolationException("Invalid row id: "+ row.getId() + " for index " + rowIdx);
+            }
+
+//            validateIdentifier(row.getId(), "Row ID at index " + rowIdx);
+
+            if (row.getRowType() == null || !ALLOWED_ROW_TYPES.contains(row.getRowType())) {
+                throw new BusinessRuleViolationException("Invalid rowType: " + row.getRowType());
+            }
+
+            // --- 5. Dynamic Row Configuration ---
+            if ("DYNAMIC".equalsIgnoreCase(row.getRowType())) {
+                ctx.totalEstimatedSpecs += validateDynamicRow(row, ctx);
+                continue;
+            }
+
+            // --- 3. Grid Consistency ---
+            if ("DATA".equalsIgnoreCase(row.getRowType()) && row.getCells() != null) {
+                if (row.getCells().size() > colCount) {
+                    throw new BusinessRuleViolationException("Row " + row.getId() + " has " + row.getCells().size() +
+                            " cells, but only " + colCount + " columns defined.");
+                }
+                for (ReportTemplateDto.Cell cell : row.getCells()) {
+                    ctx.totalEstimatedSpecs += validateCell(cell, row.getId(), ctx);
+                }
+            }
+        }
+        return ctx;
+    }
+
+    public void assignIds(ReportTemplateDto.Template t) {
+        int rowNum = 0;
+
+        for (ReportTemplateDto.Row row : t.getReportData().getRows()) {
+            if (row.getCells() == null) {
+                continue;
+            }
+
+            if (row.getId() == null || row.getId().isBlank()) {
+                throw new BusinessRuleViolationException("Row id cannot be null/blank at row index: " + rowNum);
+            }
+
+            int colNum = 0;
+            for (ReportTemplateDto.Cell cell : row.getCells()) {
+                if (cell.getId() == null || cell.getId().isBlank()) {
+                    if (colNum >= t.getReportData().getColumns().size()) {
+                        throw new BusinessRuleViolationException(
+                                "Cell at row " + rowNum + " col " + colNum + " exceeds column definitions");
+                    }
+
+                    String colId = t.getReportData().getColumns().get(colNum).getId();
+                    cell.setId("cell_" + row.getId() + "_" + colId);
+                }
+                colNum++;
+            }
+            rowNum++;
+        }
+
+        log.debug("Assigned IDs to {} rows", rowNum);
+    }
+
+    private long validateDynamicRow(ReportTemplateDto.Row row, ValidationContext ctx) {
+        Map<String, Object> cfg = row.getDynamicConfig();
+        if (cfg == null) throw new BusinessRuleViolationException("DYNAMIC row " + row.getId() + " requires dynamicConfig");
+
+        if (!"DB_LIST".equals(cfg.get("type"))) {
+            throw new BusinessRuleViolationException("Row " + row.getId() + ": Only DB_LIST type is supported");
+        }
+
+        String table = (String) cfg.get("table");
+        validateIdentifier(table, "Row " + row.getId() + " table");
+        ctx.tablesUsed.add(table.toUpperCase());
+
+        List<String> select = (List<String>) cfg.get("select");
+        if (select == null || select.isEmpty()) throw new BusinessRuleViolationException("Row " + row.getId() + ": 'select' fields required");
+
+        // Register usages for Whitelist Check
+        select.forEach(col -> addDbRequirement(ctx, table, col, null, false, true));
+
+        // Limits
+        int limit = cfg.containsKey("limit") ? ((Number) cfg.get("limit")).intValue() : 300;
+        if (limit < 1 || limit > MAX_DYNAMIC_LIMIT) {
+            throw new BusinessRuleViolationException("Row " + row.getId() + ": Limit must be between 1 and " + MAX_DYNAMIC_LIMIT);
+        }
+
+        // Filters
+        validateFilters((Map<String, Object>) cfg.get("filters"), "Row " + row.getId(), table, ctx);
+
+        // --- 12. Dynamic Query Safety (Order By) ---
+        String orderBy = (String) cfg.get("orderby");
+        if (orderBy != null && !orderBy.isBlank()) {
+            validateOrderBy(orderBy, select);
+        }
+
+        // Doom Calculation: 1 query * limit rows
+        return (long) select.size() * limit;
+    }
+
+    private void validateOrderBy(String orderBy, List<String> selectCols) {
+        for (String part : orderBy.split(",")) {
+            String[] tokens = part.trim().split("\\s+");
+            if (tokens.length > 2) throw new BusinessRuleViolationException("Invalid Order By clause: " + part);
+
+            String col = tokens[0];
+            // Rule: Column must be in select list
+            if (!selectCols.contains(col)) throw new BusinessRuleViolationException("Order By column '" + col + "' must be in select list");
+
+            // Rule: Injection check
+            if (col.contains(";") || col.contains("--") || col.contains("'") || col.contains("/*")) {
+                throw new BusinessRuleViolationException("Potential SQL Injection in Order By: " + col);
+            }
+
+            if (tokens.length == 2) {
+                String dir = tokens[1].toUpperCase();
+                if (!VALID_ORDER_DIRECTIONS.contains(dir)) {
+                    throw new BusinessRuleViolationException("Invalid sort direction: " + dir);
+                }
+            }
+        }
+    }
+
+    private long validateCell(ReportTemplateDto.Cell cell, String rowId, ValidationContext ctx) {
+        if (cell.getType() == null) return 0;
+        String type = cell.getType().toUpperCase();
+        //log.info("Cell Id {}", cell.getId());
+
+        if (!ALLOWED_CELL_TYPES.contains(type)) {
+            throw new BusinessRuleViolationException("Row " + rowId + ": Invalid cell type " + type);
+        }
+//        if(!CELL_REF_PATTERN.matcher(cell.getId()).matches()){
+//            throw new BusinessRuleViolationException("Invalid CELL REFERENCE PATTERN");
+//        }
+
+        // --- 7. Formatting & Rendering (Spanning) ---
+        if (cell.getRender() != null) {
+            Number colspan = (Number) cell.getRender().get("colspan");
+            Number rowspan = (Number) cell.getRender().get("rowspan");
+            if (colspan != null && colspan.intValue() < 1) throw new BusinessRuleViolationException("colspan must be > 0");
+            if (rowspan != null && rowspan.intValue() < 1) throw new BusinessRuleViolationException("rowspan must be > 0");
+        }
+
+        // --- 4. Database Cells (DB_*) ---
+        if (type.startsWith("DB_")) {
+            Map<String, Object> src = cell.getSource();
+            if (src == null) throw new BusinessRuleViolationException("Row " + rowId + ": DB cell missing 'source'");
+
+            String table = (String) src.get("table");
+            String col = (String) src.get("column");
+            validateIdentifier(table, rowId + " table");
+            validateIdentifier(col, rowId + " column");
+
+            ctx.tablesUsed.add(table.toUpperCase());
+            addDbRequirement(ctx, table, col, type, false, true);
+
+            validateFilters((Map<String, Object>) src.get("filters"), rowId, table, ctx);
+            return 1; // 1 spec
+        }
+
+        // --- 6. Formula Validation ---
+        if ("FORMULA".equals(type)) {
+            return validateFormulaCell(cell, rowId, ctx);
+        }
+        return 0;
+    }
+
+    private long validateFormulaCell(ReportTemplateDto.Cell cell, String rowId, ValidationContext ctx) {
+        if (isBlank(cell.getExpression())) throw new BusinessRuleViolationException("Row " + rowId + ": Formula expression is empty");
+
+        // Syntax Check
+        try {
+            JEXL.createExpression(cell.getExpression());
+        } catch (JexlException e) {
+            throw new BusinessRuleViolationException("Row " + rowId + ": Invalid Formula Syntax: " + e.getMessage());
+        }
+
+        long inlineSpecs = 0;
+        // Variables Validation
+        if (cell.getVariables() != null) {
+            for (Map.Entry<String, Object> entry : cell.getVariables().entrySet()) {
+                if (entry.getValue() instanceof Map) {
+                    Map<String, Object> varCfg = (Map<String, Object>) entry.getValue();
+                    String type = (String) varCfg.get("type");
+
+                    // Inline DB Refs
+                    if (type != null && type.startsWith("DB_")) {
+                        String table = (String) varCfg.get("table");
+                        String col = (String) varCfg.get("column");
+                        validateIdentifier(table, rowId + " var table");
+                        validateIdentifier(col, rowId + " var column");
+
+                        ctx.tablesUsed.add(table.toUpperCase());
+                        addDbRequirement(ctx, table, col, type, false, true);
+
+                        validateFilters((Map<String, Object>) varCfg.get("filters"), rowId, table, ctx);
+                        inlineSpecs++;
+                    }
+                }
+            }
+        }
+        return inlineSpecs;
+    }
+
+    private void validateFilters(Map<String, Object> filters, String context, String tableName, ValidationContext ctx) {
+        if (filters == null) return;
+
+        for (Map.Entry<String, Object> entry : filters.entrySet()) {
+            validateIdentifier(entry.getKey(), context + " filter key");
+
+            // Register filter column usage for Semantic Check
+            addDbRequirement(ctx, tableName, entry.getKey(), null, true, true);
+
+            Object val = entry.getValue();
+            if (val instanceof Map) {
+                Map<String, Object> fMap = (Map<String, Object>) val;
+                String op = (String) fMap.get("op");
+
+                if (op != null && !ALLOWED_OPERATORS.contains(op.toUpperCase())) {
+                    throw new BusinessRuleViolationException(context + ": Invalid operator " + op);
+                }
+
+                if ("IN".equalsIgnoreCase(op) && !(fMap.get("value") instanceof List)) {
+                    throw new BusinessRuleViolationException(context + ": IN operator requires List value");
+                }
+                if ("BETWEEN".equalsIgnoreCase(op)) {
+                    if (!(fMap.get("value") instanceof List) || ((List<?>) fMap.get("value")).size() != 2) {
+                        throw new BusinessRuleViolationException(context + ": BETWEEN operator requires List of size 2");
+                    }
+                }
+            }
+        }
+    }
+
+    // =========================================================================
+    // 6. Circular Dependency Detection
+    // =========================================================================
+    private void validateFormulasAndCircularDependencies(ReportTemplateDto.Template t) {
+        Map<String, Set<String>> graph = new HashMap<>();
+        Set<String> allFormulaCells = new HashSet<>();
+
+        if (t.getReportData().getRows() == null) return;
+
+        for (ReportTemplateDto.Row row : t.getReportData().getRows()) {
+            if (row.getCells() == null) continue;
+            for (ReportTemplateDto.Cell cell : row.getCells()) {
+                log.info("Cell Id {}", cell.getId());
+                log.info("Cell Type {}", cell.getType());
+                if ("FORMULA".equalsIgnoreCase(cell.getType())) {
+                    String cellId = cell.getId();
+                    if (cellId == null) continue;
+
+                    allFormulaCells.add(cellId);
+                    graph.putIfAbsent(cellId, new HashSet<>());
+
+                    // Deps from Variables
+                    if (cell.getVariables() != null) {
+                        for (Object varVal : cell.getVariables().values()) {
+                            if (varVal instanceof Map m && "CELL_REF".equals(m.get("type"))) {
+                                graph.get(cellId).add((String) m.get("ref"));
+                            }
+                        }
+                    }
+
+                    String expression = cell.getExpression();
+                    if(expression != null){
+                        // Deps from Expression String (Regex)
+                        //Matcher m = CELL_REF_PATTERN.matcher(expression);
+                        Matcher m = Pattern.compile("[A-Za-z0-9_]+").matcher(expression);
+
+                        // Iterate through every match found in the expression string
+                        while (m.find()) {
+                            String variableName = m.group();
+                            Map<String, Object> variables = cell.getVariables();
+
+                            // Check id it is a defined variable first
+                            if(variables != null && variables.containsKey(variableName)){
+                                graph.get(cellId).add(variableName);
+                                continue;             // Valid variable, move to next match
+                            }
+                            Matcher refMatcher = CELL_REF_PATTERN.matcher(variableName);
+                            if(refMatcher.matches()){
+                                String rowId = refMatcher.group(1);
+                                String colId = refMatcher.group(2);
+                                log.info("Print the row id and col id: {} {}", rowId, colId);
+                                boolean exists = validateCellExists(t, rowId, colId);
+                                if(!exists){
+                                    throw new BusinessRuleViolationException("Cell reference " + variableName + " (Row: " + rowId + ", Coll: " + colId + ") does not exist in report data.");
+                                }
+                                graph.get(cellId).add(variableName);
+                            } else {
+                                throw new BusinessRuleViolationException("Undefined reference found in expression: " + variableName);
+                            }
+                        }
+                    }
+                }
+
+            }
+        }
+
+        // Topological Sort / Cycle Detection via DFS
+        Set<String> visited = new HashSet<>();
+        Set<String> recursionStack = new HashSet<>();
+
+        for (String cellId : allFormulaCells) {
+            if (detectCycle(cellId, graph, visited, recursionStack)) {
+                throw new BusinessRuleViolationException("Circular dependency detected involving cell: " + cellId);
+            }
+        }
+    }
+
+    private boolean validateCellExists(ReportTemplateDto.Template t, String rowId, String colId){
+        if(t.getReportData() == null) return false;
+
+        // Check if the Row id exists in the row list
+        boolean rowExists = t.getReportData().getRows().stream().anyMatch(row -> rowId.equals(row.getId()));
+
+        // Check if the Column id exists in the column list
+        boolean colExists = t.getReportData().getColumns().stream().anyMatch(col -> colId.equals(col.getId()));
+
+        // Return true only if both exists
+        return colExists && rowExists;
+    }
+
+
+    private boolean detectCycle(String current, Map<String, Set<String>> graph, Set<String> visited, Set<String> recursionStack) {
+        if (recursionStack.contains(current)) return true;
+        if (visited.contains(current)) return false;
+
+        visited.add(current);
+        recursionStack.add(current);
+
+        Set<String> neighbors = graph.get(current);
+        if (neighbors != null) {
+            for (String neighbor : neighbors) {
+                if (detectCycle(neighbor, graph, visited, recursionStack)) return true;
+            }
+        }
+
+        recursionStack.remove(current);
+        return false;
+    }
+
+    public boolean isAllowed(String column,  Map<String, AllowedColumnsDTO> colMetaMap) {
+//        log.info("show me the data {}", colMetaMap);
+//        log.info("show me the column {}", colMetaMap.get(column));
+//        log.info("show me the njhcythyjuy6tuj {}", column);
+        if(colMetaMap.get(column) == null) return false;
+        return true;
+    }
+
+    // =========================================================================
+    // 8. Security & Semantic Validation (DB Whitelist)
+    // =========================================================================
+    private void validateSchemaPermissions(Map<String, Set<ColumnUsage>> requirements) {
+        if (requirements.isEmpty()) return;
+        ObjectMapper mapper = new ObjectMapper();
+
+        // Bulk fetch allowed schema from DB
+        Map<String, AllowedTablesDTO> allowedSchema = schemaRepo.findAll().stream().filter(c -> "Y".equalsIgnoreCase(c.getActive())).map(AllowedTablesDTO::new).collect(Collectors.toMap(AllowedTablesDTO :: getTableName, dto -> dto));
+        log.info("List of all the table {}", allowedSchema);
+        //Map<String, List<ColumnMetadata>> allowedSchema = rawData.stream().collect(Collectors.groupingBy(ColumnMetadata::getTableName));
+
+        for (Map.Entry<String, Set<ColumnUsage>> entry : requirements.entrySet()) {
+            String tableName = entry.getKey();
+
+            // Check if Table is allowed
+            if (!allowedSchema.containsKey(tableName)) {
+                throw new BusinessRuleViolationException("Security Violation: Table '" + tableName + "' is not allowed/whitelisted.");
+            }
+
+            Map<String, AllowedColumnsDTO> colMetaMap = allowedSchema.get(tableName).getColumns().stream()
+                    .collect(Collectors.toMap(c -> c.getColumnName().toUpperCase(), c -> c));
+
+            for (ColumnUsage usage : entry.getValue()) {
+                String colName = usage.column.toUpperCase();
+                AllowedColumnsDTO meta = colMetaMap.get(colName);
+                log.info("Column name {}", meta);
+
+                // Check if Column exists
+                if (meta == null) {
+                    throw new BusinessRuleViolationException("Column '" + colName + "' does not exist in table '" + tableName + "'");
+                }
+
+                // Check if Column is PRESENT IN THIS TABLE
+                if (!isAllowed(colName, colMetaMap)) {
+                    throw new BusinessRuleViolationException("Security Violation: Column '" + colName + "' in table '" + tableName + "' is not allowed.");
+                }
+
+                // Check if Column is SELECTABLE (if used in source or if formula then inside variable)
+                if (usage.isSelectable && !"Y".equals(meta.getSelectable())) {
+                    throw new BusinessRuleViolationException("Column '" + colName + "' cannot be Selectable.");
+                }
+
+                // Check if Column is filterable (if used in filters)
+                if (usage.isUsedInFilter && !"Y".equals(meta.getFilterable())) {
+                    throw new BusinessRuleViolationException("Column '" + colName + "' cannot be used in Filters.");
+                }
+                // Check Aggregation Compatibility
+                if (usage.aggType != null) {
+                    boolean isNumeric = "NUMBER".equalsIgnoreCase(meta.getDataType()) || "DECIMAL".equalsIgnoreCase(meta.getDataType());
+                    if (Set.of("DB_SUM", "DB_AVG").contains(usage.aggType) && !isNumeric) {
+                        throw new BusinessRuleViolationException("Aggregation " + usage.aggType + " requires numeric column. Got: " + meta.getDataType());
+                    }
+                }
+            }
+        }
+    }
+
+    // =========================================================================
+    // 9 & 10. Variant Definitions & Cross-Validation
+    // =========================================================================
+    private void validateVariants(List<ReportTemplateVariantDto> variants, Set<String> tablesUsedInTemplate) {
+        Set<String> codes = new HashSet<>();
+
+        for (ReportTemplateVariantDto v : variants) {
+            validateIdentifier(v.getVariantCode(), "Variant Code");
+            if (!codes.add(v.getVariantCode())) throw new BusinessRuleViolationException("Duplicate Variant Code: " + v.getVariantCode());
+
+            // Params
+            if (v.getParams() != null) {
+                for (ReportTemplateVariantParamDto p : v.getParams()) {
+                    validateIdentifier(p.getParamName(), "Param Name");
+                    if (!ALLOWED_PARAM_TYPES.contains(p.getParamType())) {
+                        throw new BusinessRuleViolationException("Invalid Param Type: " + p.getParamType());
+                    }
+                    if (p.getValidation() != null) {
+                        try { Pattern.compile(p.getValidation()); }
+                        catch (Exception e) { throw new BusinessRuleViolationException("Invalid Regex for param " + p.getParamName()); }
+                    }
+                }
+            }
+
+            // Rules
+            if (v.getFilterRules() != null) {
+                for (ReportTemplateFilterRuleDto r : v.getFilterRules()) {
+                    if (r.getScopeType() != null && !ALLOWED_VARIANT_SCOPES.contains(r.getScopeType())) {
+                        throw new BusinessRuleViolationException("Invalid Scope Type: " + r.getScopeType());
+                    }
+                    if (r.getOperator() != null && !ALLOWED_OPERATORS.contains(r.getOperator())) {
+                        throw new BusinessRuleViolationException("Invalid Rule Operator: " + r.getOperator());
+                    }
+                    validateIdentifier(r.getDbColumn(), "Variant Rule DB Column"); // Injection Check
+
+                    // --- 10. Cross-Validation (Rule Scope) ---
+                    // If variant tries to filter a table, ensure that table is actually used in the template
+                    if ("TABLE".equals(r.getScopeType()) && r.getScopeValue() != null) {
+                        if (!tablesUsedInTemplate.contains(r.getScopeValue().toUpperCase())) {
+                            throw new BusinessRuleViolationException("Variant Rule references table '" + r.getScopeValue() +
+                                    "' which is NOT used in the template.");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // =========================================================================
+    // Helpers
+    // =========================================================================
+    private void validateIdentifier(String id, String ctx) {
+        if (isBlank(id)) throw new BusinessRuleViolationException(ctx + " cannot be empty");
+        // Strict Regex: Alphanumeric + Underscore only (Rule 2 & 8)
+        if (!SQL_IDENTIFIER_PATTERN.matcher(id).matches()) {
+            throw new BusinessRuleViolationException("Security Error: " + ctx + " '" + id + "' contains invalid characters. Alphanumeric only.");
+        }
+    }
+
+    private boolean isBlank(String s) { return s == null || s.trim().isEmpty(); }
+
+    private void addDbRequirement(ValidationContext ctx, String table, String col, String aggType, boolean isFilter, boolean isSelectable) {
+        ctx.dbRequirements.computeIfAbsent(table.toUpperCase(), k -> new HashSet<>())
+                .add(new ColumnUsage(col, aggType, isFilter, isSelectable));
+    }
+
+    // Context Class to carry state through validation
+    private static class ValidationContext {
+        long totalEstimatedSpecs = 0;
+        Set<String> tablesUsed = new HashSet<>();
+        Map<String, Set<ColumnUsage>> dbRequirements = new HashMap<>();
+    }
+
+    // Helper DTO for collecting usages
+    private static class ColumnUsage {
+        String column;
+        String aggType;
+        boolean isUsedInFilter;
+        boolean isSelectable;
+
+        public ColumnUsage(String column, String aggType, boolean isUsedInFilter, boolean isSelectable) {
+            this.column = column;
+            this.aggType = aggType;
+            this.isUsedInFilter = isUsedInFilter;
+            this.isSelectable = isSelectable;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            ColumnUsage that = (ColumnUsage) o;
+            return isUsedInFilter == that.isUsedInFilter && isSelectable == that.isSelectable && Objects.equals(column, that.column) && Objects.equals(aggType, that.aggType);
+        }
+
+        @Override
+        public int hashCode() { return Objects.hash(column, aggType, isSelectable, isUsedInFilter); }
+    }
+}
+
+
+
+
+
+
+
+
+// *****************************************************************************************************************************************************************************
+// ReportTemplateDto.java
+// *****************************************************************************************************************************************************************************
+
+
+package com.tcs.fincore.CommonRequestService.dto;
+
+import jakarta.validation.constraints.NotNull;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonTypeName;
+import com.tcs.fincore.CommonRequestService.dto.payload.KeyablePayload;
+import jakarta.validation.constraints.NotNull;
+import lombok.*;
+
+import javax.swing.*;
+import java.util.List;
+import java.util.Map;
+
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class ReportTemplateDto implements KeyablePayload {
+
+    @NotNull
+    private Template template;
+
+    @NotNull
+    private List<ReportTemplateVariantDto> variants;
+
+//    @Override
+//    public String getKey() {
+//        if (template != null && template.getTemplateMeta() != null){
+//            return template.getTemplateMeta().getTemplateId();
+//        }
+//        return null;
+//    }
+
+    /**
+     * Provides a unique key for this DTO, based on the currency code.
+     * This method is ignored during JSON serialization.
+     *
+     * @return The {@code currencyCode} as the key.
+     */
+    @Override
+    @JsonIgnore
+    public String getKey(
+    ) {
+        // TODO Auto-generated method stub
+        return this.template.getReportMeta().getReportId();
+    }
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class Template {
+        @NotNull
+        private TemplateMeta templateMeta;
+
+        @NotNull
+        private ReportMeta reportMeta;
+
+        @NotNull
+        private ReportData reportData;
+    }
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class TemplateMeta {
+        private String templateId;
+        private String version;
+        private String description;
+        // e.g. "A4", "LETTER"; "portrait" / "landscape"
+        private String pageSize;
+        private String pageOrientation;
+        private String headerLayout;  //layout (1-col, 2-col, etc.)
+    }
+
+    @Data
+    public static class ReportMeta {
+        private String reportName;
+        private String reportId;
+        private List<Map<String, String>> extras;
+    }
+
+    @Data
+    public static class ReportData {
+        private List<ColumnDefinition> columns;
+        private List<Row> rows;
+    }
+
+    @Data
+    public static class ColumnDefinition {
+        private String id;
+        private String name;
+        private Map<String, Object> format; // flexible formatting map
+    }
+
+    @Data
+    public static class Row {
+        /**
+         * DATA|GROUP_START|GROUP_END|NOTE|BREAK|DYNAMIC (future)
+         */
+        private String id;
+        private String rowType;
+        private String rowTitle;
+        private List<Cell> cells;
+
+        // Extension point for dynamic blocks etc.
+        // Example: { "type":"DB_LIST", "table":"...", "filters":{...}, "limit":100 }
+        private Map<String, Object> dynamicConfig;
+    }
+
+    @Data
+    public static class Cell {
+        private String id;                     // assigned by TemplateProcessor (R{row}C{col})
+        private String type;                   // TEXT, DB_*, FORMULA, etc.
+        private Object value;                  // used for TEXT cells
+        private String expression;             // used for formulas
+        private Map<String, Object> variables; // formula vars (CELL_REF, DB_*, CONST, etc.)
+        private Map<String, Object> source;    // for DB_* types: { table, column, filters }
+        private Map<String, Object> render;    // { bold, colspan, rowspan, align, format, bgColor, ... }
+    }
+
+
+}
+
