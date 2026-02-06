@@ -851,6 +851,7 @@ export default ViewRequestDialog;
 
 
 
+
 import React, { useEffect, useState, useMemo, memo, useRef, useCallback } from "react";
 import {
   Dialog, DialogTitle, DialogContent, Box, Typography, Table, TableBody,
@@ -891,13 +892,12 @@ const DiffText = memo(({ value, otherValue, type }) => {
                 textDecoration: isRemoved ? "line-through" : "none",
                 color: isRemoved ? "error.main" : isAdded ? "success.main" : "text.primary",
                 fontWeight: isAdded ? "bold" : "normal",
-                // Use theme alpha for backgrounds
                 bgcolor: isAdded 
                   ? alpha(theme.palette.success.main, 0.15) 
                   : isRemoved 
                     ? alpha(theme.palette.error.main, 0.15) 
                     : "transparent",
-                px: 0.5, borderRadius: 1, fontSize: '0.8rem' // Using borderRadius from shape
+                px: 0.5, borderRadius: 1, fontSize: '0.8rem'
               })}
             >
               {typeof item === 'object' ? JSON.stringify(item) : item}{idx < value.length - 1 ? ", " : ""}
@@ -959,7 +959,7 @@ const GridCell = memo(({ cell, cellKey, hasDiff, isSelected, onCellClick, side }
         border: `1px solid ${theme.palette.divider}`,
         cursor: hasDiff ? "pointer" : "default",
         bgcolor: isSelected
-          ? alpha(theme.palette.secondary.main, 0.2) // Highlight color (Gold)
+          ? alpha(theme.palette.secondary.main, 0.2)
           : hasDiff
             ? side === "OLD" 
               ? alpha(theme.palette.error.main, 0.1) 
@@ -1026,7 +1026,9 @@ const TemplateGrid = memo(({
   const topSpacerHeight = startIndex * ROW_HEIGHT;
   const bottomSpacerHeight = Math.max(0, (totalRows - endIndex) * ROW_HEIGHT);
   const visibleRows = rows.slice(startIndex, endIndex);
-  const getCellKey = (cell, r, c) => cell?.id || `R${r}C${c}`;
+
+  // FIX: Use cell ID first, but if fallback is needed, use ORIGINAL ROW INDEX not visual index
+  const getCellKey = (cell, originalRowIndex, c) => cell?.id || `R${originalRowIndex}C${c}`;
 
   return (
     <TableContainer
@@ -1095,21 +1097,27 @@ const TemplateGrid = memo(({
           )}
 
           {visibleRows.map((row, index) => {
-            const actualIndex = startIndex + index;
+            // FIX: We rely on the _originalIndex attached in useMemo for correct data alignment
+            const rowIdxToUse = row._originalIndex ?? (startIndex + index);
+
             return (
-              <TableRow key={actualIndex} sx={{ height: ROW_HEIGHT }}>
+              <TableRow key={rowIdxToUse} sx={{ height: ROW_HEIGHT }}>
                 <TableCell sx={(theme) => ({ 
                     bgcolor: theme.palette.grey[50], 
                     textAlign: "center", fontWeight: "bold", fontSize: '0.7rem', 
                     color: "text.secondary",
                     borderRight: `1px solid ${theme.palette.divider}`
                 })}>
-                  {row?.rowId || row?.id || actualIndex + 1}
+                  {/* Show actual ID or index + 1 */}
+                  {row?.rowId || row?.id || rowIdxToUse + 1}
                 </TableCell>
                 {Array.from({ length: gridInfo.maxCols }).map((_, cIdx) => {
                   const cell = row?.cells?.[cIdx];
-                  const key = getCellKey(cell, actualIndex, cIdx);
+                  
+                  // FIX: Use rowIdxToUse (Original Index) for Key Generation
+                  const key = getCellKey(cell, rowIdxToUse, cIdx);
                   const hasDiff = !!cellDiffs?.[key];
+                  
                   return (
                     <GridCell
                       key={cIdx}
@@ -1142,7 +1150,7 @@ const TemplateGrid = memo(({
 // ============================================================================
 const CompareTemplateDialog = ({ open, onClose, requestId }) => {
   const { callApi } = useApi();
-  const theme = useTheme(); // Hook to access theme variables
+  const theme = useTheme();
 
   const [loading, setLoading] = useState(false);
   const [diffResponse, setDiffResponse] = useState(null);
@@ -1151,7 +1159,8 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
   const [analysisExpanded, setAnalysisExpanded] = useState(true);
   const [diffKeys, setDiffKeys] = useState([]);
   const [currentDiffIdx, setCurrentDiffIdx] = useState(-1);
-  const [showChangesOnly, setShowChangesOnly] = useState(false);
+  
+  const [showChangesOnly, setShowChangesOnly] = useState(true);
 
   const oldTableRef = useRef(null);
   const newTableRef = useRef(null);
@@ -1164,7 +1173,7 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
       setSelectedColumnKey(null);
       setDiffKeys([]);
       setCurrentDiffIdx(-1);
-      setShowChangesOnly(false);
+      setShowChangesOnly(true);
 
       callApi("/TC/template-diff", { requestId }, "POST")
         .then((res) => {
@@ -1185,19 +1194,23 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
     const oldTemplate = diffResponse.oldTemplate?.template?.reportData || {};
     const newTemplate = diffResponse.newTemplate?.template?.reportData || {};
     const columns = (newTemplate?.columns || oldTemplate?.columns || []);
-    let rowsOld = oldTemplate?.rows || [];
-    let rowsNew = newTemplate?.rows || [];
+    
+    // FIX: Attach _originalIndex BEFORE filtering to preserve backend matching keys
+    let rowsOld = (oldTemplate?.rows || []).map((r, i) => ({ ...r, _originalIndex: i }));
+    let rowsNew = (newTemplate?.rows || []).map((r, i) => ({ ...r, _originalIndex: i }));
 
+    // Filter Logic using original index
     if (showChangesOnly && diffResponse.cellDiffs) {
-      const isRowModified = (row, rIdx) => {
+      const isRowModified = (row) => {
          if (!row || !row.cells) return false;
          return row.cells.some((cell, cIdx) => {
-             const key = cell?.id || `R${rIdx}C${cIdx}`;
+             // FIX: Use original index for lookup key
+             const key = cell?.id || `R${row._originalIndex}C${cIdx}`;
              return diffResponse.cellDiffs[key];
          });
       };
-      rowsOld = rowsOld.filter((r, i) => isRowModified(r, i));
-      rowsNew = rowsNew.filter((r, i) => isRowModified(r, i));
+      rowsOld = rowsOld.filter(r => isRowModified(r));
+      rowsNew = rowsNew.filter(r => isRowModified(r));
     }
 
     const maxR = Math.max(rowsOld.length, rowsNew.length);
