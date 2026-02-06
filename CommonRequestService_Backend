@@ -2001,7 +2001,11 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tcs.fincore.CommonRequestService.dto.*;
 import com.tcs.fincore.CommonRequestService.exception.BusinessRuleViolationException;
+import com.tcs.fincore.CommonRequestService.model.enums.ChangeType;
+import com.tcs.fincore.CommonRequestService.repository.ReportTemplateVariantRepository;
 import com.tcs.fincore.CommonRequestService.repository.SchemaMetadataRepository;
+import com.tcs.fincore.CommonRequestService.repository.ReportTemplateRepository;
+import jakarta.validation.ValidationException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.jexl3.JexlBuilder;
@@ -2024,6 +2028,9 @@ import java.util.stream.Collectors;
 public class TemplateValidationService {
 
     private final SchemaMetadataRepository schemaRepo;
+    private final ReportTemplateRepository reportTemplateRepository;
+    private final ObjectMapper objectMapper;
+    private final ReportTemplateVariantRepository reportTemplateVariantRepository;
 
     // --- CONSTANTS & REGEX ---
     private static final Pattern SQL_IDENTIFIER_PATTERN = Pattern.compile("^[A-Za-z0-9_]+$");
@@ -2053,7 +2060,9 @@ public class TemplateValidationService {
     // Syntax Checker
     private static final JexlEngine JEXL = new JexlBuilder().silent(false).strict(true).create();
 
-    public void validate(ReportTemplateDto request) {
+    public void validate(CreateRequestDto dto) {
+        ReportTemplateDto request = objectMapper.convertValue(dto.getPayload(), ReportTemplateDto.class);
+
         if (request == null) throw new BusinessRuleViolationException("Request body cannot be null");
         if (request.getTemplate() == null) throw new BusinessRuleViolationException("ReportTemplate is missing");
 
@@ -2064,6 +2073,8 @@ public class TemplateValidationService {
 
         // 2. Column Definitions
         validateColumns(t);
+
+        validateCreateTemplateRequest(dto);
 
         assignIds(t);
 
@@ -2092,6 +2103,31 @@ public class TemplateValidationService {
                     ctx.totalEstimatedSpecs, MAX_TOTAL_SPECS));
         }
     }
+
+    // ========================================================================
+    // Validate create template request
+    // ========================================================================
+
+    public void validateCreateTemplateRequest(CreateRequestDto dto){
+        ReportTemplateDto payload = objectMapper.convertValue(dto.getPayload(), ReportTemplateDto.class);
+        String reportId = payload.getTemplate().getReportMeta().getReportId();
+        String changeType = String.valueOf(dto.getChangeType());
+
+        if("UPDATE".equals(changeType)){
+            boolean activeTemplateExists = reportTemplateRepository.existsByReportIdAndStatus(reportId, "ACTIVE");
+            if(!activeTemplateExists){
+                throw new ValidationException("Cannot create UPDATE request. " + "No ACTIVE template found for reportID: " + reportId);
+            }
+        }
+//        if(ChangeType.UPDATE.name().equals(dto.getChangeType())){
+//            boolean activeTemplateExists = reportTemplateRepository.existsByReportIdAndStatus(reportId, "ACTIVE");
+//
+//            if(!activeTemplateExists){
+//                throw new ValidationException("Cannot create UPDATE request. " + "No ACTIVE template found for reportID: " + reportId);
+//            }
+//        }
+    }
+
 
     // =========================================================================
     // 1. Metadata Validation
@@ -2319,8 +2355,12 @@ public class TemplateValidationService {
     }
 
     private long validateFormulaCell(ReportTemplateDto.Cell cell, String rowId, ValidationContext ctx) {
-        if (isBlank(cell.getExpression())) throw new BusinessRuleViolationException("Row " + rowId + ": Formula expression is empty");
 
+//        if (isBlank(cell.getExpression())) throw new BusinessRuleViolationException("Row " + rowId + ": Formula expression is empty");
+
+        // MODIFICATION: If expression is empty, we allow it and return 0 (no complexity specs)
+        // This allows cases where type="FORMULA" but "expression" is missing.
+        if (isBlank(cell.getExpression())) return 0;
         // Syntax Check
         try {
             JEXL.createExpression(cell.getExpression());
@@ -2388,6 +2428,14 @@ public class TemplateValidationService {
     // =========================================================================
     // 6. Circular Dependency Detection
     // =========================================================================
+
+    // Define a set of words to ignore (JEXL keywords, reserved names, and common functions)
+    private static final Set<String> IGNORED_KEYWORDS = Set.of(
+            "null", "true", "false", "math", "abs", "min", "max", "round", "ceil", "floor",
+            "size", "empty", "new", "and", "or", "not", "eq", "ne", "lt", "gt", "le", "ge",
+            "div", "mod", "string"
+    );
+
     private void validateFormulasAndCircularDependencies(ReportTemplateDto.Template t) {
         Map<String, Set<String>> graph = new HashMap<>();
         Set<String> allFormulaCells = new HashSet<>();
@@ -2396,9 +2444,8 @@ public class TemplateValidationService {
 
         for (ReportTemplateDto.Row row : t.getReportData().getRows()) {
             if (row.getCells() == null) continue;
+
             for (ReportTemplateDto.Cell cell : row.getCells()) {
-                log.info("Cell Id {}", cell.getId());
-                log.info("Cell Type {}", cell.getType());
                 if ("FORMULA".equalsIgnoreCase(cell.getType())) {
                     String cellId = cell.getId();
                     if (cellId == null) continue;
@@ -2416,50 +2463,62 @@ public class TemplateValidationService {
                     }
 
                     String expression = cell.getExpression();
-                    if(expression != null){
-                        // Deps from Expression String (Regex)
-                        Matcher m = CELL_REF_PATTERN.matcher(expression);
+                    if (expression != null) {
+                        // Extract all words/tokens
+                        Matcher m = Pattern.compile("[A-Za-z0-9_]+").matcher(expression);
 
-                        // Iterate through every match found in the expression string
                         while (m.find()) {
                             String variableName = m.group();
                             Map<String, Object> variables = cell.getVariables();
 
-                            // Check id it is a defined variable first
-                            if(variables != null && variables.containsKey(variableName)){
+                            // 1. Check if it is a defined variable
+                            if (variables != null && variables.containsKey(variableName)) {
                                 graph.get(cellId).add(variableName);
-                                continue;             // Valid variable, move to next match
+                                continue;
                             }
+
+                            // 2. CHECK: Is it a number? (Fix for "0", "1", "-1")
+                            if (variableName.matches("^\\d+$")) {
+                                continue; // Ignore numbers
+                            }
+
+                            // 3. CHECK: Is it a reserved keyword or function? (Fix for "math", "abs")
+                            if (IGNORED_KEYWORDS.contains(variableName.toLowerCase())) {
+                                continue; // Ignore keywords
+                            }
+
+                            // 4. Check if it is a direct Cell Reference (e.g., cell_R__1_C__2)
                             Matcher refMatcher = CELL_REF_PATTERN.matcher(variableName);
-                            if(refMatcher.matches()){
+                            if (refMatcher.matches()) {
                                 String rowId = refMatcher.group(1);
                                 String colId = refMatcher.group(2);
-                                log.info("Print the row id and col id: {} {}", rowId, colId);
+
                                 boolean exists = validateCellExists(t, rowId, colId);
-                                if(!exists){
-                                    throw new BusinessRuleViolationException("Cell reference " + variableName + " (Row: " + rowId + ", Coll: " + colId + ") does not exist in report data.");
+                                if (!exists) {
+                                    throw new BusinessRuleViolationException("Cell reference " + variableName + " (Row: " + rowId + ", Col: " + colId + ") does not exist in report data.");
                                 }
                                 graph.get(cellId).add(variableName);
                             } else {
+                                // Real error: It's not a var, not a number, not a keyword, and not a cell ref.
                                 throw new BusinessRuleViolationException("Undefined reference found in expression: " + variableName);
                             }
                         }
                     }
                 }
-
             }
         }
 
-        // Topological Sort / Cycle Detection via DFS
+        // Topological Sort / Cycle Detection
         Set<String> visited = new HashSet<>();
         Set<String> recursionStack = new HashSet<>();
-
         for (String cellId : allFormulaCells) {
             if (detectCycle(cellId, graph, visited, recursionStack)) {
                 throw new BusinessRuleViolationException("Circular dependency detected involving cell: " + cellId);
             }
         }
     }
+
+    
 
     private boolean validateCellExists(ReportTemplateDto.Template t, String rowId, String colId){
         if(t.getReportData() == null) return false;
@@ -2473,6 +2532,7 @@ public class TemplateValidationService {
         // Return true only if both exists
         return colExists && rowExists;
     }
+
 
     private boolean detectCycle(String current, Map<String, Set<String>> graph, Set<String> visited, Set<String> recursionStack) {
         if (recursionStack.contains(current)) return true;
@@ -2657,6 +2717,7 @@ public class TemplateValidationService {
         public int hashCode() { return Objects.hash(column, aggType, isSelectable, isUsedInFilter); }
     }
 }
+
 
 
 
