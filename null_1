@@ -1,1 +1,260 @@
+package com.tcs.fincore.CommonRequestService.service.strategy;
+
+import java.time.LocalDateTime;
+import java.util.*;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tcs.fincore.CommonRequestService.dto.*;
+import com.tcs.fincore.CommonRequestService.exception.ResourceNotFoundException;
+import com.tcs.fincore.CommonRequestService.model.*;
+import com.tcs.fincore.CommonRequestService.model.enums.RequestType;
+import com.tcs.fincore.CommonRequestService.repository.*;
+import com.tcs.fincore.CommonRequestService.validation.TemplateValidationService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class ReportTemplateConfigStrategy implements RequestTypeStrategy {
+
+    private final ObjectMapper objectMapper;
+    private final ReportTemplateRepository reportTemplateRepository;
+    private final ReportTemplateVariantRepository reportTemplateVariantRepository;
+    private final ReportTemplateVariantParamDefRepository reportTemplateVariantParamDefRepository;
+    private final ReportTemplateFilterRuleRepository reportTemplateFilterRuleRepository;
+    private final TemplateValidationService templateValidationService;
+
+    @Override
+    public RequestType getRequestType() {
+        return RequestType.RB_REPORT_TEMPLATE;
+    }
+
+    @Override
+    public void processApproval(CommonReq request) throws JsonProcessingException {
+        switch (request.getChangeType()) {
+            case ADD -> handleCreate(request);
+            case UPDATE -> handleUpdate(request); // Versioning Logic is here
+            case DELETE -> handleDelete(request);
+            default ->
+                    throw new UnsupportedOperationException("Change type " + request.getChangeType() + " not supported");
+        }
+    }
+
+    // -----------------------------------------------------------------------------------
+    // Template Validation
+    // -----------------------------------------------------------------------------------
+
+    @Override
+    public void validateRequest(CreateRequestDto requestDto) throws JsonProcessingException {
+        ReportTemplateDto payload = objectMapper.convertValue(requestDto.getPayload(), ReportTemplateDto.class);
+        log.info("In validate request {}", payload);
+        // Note: TemplateValidationService must allow duplicate Variant Codes if ChangeType is UPDATE.
+        templateValidationService.validate(requestDto);
+    }
+
+
+    // CREATE (First Version)
+    private void handleCreate(CommonReq request) throws JsonProcessingException {
+        ReportTemplateDto payload = objectMapper.readValue(request.getPayload(), ReportTemplateDto.class);
+        ReportTemplateDto.Template templateDTO = payload.getTemplate();
+        String reportId = templateDTO.getReportMeta().getReportId();
+        
+        // Default to Version 1 if not provided, or parse from payload
+        int version = 1;
+        if (templateDTO.getTemplateMeta().getVersion() != null) {
+            try {
+                version = Integer.parseInt(templateDTO.getTemplateMeta().getVersion());
+            } catch (NumberFormatException e) {
+                version = 1; 
+            }
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        String templateJson = serialize(templateDTO);
+
+        Optional<ReportTemplate> activeOpt = reportTemplateRepository.findFirstByReportIdAndStatus(reportId, "ACTIVE");
+
+        if (activeOpt.isPresent()) {
+             // If a version exists, we could either throw error or treat as Version 2.
+             // Usually CREATE means "Brand New Report". 
+             throw new IllegalStateException("Active version already exists for reportId " + reportId + ". Use UPDATE to create new version.");
+        }
+
+        // Create new template row (V1)
+        ReportTemplate template = new ReportTemplate();
+        template.setReportId(reportId);
+        template.setTemplateName(templateDTO.getReportMeta().getReportName());
+        template.setDescription(templateDTO.getTemplateMeta().getDescription());
+        template.setVersionNo(version);
+        template.setStatus("ACTIVE");
+        template.setTemplateJson(templateJson);
+        template.setCreatedAt(now);
+        template.setCreatedBy(request.getCreatorId());
+        template.setUpdatedAt(now);
+        template.setUpdatedBy(request.getExecutorId());
+
+        ReportTemplate savedTemplate = reportTemplateRepository.save(template);
+
+        saveVariants(payload, savedTemplate, request, now);
+    }
+
+
+    // UPDATE (VERSIONING: Deactivate Old -> Create New)
+    private void handleUpdate(CommonReq request) throws JsonProcessingException {
+
+        // The TargetId in CommonReq is the 'ReportId' (mapped in RequestService)
+        if (request.getTargetId() == null || request.getTargetId().isBlank()) {
+            throw new IllegalArgumentException("TargetId (ReportId) required for UPDATE");
+        }
+        String reportId = request.getTargetId();
+
+        // 1. Fetch the CURRENT ACTIVE Template (V_OLD)
+        // We lock the active one to ensure we are versioning the right record
+        ReportTemplate oldTemplate = reportTemplateRepository.findFirstByReportIdAndStatus(reportId, "ACTIVE")
+                .orElseThrow(() -> new ResourceNotFoundException("No Active Template found for Report ID: " + reportId));
+
+        ReportTemplateDto payload = objectMapper.readValue(request.getPayload(), ReportTemplateDto.class);
+        ReportTemplateDto.Template templateDTO = payload.getTemplate();
+
+        LocalDateTime now = LocalDateTime.now();
+
+        // 2. Deactivate V_OLD
+        // We do not delete variants of V_OLD. They remain linked to this INACTIVE template for history.
+        oldTemplate.setStatus("INACTIVE");
+        oldTemplate.setUpdatedAt(now);
+        oldTemplate.setUpdatedBy(request.getExecutorId()); // Checker who approved the new version
+        reportTemplateRepository.save(oldTemplate);
+
+        log.info("Deactivated Version {} of Report {}", oldTemplate.getVersionNo(), reportId);
+
+        // 3. Create V_NEW
+        ReportTemplate newTemplate = new ReportTemplate();
+        newTemplate.setReportId(reportId); 
+        newTemplate.setVersionNo(oldTemplate.getVersionNo() + 1); // AUTO-INCREMENT VERSION
+        
+        // Map fields from Payload (which might have changed)
+        newTemplate.setTemplateName(templateDTO.getReportMeta().getReportName());
+        newTemplate.setDescription(templateDTO.getTemplateMeta().getDescription());
+        newTemplate.setStatus("ACTIVE");
+        newTemplate.setTemplateJson(serialize(templateDTO));
+        
+        // Audit Fields
+        newTemplate.setCreatedAt(now); 
+        newTemplate.setCreatedBy(request.getCreatorId()); // The Maker who requested the update
+        newTemplate.setUpdatedAt(now);
+        newTemplate.setUpdatedBy(request.getExecutorId()); // The Checker who approved it
+
+        // Save V_NEW (Hibernate will generate a NEW TemplateID)
+        ReportTemplate savedTemplate = reportTemplateRepository.save(newTemplate);
+        
+        log.info("Created Version {} of Report {} with TemplateID {}", 
+                 savedTemplate.getVersionNo(), reportId, savedTemplate.getTemplateId());
+
+        // 4. Save Variants for V_NEW
+        // We insert new variant rows linked to the NEW TemplateID.
+        saveVariants(payload, savedTemplate, request, now);
+    }
+
+
+    // DELETE (Soft delete)
+    private void handleDelete(CommonReq request) {
+        if (request.getTargetId() == null || request.getTargetId().isBlank()) {
+            throw new IllegalArgumentException("TargetId required for DELETE");
+        }
+        
+        // Find Active Template
+        ReportTemplate template = reportTemplateRepository.findFirstByReportIdAndStatus(request.getTargetId(), "ACTIVE")
+                .orElseThrow(() -> new ResourceNotFoundException("Active Template not found for delete"));
+
+        template.setStatus("INACTIVE");
+        template.setUpdatedAt(LocalDateTime.now());
+        template.setUpdatedBy(request.getExecutorId());
+        reportTemplateRepository.save(template);
+    }
+
+
+    // VARIANT HANDLING
+    // This method saves new variant rows linked to the provided 'template' object
+    private void saveVariants(ReportTemplateDto payload, ReportTemplate template, CommonReq request, LocalDateTime now) {
+
+        if (payload.getVariants() == null) return;
+
+        for (ReportTemplateVariantDto dto : payload.getVariants()) {
+
+            ReportTemplateVariant variant = new ReportTemplateVariant();
+            // CRITICAL: Link to the NEW Template ID
+            variant.setTemplateId(template.getTemplateId()); 
+            
+            variant.setVariantCode(dto.getVariantCode());
+            variant.setVariantName(dto.getVariantName());
+            variant.setDescription(dto.getDescription());
+            variant.setStatus(dto.getStatus());
+            
+            variant.setCreatedAt(now);
+            variant.setCreatedBy(request.getCreatorId());
+            variant.setUpdatedAt(now);
+            variant.setUpdatedBy(request.getExecutorId());
+
+            ReportTemplateVariant savedVariant = reportTemplateVariantRepository.save(variant);
+
+            Long variantId = savedVariant.getVariantId();
+            
+            // Save Params
+            if (dto.getParams() != null) {
+                for (ReportTemplateVariantParamDto p : dto.getParams()) {
+                    reportTemplateVariantParamDefRepository.save(ReportTemplateVariantParamDef.builder()
+                            .variantId(variantId)
+                            .paramName(p.getParamName())
+                            .label(p.getLabel())
+                            .paramType(p.getParamType())
+                            .required(p.isRequired() ? "Y" : "N")
+                            .multiVal(p.isMultiValued() ? "Y" : "N")
+                            .uiHint(p.getUiHint())
+                            .validation(p.getValidation())
+                            .createdAt(now)
+                            .build());
+                }
+            }
+
+            // Save Rules
+            if (dto.getFilterRules() != null) {
+                for (ReportTemplateFilterRuleDto r : dto.getFilterRules()) {
+                    reportTemplateFilterRuleRepository.save(ReportTemplateFilterRule.builder()
+                            .variantId(variantId)
+                            .dbColumn(r.getDbColumn())
+                            .operator(r.getOperator())
+                            .paramName(r.getParamName())
+                            .scopeType(r.getScopeType())
+                            .scopeValue(r.getScopeValue())
+                            .createdAt(now)
+                            .build());
+                }
+            }
+        }
+    }
+
+    // Deletes variants (Used for cleanups, logic changed so not used in Update anymore)
+    private void deleteVariants(String templateId) {
+        reportTemplateVariantRepository.findByTemplateId(templateId).forEach(v -> {
+            reportTemplateVariantParamDefRepository.deleteByVariantId(v.getVariantId());
+            reportTemplateFilterRuleRepository.deleteByVariantId(v.getVariantId());
+            reportTemplateVariantRepository.delete(v);
+        });
+        // Flush to force delete execution (Prevent Unique Constraint violation)
+        reportTemplateVariantParamDefRepository.flush();
+        reportTemplateFilterRuleRepository.flush();
+        reportTemplateVariantRepository.flush();
+    }
+
+    private String serialize(Object obj) {
+        try {
+            return objectMapper.writeValueAsString(obj);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Failed to serialize template json");
+        }
+    }
+}
 
