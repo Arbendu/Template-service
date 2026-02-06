@@ -1468,11 +1468,29 @@ public class ReportTemplateConfigStrategy implements RequestTypeStrategy {
     }
 
     private void deleteVariants(String templateId) {
-        reportTemplateVariantRepository.findByTemplateId(templateId).forEach(v -> {
+        // 1. Fetch existing variants
+        List<ReportTemplateVariant> variants = reportTemplateVariantRepository.findByTemplateId(templateId);
+
+        // 2. Delete them one by one (including child tables)
+        for (ReportTemplateVariant v : variants) {
+            log.info("Deleting variant ID: {}", v.getVariantId());
+
+            // Delete dependent children first
             reportTemplateVariantParamDefRepository.deleteByVariantId(v.getVariantId());
             reportTemplateFilterRuleRepository.deleteByVariantId(v.getVariantId());
+
+            // Delete the parent variant
             reportTemplateVariantRepository.delete(v);
-        });
+        }
+
+        // 3. CRITICAL FIX: Force the DB to execute DELETE statements NOW.
+        // If we don't flush, the deletes are delayed, causing a collision
+        // when 'saveVariants' tries to re-insert the same codes immediately after.
+        reportTemplateVariantParamDefRepository.flush();
+        reportTemplateFilterRuleRepository.flush();
+        reportTemplateVariantRepository.flush();
+
+        log.info("Successfully flushed deletes for templateId: {}", templateId);
     }
 
 
