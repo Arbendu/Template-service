@@ -172,12 +172,170 @@ public class TemplateDiffResponseDto {
 // ==========≈==========================================================================
 
 
+    package com.fincore.TemplateConfigurationService.controller;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fincore.TemplateConfigurationService.dto.*;
+import com.fincore.TemplateConfigurationService.entity.ReportTemplate;
+import com.fincore.TemplateConfigurationService.service.AllowedTableService;
+import com.fincore.TemplateConfigurationService.service.TemplateDiffService;
+import com.fincore.TemplateConfigurationService.service.TemplateService;
+import com.fincore.TemplateConfigurationService.constants.ResponseMessages;
+import com.fincore.TemplateConfigurationService.response.ApiResponse;
+import com.fincore.commonutilities.jwt.JwtUtil;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
+import lombok.Data;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.time.LocalDateTime;
+import java.util.List;
+
+@Slf4j
+@RestController
+@RequestMapping("/api")
+@RequiredArgsConstructor
+public class TemplateController {
+
+    private final TemplateService templateService;
     private final TemplateDiffService templateDiffService;
+    private final JwtUtil jwtUtil;
+
+    @Autowired
+    private AllowedTableService tableService;
+
+    @GetMapping("/allowed-tables")
+    public  ResponseEntity<List<AllowedTablesDTO>> getAllTables(){
+        return ResponseEntity.ok(tableService.getTableWithColumnsAll());
+    }
+
+    @GetMapping("/{tableId}")
+    public ResponseEntity<AllowedTablesDTO> getAllowedTables(@PathVariable Long tableId) {
+        return ResponseEntity.ok(tableService.getTableWithColumns(tableId));
+    }
+
+    // -------------------------------------------------
+    // CREATE / UPDATE TEMPLATE
+    // -------------------------------------------------
+    @PostMapping("/save")
+    public ResponseEntity<ApiResponse> saveTemplate(
+            @Valid @RequestBody TemplatePayload payload,
+            @RequestHeader("Authorization") String token,
+            HttpServletRequest request) {
+
+        String userId = jwtUtil.getUserIdFromToken(token);
+
+        log.info("API: Save Template called by {}", userId);
+
+        ReportTemplate saved = templateService.createOrUpdateTemplate(payload, userId);
+
+        ApiResponse response = ApiResponse.builder()
+                .message(ResponseMessages.TEMPLATE_SAVED)
+                .status("SUCCESS")
+                .data(saved.getTemplateId())
+                .timestamp(LocalDateTime.now())
+                .path(request.getRequestURI())
+                .build();
+
+        return ResponseEntity.ok(response);
+    }
+
+    // -------------------------------------------------
+    // GET TEMPLATE WITH VARIANTS
+    // -------------------------------------------------
+    @GetMapping("/getTemplate/{templateId}")
+    public ResponseEntity<ApiResponse> getTemplate(
+            @PathVariable String templateId,
+            HttpServletRequest request) {
+
+        log.info("API: Get Template {}", templateId);
+
+        TemplateResponse payload = null;
+        try {
+            payload = templateService.getTemplateWithVariants(templateId);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+
+        ApiResponse response = ApiResponse.builder()
+                .message(ResponseMessages.TEMPLATE_FETCHED)
+                .status("SUCCESS")
+                .data(payload)
+                .timestamp(LocalDateTime.now())
+                .path(request.getRequestURI())
+                .build();
+
+        return ResponseEntity.ok(response);
+    }
+
+    // -------------------------------------------------
+    // GET ALL TEMPLATES
+    // -------------------------------------------------
+    @GetMapping("/get-templates")
+    public ResponseEntity<ApiResponse> getALLTemplates(HttpServletRequest request) {
+
+        List<TemplateResponse> templates = templateService.getAllTemplates();
+
+        ApiResponse response = ApiResponse.builder()
+                .message(ResponseMessages.ALL_TEMPLATES_FETCHED)
+                .status("SUCCESS")
+                .data(templates)
+                .timestamp(LocalDateTime.now())
+                .path(request.getRequestURI())
+                .build();
+
+        return ResponseEntity.ok(response);
+    }
+
+    // -------------------------------------------------
+    // DELETE TEMPLATE
+    // -------------------------------------------------
+    @DeleteMapping("/{templateId}")
+    public ResponseEntity<ApiResponse> deleteTemplate(
+            @PathVariable String templateId,
+            HttpServletRequest request) {
+
+        templateService.deleteTemplate(templateId);
+
+        ApiResponse response = ApiResponse.builder()
+                .message(ResponseMessages.TEMPLATE_DELETED)
+                .status("SUCCESS")
+                .timestamp(LocalDateTime.now())
+                .path(request.getRequestURI())
+                .build();
+
+        return ResponseEntity.ok(response);
+    }
+
+    // ---------------------------------------------------
+    // UPDATE STATUS
+    // ---------------------------------------------------
+    @PatchMapping("/status/{templateId}")
+    public ResponseEntity<ApiResponse> updateTemplateStatus(
+            @PathVariable String templateId,
+            @RequestBody @Valid TemplateStatusRequest request,
+            @RequestHeader("Authorization") String token
+    ){
+        String userId = jwtUtil.getUserIdFromToken(token);
+        templateService.updateStatus(templateId, request.getStatus(), userId);
+        ApiResponse response  = ApiResponse.builder()
+                .message("Status updated successfully.")
+                .status("SUCCESS")
+                .timestamp(LocalDateTime.now())
+                .build();
+        return ResponseEntity.ok(response);
+    }
+
 
     @PostMapping("/template-diff")
     public TemplateDiffResponseDto compareTemplates(
             @RequestBody TemplateDiffRequest request
     ) {
+        log.info("Display the CompareTemplate dialog box {}", request.getRequestId());
         return templateDiffService.compareByRequestId(request.getRequestId());
     }
 
