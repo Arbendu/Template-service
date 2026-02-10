@@ -1278,7 +1278,6 @@ package com.tcs.fincore.CommonRequestService.service.strategy;
 
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -1289,6 +1288,7 @@ import com.tcs.fincore.CommonRequestService.model.enums.RequestType;
 import com.tcs.fincore.CommonRequestService.repository.*;
 import com.tcs.fincore.CommonRequestService.validation.TemplateValidationService;
 import lombok.RequiredArgsConstructor;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -1303,6 +1303,7 @@ public class ReportTemplateConfigStrategy implements RequestTypeStrategy {
     private final ReportTemplateVariantParamDefRepository reportTemplateVariantParamDefRepository;
     private final ReportTemplateFilterRuleRepository reportTemplateFilterRuleRepository;
     private final TemplateValidationService templateValidationService;
+    //private final CommonRequestRepository commonRequestRepository;
 
     @Override
     public RequestType getRequestType() {
@@ -1328,7 +1329,42 @@ public class ReportTemplateConfigStrategy implements RequestTypeStrategy {
     public void validateRequest(CreateRequestDto requestDto) throws JsonProcessingException {
         ReportTemplateDto payload = objectMapper.convertValue(requestDto.getPayload(), ReportTemplateDto.class);
         log.info("In validate request {}", payload);
-         templateValidationService.validate(payload);
+         templateValidationService.validate(requestDto);
+    }
+
+    @Override
+    public List<CommonReq> filterResponse(String userId, List<CommonReq> requests) throws JsonProcessingException {
+        log.info("Filtering RB_REPORT_TEMPLATE pending requests for userId={}", userId);
+        List<CommonReq> list = new ArrayList<>();
+        for (CommonReq request : requests) {
+            CommonReq commonReq = mapToDto(request);
+            list.add(commonReq);
+        }
+        return list;
+    }
+
+
+
+    private CommonReq mapToDto(CommonReq req) throws JsonProcessingException {
+
+        ReportTemplateDto payload = objectMapper.readValue(req.getPayload(), ReportTemplateDto.class);
+
+        // Just filter below
+        CommonReq filteredReq = new CommonReq();
+        filteredReq.setId(req.getId());
+        filteredReq.setReqType(req.getReqType());
+        filteredReq.setReqStatus(req.getReqStatus());
+        filteredReq.setChangeType(req.getChangeType());
+        filteredReq.setCreatorId(req.getCreatorId());
+        filteredReq.setReqDate(req.getReqDate());
+        filteredReq.setPayload(objectMapper.writeValueAsString(Map.of(
+                "templateId", payload.getTemplate().getTemplateMeta().getTemplateId(),
+                "reportId", payload.getTemplate().getReportMeta().getReportId(),
+                "version", payload.getTemplate().getTemplateMeta().getVersion(),
+                "reportName", payload.getTemplate().getReportMeta().getReportName()
+        )));
+        filteredReq.setTargetId(req.getTargetId());
+        return filteredReq;
     }
 
 
@@ -1386,7 +1422,7 @@ public class ReportTemplateConfigStrategy implements RequestTypeStrategy {
             throw new IllegalArgumentException("TargetId required for UPDATE");
         }
 
-        ReportTemplate template = reportTemplateRepository.findById(request.getTargetId()).orElseThrow(() -> new ResourceNotFoundException("Template not found"));
+        ReportTemplate template = reportTemplateRepository.findFirstByReportId(request.getTargetId()).orElseThrow(() -> new ResourceNotFoundException("Template not found"));
 
         ReportTemplateDto payload = objectMapper.readValue(request.getPayload(), ReportTemplateDto.class);
 
@@ -1450,6 +1486,7 @@ public class ReportTemplateConfigStrategy implements RequestTypeStrategy {
             variant.setUpdatedBy(request.getExecutorId());
 
             ReportTemplateVariant savedVariant = reportTemplateVariantRepository.save(variant);
+            log.info("Variant saved successfully {}", variant.getVariantId());
 
             Long variantId = savedVariant.getVariantId();
 
@@ -1493,6 +1530,15 @@ public class ReportTemplateConfigStrategy implements RequestTypeStrategy {
         log.info("Successfully flushed deletes for templateId: {}", templateId);
     }
 
+//    private void deleteVariants(String templateId) {
+//        reportTemplateVariantRepository.findByTemplateId(templateId).forEach(v -> {
+//            log.info("deleted {}", v.getVariantId());
+//            reportTemplateVariantParamDefRepository.deleteByVariantId(v.getVariantId());
+//            reportTemplateFilterRuleRepository.deleteByVariantId(v.getVariantId());
+//            reportTemplateVariantRepository.delete(v);
+//        });
+//    }
+
 
     // UTIL
     private String serialize(Object obj) {
@@ -1502,6 +1548,8 @@ public class ReportTemplateConfigStrategy implements RequestTypeStrategy {
             throw new IllegalArgumentException("Failed to serialize template json");
         }
     }
+
+
 }
 
 
