@@ -311,3 +311,44 @@ public class ReportTemplateConfigStrategy implements RequestTypeStrategy {
     }
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+CREATE TABLE RB_REPORT_TEMPLATE_HISTORY (
+    HISTORY_ID BIGINT NOT NULL AUTO_INCREMENT, -- For Oracle/Postgres use SERIAL or SEQUENCE
+    TEMPLATE_ID VARCHAR(255),
+    VERSION_NO INT,
+    REPORT_ID VARCHAR(255),
+    TEMPLATE_NAME VARCHAR(200),
+    DESCRIPTION VARCHAR(500),
+    STATUS VARCHAR(30),
+    
+    -- Main Template JSON
+    TEMPLATE_JSON TEXT, -- Use CLOB for Oracle
+    
+    -- New Column for Variants Snapshot
+    VARIANTS_JSON TEXT, -- Use CLOB for Oracle
+    
+    CREATED_BY VARCHAR(50),
+    CREATED_AT TIMESTAMP,
+    ARCHIVED_BY VARCHAR(50),
+    ARCHIVED_AT TIMESTAMP,
+    
+    PRIMARY KEY (HISTORY_ID)
+);
