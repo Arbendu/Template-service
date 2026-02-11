@@ -1440,7 +1440,6 @@ public class ReportTemplateConfigStrategy implements RequestTypeStrategy {
     }
 
 
-
     private CommonReq mapToDto(CommonReq req) throws JsonProcessingException {
 
         ReportTemplateDto payload = objectMapper.readValue(req.getPayload(), ReportTemplateDto.class);
@@ -1453,15 +1452,28 @@ public class ReportTemplateConfigStrategy implements RequestTypeStrategy {
         filteredReq.setChangeType(req.getChangeType());
         filteredReq.setCreatorId(req.getCreatorId());
         filteredReq.setReqDate(req.getReqDate());
-        filteredReq.setPayload(objectMapper.writeValueAsString(Map.of(
-                "templateId", payload.getTemplate().getTemplateMeta().getTemplateId(),
-                "reportId", payload.getTemplate().getReportMeta().getReportId(),
-                "version", payload.getTemplate().getTemplateMeta().getVersion(),
-                "reportName", payload.getTemplate().getReportMeta().getReportName()
-        )));
+
+        Map<String, String> summary = new HashMap<>();
+        summary.put("templateId", payload.getTemplate().getTemplateMeta().getTemplateId());
+        summary.put("reportId", payload.getTemplate().getReportMeta().getReportId());
+        summary.put("version", payload.getTemplate().getTemplateMeta().getVersion());
+        summary.put("reportName", payload.getTemplate().getReportMeta().getReportName());
+
+        if(payload.getRemarks() != null){
+            summary.put("remarks", payload.getRemarks());
+        }
+        filteredReq.setPayload(objectMapper.writeValueAsString(summary));
+//        filteredReq.setPayload(objectMapper.writeValueAsString(Map.of(
+//                "templateId", payload.getTemplate().getTemplateMeta().getTemplateId(),
+//                "reportId", payload.getTemplate().getReportMeta().getReportId(),
+//                "version", payload.getTemplate().getTemplateMeta().getVersion(),
+//                "reportName", payload.getTemplate().getReportMeta().getReportName()
+//        )));
         filteredReq.setTargetId(req.getTargetId());
         return filteredReq;
     }
+
+    
 
     // -----------------------------------------------------------------------------------
     // CREATE (New report OR New version via Create flow)
@@ -1507,6 +1519,7 @@ public class ReportTemplateConfigStrategy implements RequestTypeStrategy {
         template.setCreatedBy(request.getCreatorId());
         template.setUpdatedAt(now);
         template.setUpdatedBy(request.getExecutorId());
+        template.setRemarks(payload.getRemarks());
 
         ReportTemplate savedTemplate = reportTemplateRepository.save(template);
 
@@ -1541,6 +1554,7 @@ public class ReportTemplateConfigStrategy implements RequestTypeStrategy {
         template.setReportId(templateDTO.getReportMeta().getReportId());
         template.setTemplateName(templateDTO.getReportMeta().getReportName());
         template.setDescription(templateDTO.getTemplateMeta().getDescription());
+        template.setRemarks(payload.getRemarks());
 
         // Update JSON with the new version number injected back into it
         templateDTO.getTemplateMeta().setVersion(String.valueOf(newVersion));
