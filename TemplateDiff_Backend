@@ -46,6 +46,8 @@ public class TemplatePayload{
     @NotNull
     private List<VariantDto> variants;
 
+    private String remarks;
+
     @Getter
     @Setter
     @NoArgsConstructor
