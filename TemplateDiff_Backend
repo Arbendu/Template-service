@@ -1,7 +1,293 @@
-// =====================================================================================
-// dto/ValueDiff.java
-// ==========≈==========================================================================
+// ===============================================================================================================================================================================================================================================
+// entity/ReportTemplate
+// ===============================================================================================================================================================================================================================================
 
+package com.fincore.TemplateConfigurationService.entity;
+
+import jakarta.persistence.*;
+import lombok.*;
+
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "RB_REPORT_TEMPLATE")
+@Getter
+@Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ReportTemplate {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "TEMPLATE_ID")
+    private String templateId;
+
+    @Column(name = "VERSION_NO")
+    private Integer versionNo;
+
+    @Column(name = "REPORT_ID")
+    private String reportId;
+
+    @Column(name = "TEMPLATE_NAME", length = 200)
+    private String templateName;
+
+    @Column(name = "DESCRIPTION", length = 500)
+    private String description;
+
+    @Column(name = "STATUS", length = 30)
+    private String status;
+
+    @Lob
+    @Column(name = "TEMPLATE_JSON")
+    private String templateJson;
+
+    @Column(name = "CREATED_BY", length = 50)
+    private String createdBy;
+
+    @Column(name = "CREATED_AT")
+    private LocalDateTime createdAt;
+
+    @Column(name = "UPDATED_BY", length = 50)
+    private String updatedBy;
+
+    @Column(name = "UPDATED_AT")
+    private LocalDateTime updatedAt;
+
+    @Column(name = "REMARKS", length = 500)
+    private String remarks;
+}
+
+
+
+
+
+
+
+
+
+
+
+// ===============================================================================================================================================================================================================================================
+// entity/ReportTemplateHistory
+// ===============================================================================================================================================================================================================================================
+
+package com.fincore.TemplateConfigurationService.entity;
+
+import jakarta.persistence.*;
+import lombok.*;
+
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "RB_REPORT_TEMPLATE_HISTORY")
+@Getter
+@Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ReportTemplateHistory {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "HISTORY_ID")
+    private long historyId;
+
+    // I store the original Template ID for reference
+    @Column(name = "TEMPLATE_ID")
+    private String templateId;
+
+    @Column(name = "VERSION_NO")
+    private Integer versionNo;
+
+    @Column(name = "report_id")
+    private String reportId;
+
+    @Column(name = "TEMPLATE_NAME", length = 200)
+    private String templateName;
+
+    @Column(name = "DESCRIPTION", length = 500)
+    private String description;
+
+    @Column(name = "STATUS",length = 30)
+    private String status;
+
+    // Snapshot of the main template json
+    @Lob
+    @Column(name = "TEMPLATE_JSON")
+    private String templateJson;
+
+    // Snapshot of all variants + params + rules as a JSON array
+    @Lob
+    @Column(name = "VARIANTS_JSON")
+    private String variantsJson;
+
+    @Column(name = "CREATED_BY", length = 50)
+    private String createdBy;
+
+    @Column(name = "CREATED_AT")
+    private LocalDateTime createdAt;
+
+    @Column(name = "ARCHIVED_BY", length = 50)
+    private String archivedBy;
+
+    @Column(name = "ARCHIVED_AT")
+    private LocalDateTime archivedAt;
+
+    @Column(name = "REMARKS", length = 500)
+    private String remarks;
+
+}
+
+
+
+
+
+
+
+// ===============================================================================================================================================================================================================================================
+// entity/CommonReq.java
+// ===============================================================================================================================================================================================================================================
+
+package com.fincore.TemplateConfigurationService.entity;
+
+import com.fasterxml.jackson.annotation.JsonRawValue;
+import jakarta.persistence.*;
+import lombok.*;
+
+import java.time.LocalDateTime;
+
+/**
+ * Represents a common request entity stored in the "COMMON_REQ" database table.
+ * This entity is used to log and track various types of requests within the system,
+ * including their status, payload, and execution details.
+ *
+ * All enum fields are now handled by their respective {@link Converter @Converter(autoApply = true)} classes.
+ */
+@Getter
+@Setter
+@Entity
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+@Table(name = "COMMON_REQ")
+public class CommonReq {
+    /**
+     * The unique identifier for the request.
+     * Generated using a sequence "COMMON_REQ_SEQ".
+     */
+    @Id
+    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "COMMON_REQ_id_gen")
+    @SequenceGenerator(name = "COMMON_REQ_id_gen", sequenceName = "COMMON_REQ_SEQ", allocationSize = 1)
+    @Column(name = "REQ_ID", nullable = false)
+    private Long id;
+
+    /**
+     * The type of request (e.g., New, Update, Delete).
+     * Mapped to the "REQ_TYPE" column. Handled by an auto-applied JPA converter.
+     */
+    @Column(name = "REQ_TYPE", nullable = false, length = 20)
+    private String reqType;
+
+    /**
+     * The specific type of change associated with the request.
+     * Mapped to the "CHANGE_TYPE" column. Handled by an auto-applied JPA converter.
+     */
+    @Column(name = "CHANGE_TYPE", nullable = false, length = 2)
+    private String changeType;
+
+    /**
+     * The current status of the request (e.g., PENDING, APPROVED, REJECTED).
+     * Mapped to the "REQ_STATUS" column. Handled by an auto-applied JPA converter.
+     */
+    @Column(name = "REQ_STATUS", nullable = false, length = 2)
+    private String reqStatus;
+
+    /**
+     * The Oracle's SYSDATE/CURRENT_TIMESTAMP when the request was created.
+     * Automatically set upon entity creation and is not updatable.
+     * the value comes from not the Java JVM time, fixes time mismatch issues
+     */
+    @Column(name = "REQ_DATE", nullable = false, updatable = false)
+    private LocalDateTime reqDate;
+
+    /**
+     * The ID of the user who created the request.
+     * Mapped to the "CREATOR_ID" column.
+     */
+    @Column(name = "CREATOR_ID", nullable = false, length = 12)
+    private String creatorId;
+
+    /**
+     * The timestamp when the request was executed or processed.
+     * Mapped to the "EXECUTION_DATE" column.
+     */
+    @Column(name = "EXECUTION_DATE")
+    private LocalDateTime executionDate;
+
+    /**
+     * General remarks regarding the execution process.
+     * Stored as a Large Object (LOB) in the "EXECUTION_REMARKS" column.
+     */
+    @Lob
+    @Column(name = "EXECUTION_REMARKS")
+    private String executionRemarks;
+
+    /**
+     * The ID of the user who executed or processed the request.
+     * Mapped to the "EXECUTOR_ID" column.
+     */
+    @Column(name = "EXECUTOR_ID", length = 12)
+    private String executorId;
+
+    /**
+     * Specific remarks provided by the executor.
+     * Mapped to the "EXECUTOR_REMARKS" column.
+     */
+    @Column(name = "EXECUTOR_REMARKS", length = 500)
+    private String executorRemarks;
+
+    /**
+     * The request's main data payload, typically a JSON string.
+     * Stored as a Large Object (LOB) in the "PAYLOAD" column.
+     */
+    @Lob
+    @Column(name = "PAYLOAD", nullable = false)
+    private String payload;
+
+    /**
+     * An identifier for the target entity affected by the request (e.g., account number, user ID).
+     * Mapped to the "TARGET_ID" column.
+     */
+    @Column(name = "TARGET_ID", length = 4000)
+    private String targetId;
+
+
+    /**
+     * Retrieves the payload and marks it for raw JSON serialization.
+     *
+     * When this entity is serialized to JSON (e.g., in a REST API response),
+     * the value returned by this getter will be inserted directly as raw JSON,
+     * assuming the {@link #payload} field already contains a valid JSON string.
+     *
+     * @return The raw JSON payload string.
+     */
+    @JsonRawValue
+    public String getPayload() {
+        return payload;
+    }
+}
+
+
+
+
+
+
+
+
+// ===============================================================================================================================================================================================================================================
+// dto/ValueDiff.java
+// ===============================================================================================================================================================================================================================================
 package com.fincore.TemplateConfigurationService.dto;
 
 import lombok.*;
@@ -18,9 +304,9 @@ public class ValueDiff {
 
 
 
-// =====================================================================================
+// ===============================================================================================================================================================================================================================================
 // dto/TemplatePayload.java
-// ==========≈==========================================================================
+// ===============================================================================================================================================================================================================================================
 
 
 
@@ -134,10 +420,9 @@ public class TemplatePayload{
 
 
 
-// =====================================================================================
+// ===============================================================================================================================================================================================================================================
 // dto/TemplateDiffResponseDto.java
-// ==========≈==========================================================================
-
+// ===============================================================================================================================================================================================================================================
 
 package com.fincore.TemplateConfigurationService.dto;
 
@@ -169,10 +454,9 @@ public class TemplateDiffResponseDto {
 
 
 
-// =====================================================================================
+// ===============================================================================================================================================================================================================================================
 // controller 
-// ==========≈==========================================================================
-
+// ===============================================================================================================================================================================================================================================
 
     package com.fincore.TemplateConfigurationService.controller;
 
@@ -353,9 +637,57 @@ public class TemplateController {
 
 
 
-// =====================================================================================
+
+
+// ===============================================================================================================================================================================================================================================
+// repository/ReportTemplateHistoryRepository
+// ===============================================================================================================================================================================================================================================
+
+package com.fincore.TemplateConfigurationService.repository;
+
+import com.fincore.TemplateConfigurationService.entity.ReportTemplateHistory;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.Optional;
+
+public interface ReportTemplateHistoryRepository extends JpaRepository<ReportTemplateHistory, Long> {
+    Optional<Object> findByTemplateIdAndVersionNo(String templateId, int version);
+}
+
+
+
+
+
+
+
+// ===============================================================================================================================================================================================================================================
+// repository/ReportTemplateRepository
+// ===============================================================================================================================================================================================================================================
+
+package com.fincore.TemplateConfigurationService.repository;
+
+import com.fincore.TemplateConfigurationService.entity.ReportTemplate;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.Optional;
+
+public interface ReportTemplateRepository extends JpaRepository<ReportTemplate, String> {
+    Optional<ReportTemplate> findFirstByReportId(String reportId);
+
+    Optional<ReportTemplate> findFirstByReportIdAndStatus(String reportId, String status);
+
+}
+
+
+
+
+
+
+
+
+// ===============================================================================================================================================================================================================================================
 // service/TemplateDiffService.java
-// ==========≈==========================================================================
+// ===============================================================================================================================================================================================================================================
 
 
 
@@ -374,9 +706,9 @@ public interface TemplateDiffService {
 
 
 
-// =====================================================================================
+// ===============================================================================================================================================================================================================================================
 // service/TemplateDiffServiceImpl.java
-// ==========≈==========================================================================
+// ===============================================================================================================================================================================================================================================
 
 
 
@@ -475,9 +807,9 @@ public class TemplateDiffServiceImpl implements TemplateDiffService {
 
 
 
-// =====================================================================================
+// ===============================================================================================================================================================================================================================================
 // util/JsonCompareUtil.java
-// ==========≈==========================================================================
+// ===============================================================================================================================================================================================================================================
 
 package com.fincore.TemplateConfigurationService.util;
 
@@ -657,5 +989,96 @@ public class JsonCompareUtil {
         return t.getTemplate().getReportData().getColumns();
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+// ===============================================================================================================================================================================================================================================
+// exception/GlobalExceptionHandler
+// ===============================================================================================================================================================================================================================================
+
+package com.fincore.TemplateConfigurationService.exception;
+
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.validation.FieldError;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+import java.util.HashMap;
+import java.util.Map;
+
+@Slf4j
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+
+    @ExceptionHandler(TemplateNotFoundException.class)
+    public ResponseEntity<?> handleTemplateNotFound(TemplateNotFoundException ex) {
+        log.warn("Template not found: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error("NOT_FOUND", ex.getMessage()));
+    }
+
+    @ExceptionHandler(BadRequestException.class)
+    public ResponseEntity<?> handleBadRequest(BadRequestException ex) {
+        log.warn("Bad request: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error("BAD_REQUEST", ex.getMessage()));
+    }
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<?> handleValidation(MethodArgumentNotValidException ex) {
+        Map<String, String> fieldErrors = new HashMap<>();
+        for (FieldError fe : ex.getBindingResult().getFieldErrors()) {
+            fieldErrors.put(fe.getField(), fe.getDefaultMessage());
+        }
+        log.warn("Validation error: {}", fieldErrors);
+        Map<String, Object> body = error("VALIDATION_ERROR", "Invalid request");
+        body.put("fieldErrors", fieldErrors);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<?> handleOther(Exception ex) {
+        log.error("Unexpected error", ex);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(error("INTERNAL_ERROR", "Unexpected error occurred"));
+    }
+
+    private Map<String, Object> error(String code, String message) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("code", code);
+        map.put("message", message);
+        return map;
+    }
+}
+
+
+
+
+
+
+
+
+
+// ===============================================================================================================================================================================================================================================
+// exception/TemplateNotFoundException
+// ===============================================================================================================================================================================================================================================
+
+package com.fincore.TemplateConfigurationService.exception;
+
+public class TemplateNotFoundException extends RuntimeException {
+    public TemplateNotFoundException(String templateId) {
+        super("Template not found: " + templateId);
+    }
+}
+
 
 
