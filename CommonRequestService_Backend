@@ -1440,6 +1440,7 @@ public class ReportTemplateConfigStrategy implements RequestTypeStrategy {
     }
 
 
+
     private CommonReq mapToDto(CommonReq req) throws JsonProcessingException {
 
         ReportTemplateDto payload = objectMapper.readValue(req.getPayload(), ReportTemplateDto.class);
@@ -1472,8 +1473,6 @@ public class ReportTemplateConfigStrategy implements RequestTypeStrategy {
         filteredReq.setTargetId(req.getTargetId());
         return filteredReq;
     }
-
-    
 
     // -----------------------------------------------------------------------------------
     // CREATE (New report OR New version via Create flow)
@@ -1613,6 +1612,7 @@ public class ReportTemplateConfigStrategy implements RequestTypeStrategy {
                 .createdAt(oldTemplate.getCreatedAt())
                 .archivedBy(archivedBy)
                 .archivedAt(archivedAt)
+                .remarks(oldTemplate.getRemarks())
                 .build();
 
         reportTemplateHistoryRepository.save(history);
@@ -1738,6 +1738,9 @@ public class ReportTemplateConfigStrategy implements RequestTypeStrategy {
         }
     }
 }
+
+
+
 
 
 
