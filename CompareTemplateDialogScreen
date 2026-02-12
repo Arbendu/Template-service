@@ -14,8 +14,6 @@
 
 
 
-
-
 import React, { useEffect, useState, useMemo, memo, useRef, useCallback } from "react";
 import {
   Dialog, DialogTitle, DialogContent, Box, Typography, Table, TableBody,
@@ -604,7 +602,7 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
                           borderLeft: `5px solid ${theme.palette.warning.main}` 
                         }}>
                           <Typography variant="body2" sx={{ fontStyle: "italic", color: theme.palette.warning.dark }}>
-                            {diffResponse.cellDiffs[selectedCellKey]?.remark || "No manual remarks provided."}
+                            {diffResponse.newTemplate.remarks || "No manual remarks provided."}
                           </Typography>
                         </Paper>
                       </Box>
@@ -622,8 +620,3 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
 };
 
 export default CompareTemplateDialog;
-
-
-
-
-
