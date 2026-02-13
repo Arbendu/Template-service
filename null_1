@@ -1,58 +1,435 @@
-/**
- * Compares two lists of variants and returns a map of differences.
- * Key: Variant Code, Value: Map of field changes.
- */
-public Map<String, Map<String, ValueDiff>> compareVariants(
-        List<VariantDto> oldVariants,
-        List<VariantDto> newVariants
-) {
-    Map<String, Map<String, ValueDiff>> diffs = new LinkedHashMap<>();
+package com.fincore.TemplateConfigurationService.service.impl;
 
-    // Use a Set to collect all unique variant codes from both lists
-    Set<String> allCodes = new LinkedHashSet<>();
-    if (oldVariants != null) oldVariants.forEach(v -> allCodes.add(v.getVariantCode()));
-    if (newVariants != null) newVariants.forEach(v -> allCodes.add(v.getVariantCode()));
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fincore.TemplateConfigurationService.dto.*;
+import com.fincore.TemplateConfigurationService.entity.*;
+import com.fincore.TemplateConfigurationService.enums.TemplateStatus;
+import com.fincore.TemplateConfigurationService.exception.BadRequestException;
+import com.fincore.TemplateConfigurationService.exception.TemplateNotFoundException;
+import com.fincore.TemplateConfigurationService.repository.*;
+import com.fincore.TemplateConfigurationService.service.TemplateService;
+import com.fincore.TemplateConfigurationService.validator.TemplatePayloadValidator;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-    for (String code : allCodes) {
-        VariantDto oldV = findVariantByCode(oldVariants, code);
-        VariantDto newV = findVariantByCode(newVariants, code);
+import java.time.LocalDateTime;
+import java.util.*;
+import java.util.stream.Collectors;
 
-        Map<String, ValueDiff> fieldDiffs = new LinkedHashMap<>();
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class TemplateServiceImpl implements TemplateService {
 
-        // 1. Compare basic fields
-        compareField("variantName", 
-            oldV != null ? oldV.getVariantName() : null, 
-            newV != null ? newV.getVariantName() : null, fieldDiffs);
-        
-        compareField("description", 
-            oldV != null ? oldV.getDescription() : null, 
-            newV != null ? newV.getDescription() : null, fieldDiffs);
-        
-        compareField("status", 
-            oldV != null ? oldV.getStatus() : null, 
-            newV != null ? newV.getStatus() : null, fieldDiffs);
+    private final ReportTemplateRepository templateRepository;
+    private final ReportVariantRepository variantRepository;
+    private final VariantParamDefRepository paramRepository;
+    private final FilterRuleRepository filterRuleRepository;
+    private final TemplatePayloadValidator payloadValidator;
+    private final ObjectMapper objectMapper;
 
-        // 2. Compare complex lists (Params and Filter Rules)
-        compareField("params", 
-            oldV != null ? oldV.getParams() : null, 
-            newV != null ? newV.getParams() : null, fieldDiffs);
-            
-        compareField("filterRules", 
-            oldV != null ? oldV.getFilterRules() : null, 
-            newV != null ? newV.getFilterRules() : null, fieldDiffs);
+    // ========================================================================
+    // SAVE TEMPLATE (CREATE OR UPDATE - FULL PAYLOAD)
+    // ========================================================================
 
-        if (!fieldDiffs.isEmpty()) {
-            diffs.put(code, fieldDiffs);
+@Override
+@Transactional
+public ReportTemplate createOrUpdateTemplate(TemplatePayload payload, String userId) {
+    TemplatePayload.Template meta = payload.getTemplate();
+    String reportId = meta.getReportMeta().getReportId();
+
+    if (reportId == null || reportId.isEmpty()) {
+        throw new BadRequestException("Report ID is required");
+    }
+
+    int incomingVersion = Integer.parseInt(meta.getTemplateMeta().getVersion());
+    LocalDateTime now = LocalDateTime.now();
+
+    // 1. Serialize template JSON
+    String templateJson;
+    try {
+        templateJson = objectMapper.writeValueAsString(meta);
+    } catch (Exception e) {
+        throw new BadRequestException("Failed to serialize template json");
+    }
+
+    // 2. Determine Versioning Logic
+    Optional<ReportTemplate> existingOpt = templateRepository.findFirstByReportIdAndStatus(reportId, "ACTIVE");
+    ReportTemplate targetTemplate;
+    boolean isNewVersion = false;
+
+    if (existingOpt.isPresent()) {
+        ReportTemplate existing = existingOpt.get();
+
+        if (incomingVersion > existing.getVersionNo()) {
+            // SCENARIO: NEW VERSION - Deactivate old, create a fresh record
+            existing.setStatus("INACTIVE");
+            existing.setUpdatedAt(now);
+            existing.setUpdatedBy(userId);
+            templateRepository.save(existing);
+
+            targetTemplate = new ReportTemplate();
+            targetTemplate.setCreatedAt(now);
+            targetTemplate.setCreatedBy(userId);
+            isNewVersion = true;
+        } else if (incomingVersion == existing.getVersionNo()) {
+            // SCENARIO: SAME VERSION - Update the existing ACTIVE record
+            targetTemplate = existing;
+        } else {
+            throw new BadRequestException("Incoming version (" + incomingVersion +
+                    ") must be greater than or equal to current version (" + existing.getVersionNo() + ")");
+        }
+    } else {
+        // INITIAL CREATION
+        targetTemplate = new ReportTemplate();
+        targetTemplate.setCreatedAt(now);
+        targetTemplate.setCreatedBy(userId);
+        isNewVersion = true;
+    }
+
+    // 3. Save Template Data
+    targetTemplate.setTemplateName(meta.getReportMeta().getReportName());
+    targetTemplate.setDescription(meta.getTemplateMeta().getDescription());
+    targetTemplate.setVersionNo(incomingVersion);
+    targetTemplate.setStatus("ACTIVE");
+    targetTemplate.setTemplateJson(templateJson);
+    targetTemplate.setReportId(reportId);
+    targetTemplate.setUpdatedAt(now);
+    targetTemplate.setUpdatedBy(userId);
+
+    ReportTemplate savedTemplate = templateRepository.save(targetTemplate);
+    log.info("Template Id after save: {}", savedTemplate.getTemplateId());
+    String currentTemplateId = savedTemplate.getTemplateId();
+
+    // 4. Sync Variants and Params
+    // If it's the SAME version, we update by variantCode.
+    // If it's a NEW version, we treat every variant as a new record linked to the new templateId.
+    Map<String, ReportVariant> existingVariantMap = new HashMap<>();
+    if (!isNewVersion) {
+        existingVariantMap = variantRepository.findByTemplateId(currentTemplateId)
+                .stream().collect(Collectors.toMap(ReportVariant::getVariantCode, v -> v));
+    }
+
+    for (VariantDto dto : payload.getVariants()) {
+        ReportVariant variant;
+
+        // Logic: Use existing record if updating same version, otherwise create new row
+        if (!isNewVersion && existingVariantMap.containsKey(dto.getVariantCode())) {
+            variant = existingVariantMap.get(dto.getVariantCode());
+        } else {
+            variant = new ReportVariant();
+            variant.setTemplateId(currentTemplateId); // Links to the NEW template record
+            variant.setVariantCode(dto.getVariantCode());
+            variant.setCreatedAt(now);
+            variant.setCreatedBy(userId);
+        }
+
+        variant.setVariantName(dto.getVariantName());
+        variant.setDescription(dto.getDescription());
+        variant.setStatus(dto.getStatus());
+        variant.setUpdatedAt(now);
+        variant.setUpdatedBy(userId);
+
+        ReportVariant savedVariant = variantRepository.save(variant);
+        Long variantId = savedVariant.getVariantId();
+
+        // 5. Update Params & Rules (Always refresh child lists for the current variant row)
+        paramRepository.deleteByVariantId(variantId);
+        filterRuleRepository.deleteByVariantId(variantId);
+
+        if (dto.getParams() != null) {
+            for (VariantParamDto p : dto.getParams()) {
+                paramRepository.save(VariantParamDef.builder()
+                        .variantId(variantId)
+                        .paramName(p.getParamName())
+                        .label(p.getLabel())
+                        .paramType(p.getParamType())
+                        .required(p.isRequired() ? "Y" : "N")
+                        .multiVal(p.isMultiValued() ? "Y" : "N")
+                        .uiHint(p.getUiHint())
+                        .validation(p.getValidation())
+                        .createdAt(now)
+                        .build());
+            }
+        }
+
+        if (dto.getFilterRules() != null) {
+            for (FilterRuleDto r : dto.getFilterRules()) {
+                filterRuleRepository.save(FilterRule.builder()
+                        .variantId(variantId)
+                        .dbColumn(r.getDbColumn())
+                        .operator(r.getOperator())
+                        .paramName(r.getParamName())
+                        .scopeType(r.getScopeType())
+                        .scopeValue(r.getScopeValue())
+                        .createdAt(now)
+                        .build());
+            }
         }
     }
-    return diffs;
+
+    // -----------------------------
+    // 6. DELETE REMOVED VARIANTS
+    // -----------------------------
+    // 6. Cleanup removed variants (Only for in-place updates)
+    if (!isNewVersion) {
+        Set<String> incomingCodes = payload.getVariants().stream()
+                .map(VariantDto::getVariantCode).collect(Collectors.toSet());
+
+        existingVariantMap.values().stream()
+                .filter(v -> !incomingCodes.contains(v.getVariantCode()))
+                .forEach(v -> {
+                    paramRepository.deleteByVariantId(v.getVariantId());
+                    filterRuleRepository.deleteByVariantId(v.getVariantId());
+                    variantRepository.delete(v);
+                });
+    }
+
+    return savedTemplate;
 }
 
-// Helper to find a variant in the list by its code
-private VariantDto findVariantByCode(List<VariantDto> list, String code) {
-    if (list == null || code == null) return null;
-    return list.stream()
-            .filter(v -> code.equals(v.getVariantCode()))
-            .findFirst()
-            .orElse(null);
+
+    // ========================================================================
+    // GET ALL TEMPLATES (WITH VARIANTS)
+    // ========================================================================
+    @Override
+    @Transactional(readOnly = true)
+    public List<TemplateResponse> getAllTemplates() {
+
+        List<ReportTemplate> templates = templateRepository.findAll();
+        if (templates.isEmpty()) return List.of();
+
+        List<String> templateIds = templates.stream()
+                .map(ReportTemplate::getTemplateId)
+                .toList();
+
+        List<ReportVariant> variants = variantRepository.findByTemplateIdIn(templateIds);
+
+        Map<String, List<ReportVariant>> variantMap =
+                variants.stream().collect(Collectors.groupingBy(ReportVariant::getTemplateId));
+
+        List<Long> variantIds = variants.stream()
+                .map(ReportVariant::getVariantId)
+                .toList();
+
+        Map<Long, List<VariantParamDef>> paramMap =
+                paramRepository.findByVariantIdIn(variantIds)
+                        .stream().collect(Collectors.groupingBy(VariantParamDef::getVariantId));
+
+        Map<Long, List<FilterRule>> ruleMap =
+                filterRuleRepository.findByVariantIdIn(variantIds)
+                        .stream().collect(Collectors.groupingBy(FilterRule::getVariantId));
+
+        return templates.stream().map(t -> TemplateResponse.builder()
+                .templateId(t.getTemplateId())
+                .reportId(t.getReportId())
+                .templateName(t.getTemplateName())
+                .description(t.getDescription())
+                .status(t.getStatus())
+                .versionNo(t.getVersionNo())
+                .variants(
+                        variantMap.getOrDefault(t.getTemplateId(), List.of())
+                                .stream()
+                                .map(v -> mapVariant(v,
+                                        paramMap.getOrDefault(v.getVariantId(), List.of()),
+                                        ruleMap.getOrDefault(v.getVariantId(), List.of())))
+                                .toList()
+                )
+                .build()
+        ).toList();
+    }
+
+    // ========================================================================
+    // GET TEMPLATE BY ID
+    // ========================================================================
+    @Override
+    @Transactional(readOnly = true)
+    public TemplateResponse getTemplateWithVariants(String templateId) throws JsonProcessingException {
+
+        ReportTemplate template = templateRepository.findById(templateId)
+                .orElseThrow(() -> new TemplateNotFoundException(templateId));
+
+        List<ReportVariant> variants = variantRepository.findByTemplateId(templateId);
+
+        List<Long> variantIds = variants.stream()
+                .map(ReportVariant::getVariantId)
+                .toList();
+
+        Map<Long, List<VariantParamDef>> paramMap =
+                paramRepository.findByVariantIdIn(variantIds)
+                        .stream().collect(Collectors.groupingBy(VariantParamDef::getVariantId));
+
+        Map<Long, List<FilterRule>> ruleMap =
+                filterRuleRepository.findByVariantIdIn(variantIds)
+                        .stream().collect(Collectors.groupingBy(FilterRule::getVariantId));
+
+        ObjectMapper mapper = new ObjectMapper();
+        Map<String, Object> templateJsonMap = mapper.readValue(template.getTemplateJson(), new TypeReference<Map<String, Object>>() {});
+
+        return TemplateResponse.builder()
+                .templateId(template.getTemplateId())
+                .templateName(template.getTemplateName())
+                .description(template.getDescription())
+                .status(template.getStatus())
+                .versionNo(template.getVersionNo())
+                .template(templateJsonMap)
+                .variants(
+                        variants.stream()
+                                .map(v -> mapVariant(v,
+                                        paramMap.getOrDefault(v.getVariantId(), List.of()),
+                                        ruleMap.getOrDefault(v.getVariantId(), List.of())))
+                                .toList()
+                )
+                .build();
+    }
+
+    // ========================================================================
+    // DELETE TEMPLATE
+    // ========================================================================
+    @Override
+    @Transactional
+    public void deleteTemplate(String templateId) {
+
+        ReportTemplate template = templateRepository.findById(templateId)
+                .orElseThrow(() -> new TemplateNotFoundException(templateId));
+
+        clearAllVariants(templateId);
+        templateRepository.delete(template);
+
+        log.info("Template {} deleted", templateId);
+    }
+
+
+    // ========================================================================
+    // UPDATE STATUS
+    // ========================================================================
+
+    @Override
+    @Transactional
+    public void updateStatus(String templateId, TemplateStatus status, String userId){
+
+    ReportTemplate template = templateRepository.findById(templateId).orElseThrow(() ->
+            new TemplateNotFoundException("Template not found: " + templateId));
+    template.setStatus(status.name());
+    template.setUpdatedAt(LocalDateTime.now());
+    template.setUpdatedBy(userId);
+    templateRepository.save(template);
+    }
+
+
+    // ========================================================================
+    // PRIVATE HELPERS
+    // ========================================================================
+    private void clearAllVariants(String templateId) {
+        List<ReportVariant> variants = variantRepository.findByTemplateId(templateId);
+
+        if(variants.isEmpty()){
+            return;
+        }
+        for (ReportVariant v : variants) {
+            paramRepository.deleteByVariantId(v.getVariantId());
+            filterRuleRepository.deleteByVariantId(v.getVariantId());
+        }
+        variantRepository.deleteAll(variants);
+    }
+
+    private void insertVariants(String templateId, List<VariantDto> variants,
+                                LocalDateTime now, String userId) {
+
+        if (variants == null) return;
+
+        for (VariantDto dto : variants) {
+
+            ReportVariant variant = ReportVariant.builder()
+                    .templateId(templateId)
+                    .variantCode(dto.getVariantCode())
+                    .variantName(dto.getVariantName())
+                    .description(dto.getDescription())
+                    .status(dto.getStatus())
+                    .createdAt(now)
+                    .createdBy(userId)
+                    .updatedAt(now)
+                    .updatedBy(userId)
+                    .build();
+
+            variant = variantRepository.save(variant);
+
+            if (dto.getParams() != null) {
+                for (VariantParamDto p : dto.getParams()) {
+                    paramRepository.save(VariantParamDef.builder()
+                            .variantId(variant.getVariantId())
+                            .paramName(p.getParamName())
+                            .label(p.getLabel())
+                            .paramType(p.getParamType())
+                            .required(p.isRequired() ? "Y" : "N")
+                            .multiVal(p.isMultiValued() ? "Y" : "N")
+                            .uiHint(p.getUiHint())
+                            .validation(p.getValidation())
+                            .createdAt(now)
+                            .build());
+                }
+            }
+
+            if (dto.getFilterRules() != null) {
+                for (FilterRuleDto r : dto.getFilterRules()) {
+                    filterRuleRepository.save(FilterRule.builder()
+                            .variantId(variant.getVariantId())
+                            .scopeType(r.getScopeType())
+                            .paramName(r.getParamName())
+                            .dbColumn(r.getDbColumn())
+                            .operator(r.getOperator())
+                            .createdAt(now)
+                            .build());
+                }
+            }
+        }
+    }
+
+    private TemplateResponse.VariantResponse mapVariant(
+            ReportVariant v,
+            List<VariantParamDef> params,
+            List<FilterRule> rules) {
+
+        return TemplateResponse.VariantResponse.builder()
+                .variantCode(v.getVariantCode())
+                .variantName(v.getVariantName())
+                .description(v.getDescription())
+                .status(v.getStatus())
+                .params(params.stream().map(this::toParamDto).toList())
+                .filterRules(rules.stream().map(this::toRuleDto).toList())
+                .build();
+    }
+
+    private VariantParamDto toParamDto(VariantParamDef p) {
+        return VariantParamDto.builder()
+                .paramName(p.getParamName())
+                .label(p.getLabel())
+                .paramType(p.getParamType())
+                .required("Y".equalsIgnoreCase(p.getRequired()))
+                .multiValued("Y".equalsIgnoreCase(p.getMultiVal()))
+                .uiHint(p.getUiHint())
+                .validation(p.getValidation())
+                .build();
+    }
+
+    private FilterRuleDto toRuleDto(FilterRule r) {
+        return FilterRuleDto.builder()
+                .scopeType(r.getScopeType())
+                .paramName(r.getParamName())
+                .dbColumn(r.getDbColumn())
+                .operator(r.getOperator())
+                .build();
+    }
+
+    private Map<String, Object> toJsonMap(String json) {
+        try {
+            return objectMapper.readValue(json, new TypeReference<>() {});
+        } catch (Exception e) {
+            return Map.of();
+        }
+    }
 }
