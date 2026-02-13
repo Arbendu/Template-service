@@ -1,83 +1,58 @@
-// -----------------------------------------------------
+/**
+ * Compares two lists of variants and returns a map of differences.
+ * Key: Variant Code, Value: Map of field changes.
+ */
+public Map<String, Map<String, ValueDiff>> compareVariants(
+        List<VariantDto> oldVariants,
+        List<VariantDto> newVariants
+) {
+    Map<String, Map<String, ValueDiff>> diffs = new LinkedHashMap<>();
 
-​package com.fincore.TemplateConfigurationService.dto;
+    // Use a Set to collect all unique variant codes from both lists
+    Set<String> allCodes = new LinkedHashSet<>();
+    if (oldVariants != null) oldVariants.forEach(v -> allCodes.add(v.getVariantCode()));
+    if (newVariants != null) newVariants.forEach(v -> allCodes.add(v.getVariantCode()));
 
-import lombok.*;
-import java.util.List;
-import java.util.Map;
+    for (String code : allCodes) {
+        VariantDto oldV = findVariantByCode(oldVariants, code);
+        VariantDto newV = findVariantByCode(newVariants, code);
 
-@Getter
-@Setter
-@NoArgsConstructor
-@AllArgsConstructor
-@Builder
-public class TemplateDiffResponseDto {
+        Map<String, ValueDiff> fieldDiffs = new LinkedHashMap<>();
 
-    private String status;
-    private String message;
-    
-    // Requirement 1: Maker Remarks
-    private String remarks;
+        // 1. Compare basic fields
+        compareField("variantName", 
+            oldV != null ? oldV.getVariantName() : null, 
+            newV != null ? newV.getVariantName() : null, fieldDiffs);
+        
+        compareField("description", 
+            oldV != null ? oldV.getDescription() : null, 
+            newV != null ? newV.getDescription() : null, fieldDiffs);
+        
+        compareField("status", 
+            oldV != null ? oldV.getStatus() : null, 
+            newV != null ? newV.getStatus() : null, fieldDiffs);
 
-    // Full objects for context
-    private TemplatePayload oldTemplate;
-    private TemplatePayload newTemplate;
+        // 2. Compare complex lists (Params and Filter Rules)
+        compareField("params", 
+            oldV != null ? oldV.getParams() : null, 
+            newV != null ? newV.getParams() : null, fieldDiffs);
+            
+        compareField("filterRules", 
+            oldV != null ? oldV.getFilterRules() : null, 
+            newV != null ? newV.getFilterRules() : null, fieldDiffs);
 
-    // Diff Details
-    private Map<String, CellDiff> cellDiffs;     // Key: RowID + ColID
-    private Map<String, ColumnDiff> columnDiffs; // Key: ColID
-    
-    // Requirement 3: Variant Diffs
-    private List<VariantDiff> variantDiffs;
-
-    @Getter
-    @Setter
-    @NoArgsConstructor
-    @AllArgsConstructor
-    @Builder
-    public static class CellDiff {
-        private String rowId;
-        private String columnId;
-        private ValueDiff value;
-        private ValueDiff style;
-        private String remark;
+        if (!fieldDiffs.isEmpty()) {
+            diffs.put(code, fieldDiffs);
+        }
     }
-
-    @Getter
-    @Setter
-    @NoArgsConstructor
-    @AllArgsConstructor
-    @Builder
-    public static class ColumnDiff {
-        private String columnId;
-        private String columnName;
-        private ValueDiff width;
-        private ValueDiff alignment;
-    }
-    
-    // New DTO for Variant Diffs
-    @Getter
-    @Setter
-    @NoArgsConstructor
-    @AllArgsConstructor
-    @Builder
-    public static class VariantDiff {
-        private String variantCode;
-        private String variantName;
-        private String changeType; // ADDED, REMOVED, MODIFIED
-        private ValueDiff description;
-        private ValueDiff status;
-        // List of changes within this variant (params/rules)
-        private List<String> details; 
-    }
+    return diffs;
 }
 
-
-
-
-
-
-
-// -----------------------------------------------------------------------------------
-
-
+// Helper to find a variant in the list by its code
+private VariantDto findVariantByCode(List<VariantDto> list, String code) {
+    if (list == null || code == null) return null;
+    return list.stream()
+            .filter(v -> code.equals(v.getVariantCode()))
+            .findFirst()
+            .orElse(null);
+}
