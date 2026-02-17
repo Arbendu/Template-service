@@ -309,6 +309,8 @@ public class ReportTemplateDto implements KeyablePayload {
 
         @NotNull
         private ReportData reportData;
+
+        private List<GlobalParamDef> globalParams;
     }
 
     @Getter
@@ -340,10 +342,54 @@ public class ReportTemplateDto implements KeyablePayload {
     }
 
     @Data
+    public static class GlobalParamDef {
+        private String name;           // e.g., "BRANCH_NAME"
+        private String dataType;       // STRING, NUMBER, DATE, BOOLEAN
+        private String label;
+
+        // NEW: Mode of execution
+        private ParamMode mode;        // INPUT, EXPRESSION, QUERY
+
+        // For INPUT
+        private Object defaultValue;
+        private boolean required;
+
+        // For EXPRESSION
+        private String expression;     // e.g., "#{DateUtils.addDays(G.REPORT_DATE, -1)}"
+
+        // For QUERY
+        private ParamDataSource source; // DB Config
+    }
+
+    public enum ParamMode {
+        INPUT,          // Provided by user or defaults
+        EXPRESSION,     // Calculated using JEXL
+        QUERY           // Fetched from Database
+    }
+
+    @Data
+    public static class ParamDataSource {
+        private String type;           // DB_VALUE, DB_SUM, etc.
+        private String table;
+        private String column;
+        // Filters: Map<ColumnName, List<Condition>>
+        private Map<String, Object> filters;
+    }
+
+    @Data
     public static class ColumnDefinition {
         private String id;
         private String name;
         private Map<String, Object> format; // flexible formatting map
+        private List<TemplateColumnFilter> templateColumnFilters;
+    }
+
+    @Data
+    public static class TemplateColumnFilter {
+        private String tableName;
+
+        // Maps Column Name -> List of Conditions (e.g., "BALANCE": [{op:">", value:"0"}])
+        private Map<String, Object> filters;
     }
 
     @Data
@@ -374,6 +420,8 @@ public class ReportTemplateDto implements KeyablePayload {
 
 
 }
+
+
 
 
 
