@@ -106,3 +106,75 @@ return TemplateDiffResponseDto.builder()
 
 //  Compare Template Dialog Screen
 
+// Inside DiffText component...
+const formatItem = (item) => {
+  if (typeof item !== 'object' || item === null) return item;
+
+  // 1. Global Param Definition
+  if (item.name && item.mode) {
+    return `[Param] ${item.name} (${item.dataType}) - ${item.mode}`;
+  }
+  // 2. Template Column Filter
+  if (item.tableName && item.filters) {
+    return `[Filter] Table: ${item.tableName}, Conditions: ${JSON.stringify(item.filters)}`;
+  }
+  // 3. Filter Rule (Existing)
+  if (item.dbColumn || item.operator) return `[Rule] ${item.dbColumn} ${item.operator} ${item.scopeValue}`;
+  
+  // 4. Variant Param (Existing)
+  if (item.paramName) return `${item.paramName}: ${item.paramValue || item.label || 'N/A'}`;
+
+  return JSON.stringify(item);
+};
+
+
+
+
+
+
+
+
+
+
+// ... Inside CompareTemplateDialog return statement ...
+
+{/* ======================================================================== */}
+{/* NEW: GLOBAL PARAMETERS DIFF (Add this above or below Variants)             */}
+{/* ======================================================================== */}
+{diffResponse?.globalParamDiffs && Object.keys(diffResponse.globalParamDiffs).length > 0 && (
+  <Paper variant="outlined" sx={{ overflow: 'hidden', borderColor: 'info.light', mt: 2 }}>
+    <Box sx={{ bgcolor: alpha(theme.palette.info.main, 0.08), px: 2, py: 1.5 }}>
+      <Typography variant="subtitle2" fontWeight="bold" color="text.primary">
+        Global Parameter Changes
+      </Typography>
+    </Box>
+    <TableContainer>
+      <Table size="small">
+        <TableHead>
+          <TableRow>
+            <TableCell sx={{ fontWeight: 'bold' }}>Param Name</TableCell>
+            <TableCell sx={{ fontWeight: 'bold' }}>Property</TableCell>
+            <TableCell sx={{ fontWeight: 'bold', color: 'error.main' }}>Old Value</TableCell>
+            <TableCell sx={{ fontWeight: 'bold', color: 'success.main' }}>New Value</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {Object.entries(diffResponse.globalParamDiffs).flatMap(([paramName, fields]) => 
+            Object.entries(fields).map(([field, diff]) => (
+              <TableRow key={`${paramName}-${field}`} hover>
+                <TableCell sx={{ fontWeight: 'bold', color: 'primary.main' }}>{paramName}</TableCell>
+                <TableCell>{field}</TableCell>
+                <TableCell sx={{ bgcolor: alpha(theme.palette.error.main, 0.02) }}>
+                  <DiffText value={diff.oldValue} otherValue={diff.newValue} type="old" />
+                </TableCell>
+                <TableCell sx={{ bgcolor: alpha(theme.palette.success.main, 0.02) }}>
+                  <DiffText value={diff.newValue} otherValue={diff.oldValue} type="new" />
+                </TableCell>
+              </TableRow>
+            ))
+          )}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  </Paper>
+)}
