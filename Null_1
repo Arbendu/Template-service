@@ -1,3 +1,4 @@
+// Json compare utill
 // Inside JsonCompareUtil class
 
 // 1. NEW METHOD: Compare Global Params
@@ -67,7 +68,7 @@ private Map<String, ValueDiff> compareColumnFields(TemplatePayload.ColumnDefinit
 
 
 
-TemplateDiffServiceImpl
+// TemplateDiffServiceImpl
 
 
 // Inside compareByRequestId method
@@ -87,4 +88,21 @@ return TemplateDiffResponseDto.builder()
         .variantDiffs(variantDiffs)
         .globalParamDiffs(globalParamDiffs) // Add to response
         .build();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//  Compare Template Dialog Screen
 
