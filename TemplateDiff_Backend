@@ -498,6 +498,8 @@ public class TemplateDiffResponseDto {
      * cellId -> (fieldName -> old/new value)
      */
     private Map<String, Map<String, ValueDiff>> columnDiffs;
+
+     private Map<String, Map<String, ValueDiff>> globalParamDiffs;
 }
 
 
@@ -766,13 +768,17 @@ package com.fincore.TemplateConfigurationService.service.impl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fincore.TemplateConfigurationService.dto.*;
 import com.fincore.TemplateConfigurationService.entity.CommonReq;
+import com.fincore.TemplateConfigurationService.entity.ReportTemplate;
+import com.fincore.TemplateConfigurationService.entity.ReportVariant;
 import com.fincore.TemplateConfigurationService.repository.CommonRequestRepository;
 import com.fincore.TemplateConfigurationService.repository.ReportTemplateRepository;
+import com.fincore.TemplateConfigurationService.repository.ReportVariantRepository;
 import com.fincore.TemplateConfigurationService.service.TemplateDiffService;
 import com.fincore.TemplateConfigurationService.util.JsonCompareUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -782,6 +788,7 @@ public class TemplateDiffServiceImpl implements TemplateDiffService {
 
     private final CommonRequestRepository commonRequestRepository;
     private final ReportTemplateRepository reportTemplateRepository;
+    private final ReportVariantRepository reportVariantRepository;
     private final JsonCompareUtil jsonCompareUtil;
     private final ObjectMapper objectMapper;
 
@@ -800,23 +807,47 @@ public class TemplateDiffServiceImpl implements TemplateDiffService {
                 .getReportMeta()
                 .getReportId();
 
-        // 3️⃣ Fetch OLD ACTIVE template JSON from DB
-        String oldTemplateJson = reportTemplateRepository
+        // 3️⃣ Fetch OLD ACTIVE template from DB
+        ReportTemplate oldEntity = reportTemplateRepository
                 .findFirstByReportIdAndStatus(reportId, "ACTIVE")
-                .map(rt -> rt.getTemplateJson())
-                .orElseThrow(() ->
-                        new IllegalStateException("Active template not found for reportId: " + reportId));
+                .orElseThrow(() -> new IllegalStateException("Active template not found"));
 
-        TemplatePayload oldTemplate = parseTemplate(oldTemplateJson, "stored template");
+        // Parse old template AND its variants
+        TemplatePayload oldTemplate = parseTemplate(oldEntity.getTemplateJson(), "stored template");
+
+//        String oldTemplateJson = reportTemplateRepository
+//                .findFirstByReportIdAndStatus(reportId, "ACTIVE")
+//                .map(rt -> rt.getTemplateJson())
+//                .orElseThrow(() ->
+//                        new IllegalStateException("Active template not found for reportId: " + reportId));
+//
+//        TemplatePayload oldTemplate = parseTemplate(oldTemplateJson, "stored template");
+
+        // Fetch variants for the old template
+        List<VariantDto> oldVariants = reportVariantRepository.findByTemplateId(oldEntity.getTemplateId())
+                .stream()
+                .map(this::mapToVariantDto).toList();
+
+        oldTemplate.setVariants(oldVariants);           // Set variants to the old template
 
         // 4️⃣ Run diff logic
         // 4a. Compare Cells
         Map<String, Map<String, ValueDiff>> cellDiffs =
                 jsonCompareUtil.compareCells(oldTemplate, newTemplate);
 
-        // 4b. Compare Columns (NEW LOGIC)
+        // 4b. Compare Columns
         Map<String, Map<String, ValueDiff>> columnDiffs =
                 jsonCompareUtil.compareColumns(oldTemplate, newTemplate);
+
+        // 4c. Compare variants
+        Map<String, Map<String, ValueDiff>> variantDiffs =
+                jsonCompareUtil.compareVariants(oldTemplate.getVariants(), newTemplate.getVariants());
+
+        // Compare Global Params
+        Map<String, Map<String, ValueDiff>> globalParamDiffs = jsonCompareUtil.compareGlobalParams(
+                oldTemplate.getTemplate().getGlobalParams(),
+                newTemplate.getTemplate().getGlobalParams()
+        );
 
         // 5️⃣ Response
         return TemplateDiffResponseDto.builder()
@@ -824,6 +855,37 @@ public class TemplateDiffServiceImpl implements TemplateDiffService {
                 .newTemplate(newTemplate)
                 .cellDiffs(cellDiffs)
                 .columnDiffs(columnDiffs) // Add columns to response
+                .variantDiffs(variantDiffs)
+                .globalParamDiffs(globalParamDiffs)
+                .build();
+    }
+
+    // Helper to map ReportVariant entity to VariantDto
+    private VariantDto mapToVariantDto(ReportVariant entity){
+        return VariantDto.builder()
+                .variantCode(entity.getVariantCode())
+                .variantName(entity.getVariantName())
+                .description(entity.getDescription())
+                .status(entity.getStatus())
+                .params(entity.getParams() != null ? entity.getParams().stream()
+                        .map(def -> VariantParamDto.builder()
+                                .paramName(def.getParamName())
+                                .label(def.getLabel())
+                                .paramType(def.getParamType())
+                                .validation(def.getValidation())
+                                .uiHint(def.getUiHint())
+                                .required("Y".equalsIgnoreCase(def.getRequired()))
+                                .multiValued("Y".equalsIgnoreCase(def.getMultiVal())).build())
+                        .toList() : new ArrayList<>())
+                .filterRules(entity.getFilterRules() != null ? entity.getFilterRules().stream()
+                        .map(rule -> FilterRuleDto.builder()
+                                .dbColumn(rule.getDbColumn())
+                                .operator(rule.getOperator())
+                                .paramName(rule.getParamName())
+                                .scopeType(rule.getScopeType())
+                                .scopeValue(rule.getScopeValue())
+                                .build())
+                        .toList() : new ArrayList<>())
                 .build();
     }
 
@@ -856,14 +918,17 @@ public class TemplateDiffServiceImpl implements TemplateDiffService {
 
 
 
+
 // ===============================================================================================================================================================================================================================================
 // util/JsonCompareUtil.java
 // ===============================================================================================================================================================================================================================================
+
 
 package com.fincore.TemplateConfigurationService.util;
 
 import com.fincore.TemplateConfigurationService.dto.TemplatePayload;
 import com.fincore.TemplateConfigurationService.dto.ValueDiff;
+import com.fincore.TemplateConfigurationService.dto.VariantDto;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
@@ -945,6 +1010,102 @@ public class JsonCompareUtil {
         return diffs;
     }
 
+    // 3. METHOD: Compare variants
+    public Map<String, Map<String, ValueDiff>> compareVariants(
+            List<VariantDto> oldVariants,
+            List<VariantDto> newVariants
+    ) {
+        Map<String, Map<String, ValueDiff>> diffs = new LinkedHashMap<>();
+
+        // Use a Set to collect all unique variant codes from both lists
+        Set<String> allCodes = new LinkedHashSet<>();
+        if (oldVariants != null) oldVariants.forEach(v -> allCodes.add(v.getVariantCode()));
+        if (newVariants != null) newVariants.forEach(v -> allCodes.add(v.getVariantCode()));
+
+        for (String code : allCodes) {
+            VariantDto oldV = findVariantByCode(oldVariants, code);
+            VariantDto newV = findVariantByCode(newVariants, code);
+
+            Map<String, ValueDiff> fieldDiffs = new LinkedHashMap<>();
+
+            // 1. Compare basic fields
+            compareField("variantName",
+                    oldV != null ? oldV.getVariantName() : null,
+                    newV != null ? newV.getVariantName() : null, fieldDiffs);
+
+            compareField("description",
+                    oldV != null ? oldV.getDescription() : null,
+                    newV != null ? newV.getDescription() : null, fieldDiffs);
+
+            compareField("status",
+                    oldV != null ? oldV.getStatus() : null,
+                    newV != null ? newV.getStatus() : null, fieldDiffs);
+
+            // 2. Compare complex lists (Params and Filter Rules)
+            compareField("params",
+                    oldV != null ? oldV.getParams() : null,
+                    newV != null ? newV.getParams() : null, fieldDiffs);
+
+            compareField("filterRules",
+                    oldV != null ? oldV.getFilterRules() : null,
+                    newV != null ? newV.getFilterRules() : null, fieldDiffs);
+
+            if (!fieldDiffs.isEmpty()) {
+                diffs.put(code, fieldDiffs);
+            }
+        }
+        return diffs;
+    }
+
+
+    // 4. METHOD: Compare Global Params
+    public Map<String, Map<String, ValueDiff>> compareGlobalParams(
+            List<TemplatePayload.GlobalParamDef> oldParams,
+            List<TemplatePayload.GlobalParamDef> newParams
+    ) {
+        Map<String, Map<String, ValueDiff>> diffs = new LinkedHashMap<>();
+        Set<String> allNames = new LinkedHashSet<>();
+        if (oldParams != null) oldParams.forEach(p -> allNames.add(p.getName()));
+        if (newParams != null) newParams.forEach(p -> allNames.add(p.getName()));
+
+        for (String name : allNames) {
+            TemplatePayload.GlobalParamDef oldP = findParam(oldParams, name);
+            TemplatePayload.GlobalParamDef newP = findParam(newParams, name);
+
+            Map<String, ValueDiff> fieldDiffs = new LinkedHashMap<>();
+
+            // Compare fields
+            compareField("name", oldP != null ? oldP.getName() : null, newP != null ? newP.getName() : null, fieldDiffs);
+            compareField("label", oldP != null ? oldP.getLabel() : null, newP != null ? newP.getLabel() : null, fieldDiffs);
+            compareField("dataType", oldP != null ? oldP.getDataType() : null, newP != null ? newP.getDataType() : null, fieldDiffs);
+            compareField("mode", oldP != null ? oldP.getMode() : null, newP != null ? newP.getMode() : null, fieldDiffs);
+            compareField("expression", oldP != null ? oldP.getExpression() : null, newP != null ? newP.getExpression() : null, fieldDiffs);
+            compareField("defaultValue", oldP != null ? oldP.getDefaultValue() : null, newP != null ? newP.getDefaultValue() : null, fieldDiffs);
+            compareField("source", oldP != null ? oldP.getSource() : null, newP != null ? newP.getSource() : null, fieldDiffs);
+
+            if (!fieldDiffs.isEmpty()) {
+                diffs.put(name, fieldDiffs);
+            }
+        }
+        return diffs;
+    }
+
+    // Helper to find params in the list
+    private TemplatePayload.GlobalParamDef findParam(List<TemplatePayload.GlobalParamDef> list, String name) {
+        if (list == null) return null;
+        return list.stream().filter(p -> name.equals(p.getName())).findFirst().orElse(null);
+    }
+
+
+    // Helper to find a variant in the list by its code
+    private VariantDto findVariantByCode(List<VariantDto> list, String code) {
+        if (list == null || code == null) return null;
+        return list.stream()
+                .filter(v -> code.equals(v.getVariantCode()))
+                .findFirst()
+                .orElse(null);
+    }
+
     // --------------------------------------------------------
     // Comparison Logic Helpers
     // --------------------------------------------------------
@@ -985,9 +1146,14 @@ public class JsonCompareUtil {
             return diffs;
         }
 
+        assert oldCol != null;
         compareField("id", oldCol.getId(), newCol.getId(), diffs);
         compareField("name", oldCol.getName(), newCol.getName(), diffs);
         compareField("format", oldCol.getFormat(), newCol.getFormat(), diffs);
+        compareField("filters",
+                oldCol.getTemplateColumnFilters(),
+                newCol.getTemplateColumnFilters(),
+                diffs);
 
         return diffs;
     }
@@ -1036,96 +1202,6 @@ public class JsonCompareUtil {
             return Collections.emptyList();
         }
         return t.getTemplate().getReportData().getColumns();
-    }
-}
-
-
-
-
-
-
-
-
-
-
-
-// ===============================================================================================================================================================================================================================================
-// exception/GlobalExceptionHandler
-// ===============================================================================================================================================================================================================================================
-
-package com.fincore.TemplateConfigurationService.exception;
-
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.validation.FieldError;
-import org.springframework.web.bind.MethodArgumentNotValidException;
-import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.springframework.web.bind.annotation.RestControllerAdvice;
-
-import java.util.HashMap;
-import java.util.Map;
-
-@Slf4j
-@RestControllerAdvice
-public class GlobalExceptionHandler {
-
-    @ExceptionHandler(TemplateNotFoundException.class)
-    public ResponseEntity<?> handleTemplateNotFound(TemplateNotFoundException ex) {
-        log.warn("Template not found: {}", ex.getMessage());
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error("NOT_FOUND", ex.getMessage()));
-    }
-
-    @ExceptionHandler(BadRequestException.class)
-    public ResponseEntity<?> handleBadRequest(BadRequestException ex) {
-        log.warn("Bad request: {}", ex.getMessage());
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error("BAD_REQUEST", ex.getMessage()));
-    }
-
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<?> handleValidation(MethodArgumentNotValidException ex) {
-        Map<String, String> fieldErrors = new HashMap<>();
-        for (FieldError fe : ex.getBindingResult().getFieldErrors()) {
-            fieldErrors.put(fe.getField(), fe.getDefaultMessage());
-        }
-        log.warn("Validation error: {}", fieldErrors);
-        Map<String, Object> body = error("VALIDATION_ERROR", "Invalid request");
-        body.put("fieldErrors", fieldErrors);
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
-    }
-
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<?> handleOther(Exception ex) {
-        log.error("Unexpected error", ex);
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(error("INTERNAL_ERROR", "Unexpected error occurred"));
-    }
-
-    private Map<String, Object> error(String code, String message) {
-        Map<String, Object> map = new HashMap<>();
-        map.put("code", code);
-        map.put("message", message);
-        return map;
-    }
-}
-
-
-
-
-
-
-
-
-
-// ===============================================================================================================================================================================================================================================
-// exception/TemplateNotFoundException
-// ===============================================================================================================================================================================================================================================
-
-package com.fincore.TemplateConfigurationService.exception;
-
-public class TemplateNotFoundException extends RuntimeException {
-    public TemplateNotFoundException(String templateId) {
-        super("Template not found: " + templateId);
     }
 }
 
