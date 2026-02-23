@@ -1,1 +1,44 @@
+// Submits a template for checker approval (handles both Create and Update)
+export const saveTemplate = async (callApi, template) => {
+  try {
+    // 1. Determine if this is an update by checking for an existing ID.
+    // NOTE: Change 'template.id' if your template's primary key is named differently (e.g., template.templateId)
+    const existingId = template.id || template.templateId; 
+    const isUpdate = Boolean(existingId);
+
+    // 2. Construct the payload dynamically
+    const createRequestDto = {
+      requestType: "RB_REPORT_TEMPLATE", 
+      
+      // Dynamically assign changeType
+      changeType: isUpdate ? "UPDATE" : "CREATE", 
+      
+      // If it's an update, pass the ID as a string (since targetId is a String in your Java DTO). Otherwise, null.
+      targetId: isUpdate ? String(existingId) : null, 
+      
+      payload: template 
+    };
+
+    const response = await callApi(
+      "/CR/create-request", 
+      JSON.stringify(createRequestDto),
+      "POST"
+    );
+
+    return { 
+      success: true, 
+      requestId: response.id || response.requestId, 
+      status: "PENDING_APPROVAL",
+      // Optional: return the action taken so your UI can show a specific success message
+      action: isUpdate ? "UPDATE_SUBMITTED" : "CREATE_SUBMITTED" 
+    }; 
+
+  } catch (error) {
+    console.error("Error submitting template request:", error);
+    return { 
+      success: false, 
+      error: error.message || "Failed to submit request to checker." 
+    };
+  }
+};
 
