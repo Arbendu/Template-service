@@ -9,8 +9,7 @@
 //               7. Maintain all the formatting like colspan, alignment, etc...   ❌
 //               8. Virtualization       ✅
 //               9. Checker can see the full template or only the perticular changes between old and new template.       ✅
-//              10. Add the remarks during modify the report and display the remarks in request screen.         ✅
-//              11. Added global params diff, column diff, column filters         ✅
+//              10. Add the remarks during modify the report and display the remarks in request screen.         ❌
 // ================================================================================================================================================================
 
 import React, {
@@ -516,7 +515,7 @@ const CompareTemplateDialog = ({ open, onClose, requestId }) => {
       setCurrentDiffIdx(-1);
       setShowChangesOnly(true);
 
-      callApi("/TC/template-diff", { requestId }, "POST")
+      callApi("/TC/template-config/template-diff", { requestId }, "POST")
         .then((res) => {
           const data = res.data || res;
           setDiffResponse(data);
