@@ -50,6 +50,27 @@ export default function TemplateRequestScreen() {
 // ******************************************************************************************************************************************************************************************
 
 
+export const styles = {
+  container: { p: 2 },
+
+  noRowsOverlay: {
+    fontSize: 48,
+    color: "text.secondary",
+    mb: 2,
+  },
+
+  dataGrid: {
+   
+  },
+
+  requestDate: {
+    fontSize: "0.9rem",
+  },
+
+  StackStyle: {
+    height: "100%",
+  },
+};
 
 
 
