@@ -2005,6 +2005,8 @@ import com.tcs.fincore.CommonRequestService.model.enums.RequestStatus;
 import com.tcs.fincore.CommonRequestService.model.enums.RequestType;
 import com.tcs.fincore.CommonRequestService.repository.CommonRequestRepository;
 import com.tcs.fincore.CommonRequestService.service.strategy.RequestStrategyFactory;
+//import com.tcs.fincore.CommonRequestService.service.strategy.RequestTypeStrategy;
+//import com.tcs.fincore.CommonRequestService.service.strategy.RequestTypeStrategyResolver;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -2040,6 +2042,7 @@ public class RequestServiceImpl implements RequestService {
     private final NotificationWriterService notificationWriterService;
     private final PermissionConfigService permissionConfigService;
     private final BusinessSecurityService businessSecurityService;
+    //private final RequestTypeStrategyResolver requestTypeStrategyResolver;
 
     @Override
     @Transactional(rollbackOn = Exception.class) // Ensure rollback on any exception
@@ -2269,7 +2272,16 @@ public class RequestServiceImpl implements RequestService {
                     "Request type is missing, Please provide correct request type to fetch requests.");
         }
         log.info("Fetching my requests for user {} with type {}", userId, requestType);
-        return commonRequestRepository.findByCreatorIdAndReqType(userId, requestType);
+
+        List<CommonReq> requests = commonRequestRepository.findByCreatorIdAndReqType(userId, requestType);
+
+        try{
+            return strategyFactory.getStrategy(requestType).filterResponse(userId, requests);
+        } catch (JsonProcessingException e) {
+            log.error("Error while filtering response for requestType={}", requestType, e);
+            return requests;
+        }
+        //return commonRequestRepository.findByCreatorIdAndReqType(userId, requestType);
     }
 
     @Override
@@ -2284,8 +2296,15 @@ public class RequestServiceImpl implements RequestService {
             );
         }
         log.info("Fetching pending requests for user :  {} with type : {}",userId, requestType);
-        return commonRequestRepository
-                .findByCreatorIdNotAndReqStatusAndReqType(userId, RequestStatus.PENDING, requestType);
+
+        List<CommonReq> requests = commonRequestRepository.findByCreatorIdNotAndReqStatusAndReqType(userId, RequestStatus.PENDING, requestType);
+
+        try{
+            return strategyFactory.getStrategy(requestType).filterResponse(userId, requests);
+        } catch (JsonProcessingException e) {
+            log.error("Error while filtering response for requestType={}", requestType, e);
+            return requests;
+        }
     }
 
 
