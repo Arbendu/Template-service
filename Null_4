@@ -1,1 +1,40 @@
 
+import com.fasterxml.jackson.databind.JsonNode;
+
+// ...
+
+private CommonReq mapToDto(CommonReq req) throws JsonProcessingException {
+    
+    // 1. FAST PARSING: Read as a generic tree instead of mapping thousands of nested Java objects
+    JsonNode rootNode = objectMapper.readTree(req.getPayload());
+
+    CommonReq filteredReq = new CommonReq();
+    filteredReq.setId(req.getId());
+    filteredReq.setReqType(req.getReqType());
+    filteredReq.setReqStatus(req.getReqStatus());
+    filteredReq.setChangeType(req.getChangeType());
+    filteredReq.setCreatorId(req.getCreatorId());
+    filteredReq.setReqDate(req.getReqDate());
+    filteredReq.setTargetId(req.getTargetId());
+
+    // 2. Safely traverse the tree to get only the metadata we care about
+    JsonNode templateNode = rootNode.path("template");
+    JsonNode templateMeta = templateNode.path("templateMeta");
+    JsonNode reportMeta = templateNode.path("reportMeta");
+
+    Map<String, String> summary = new HashMap<>();
+    
+    // .asText(null) gracefully returns null if the field is missing
+    summary.put("templateId", templateMeta.path("templateId").asText(null));
+    summary.put("reportId", reportMeta.path("reportId").asText(null));
+    summary.put("version", templateMeta.path("version").asText(null));
+    summary.put("reportName", reportMeta.path("reportName").asText(null));
+
+    if(rootNode.hasNonNull("remarks")){
+        summary.put("remarks", rootNode.path("remarks").asText());
+    }
+
+    filteredReq.setPayload(objectMapper.writeValueAsString(summary));
+    
+    return filteredReq;
+}
