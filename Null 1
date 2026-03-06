@@ -1,1 +1,68 @@
 
+    // 🚀 EXTREME PERFORMANCE: Pre-compiled Regex to bypass Jackson parsing
+    private static final Pattern TEMPLATE_ID_PATTERN = Pattern.compile("\"templateId\"\\s*:\\s*\"([^\"]*)\"");
+    private static final Pattern REPORT_ID_PATTERN = Pattern.compile("\"reportId\"\\s*:\\s*\"([^\"]*)\"");
+    private static final Pattern VERSION_PATTERN = Pattern.compile("\"version\"\\s*:\\s*\"([^\"]*)\"");
+    private static final Pattern REPORT_NAME_PATTERN = Pattern.compile("\"reportName\"\\s*:\\s*\"([^\"]*)\"");
+    private static final Pattern REMARKS_PATTERN = Pattern.compile("\"remarks\"\\s*:\\s*\"([^\"]*)\"");
+
+
+
+
+
+
+
+
+
+
+    private CommonReq mapToDto(CommonReq req) {
+        CommonReq filteredReq = new CommonReq();
+        filteredReq.setId(req.getId());
+        filteredReq.setReqType(req.getReqType());
+        filteredReq.setReqStatus(req.getReqStatus());
+        filteredReq.setChangeType(req.getChangeType());
+        filteredReq.setCreatorId(req.getCreatorId());
+        filteredReq.setReqDate(req.getReqDate());
+        filteredReq.setTargetId(req.getTargetId());
+
+        Map<String, String> summary = new HashMap<>();
+        String rawPayload = req.getPayload();
+
+        if (rawPayload != null && !rawPayload.isEmpty()) {
+            try {
+                // 🚀 SPEED HACK: Only search the first 5000 characters of the 5MB string!
+                // Since templateMeta and reportMeta are at the top, we find them instantly.
+                String searchWindow = rawPayload.length() > 5000 ? rawPayload.substring(0, 5000) : rawPayload;
+
+                summary.put("templateId", extractWithRegex(searchWindow, TEMPLATE_ID_PATTERN));
+                summary.put("reportId", extractWithRegex(searchWindow, REPORT_ID_PATTERN));
+                summary.put("version", extractWithRegex(searchWindow, VERSION_PATTERN));
+                summary.put("reportName", extractWithRegex(searchWindow, REPORT_NAME_PATTERN));
+
+                // Remarks might be at the bottom, so we scan the full string if it exists
+                String remarks = extractWithRegex(rawPayload, REMARKS_PATTERN);
+                if (remarks != null && !remarks.isEmpty()) {
+                    summary.put("remarks", remarks);
+                }
+            } catch (Exception e) {
+                log.error("Regex extraction failed for request {}", req.getId(), e);
+            }
+        }
+
+        try {
+            filteredReq.setPayload(objectMapper.writeValueAsString(summary));
+        } catch (JsonProcessingException e) {
+            filteredReq.setPayload("{}");
+        }
+        
+        return filteredReq;
+    }
+
+    // Helper method for Regex extraction
+    private String extractWithRegex(String text, Pattern pattern) {
+        Matcher matcher = pattern.matcher(text);
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+        return ""; 
+    }
