@@ -1,9 +1,8 @@
-
 import { useState, useMemo, useCallback, useEffect, memo } from 'react';
 import { 
   Box, Paper, Table, TableBody, TableCell, TableContainer, 
   TableHead, TableRow, Typography, IconButton, CircularProgress, 
-  Button, Chip 
+  Button, Chip, useTheme
 } from '@mui/material';
 import { Plus, Minus, Download } from 'lucide-react';
 
@@ -67,6 +66,7 @@ const fetchChildrenData = async (parentNode) => {
 
 // 1. The MUI Row Component
 const TreeTableRow = memo(({ node, isExpanded, isLoading, onToggle, maxVisibleLevel }) => {
+  const theme = useTheme();
   const total = node.jan + node.feb + node.mar;
 
   return (
@@ -78,32 +78,35 @@ const TreeTableRow = memo(({ node, isExpanded, isLoading, onToggle, maxVisibleLe
             <TableCell 
               key={colIndex} 
               sx={{ 
-                borderRight: '1px solid #e0e0e0', 
+                borderRight: 1, 
+                borderColor: 'divider', 
                 minWidth: 220,
-                backgroundColor: '#ffffff'
+                bgcolor: 'background.paper'
               }}
             >
               <Box sx={{ display: 'flex', alignItems: 'center', pl: node.level * 3 }}>
                 {node.hasChildren ? (
                   <IconButton
                     size="small"
+                    color="primary"
                     onClick={() => onToggle(node)}
                     disabled={isLoading}
                     sx={{ 
                       mr: 1.5, 
-                      border: '1px solid #bdbdbd', 
+                      border: 1,
+                      borderColor: 'divider', 
                       borderRadius: 1, 
                       p: 0.3,
-                      backgroundColor: '#f5f5f5',
-                      '&:hover': { backgroundColor: '#e3f2fd', borderColor: '#2196f3' }
+                      bgcolor: 'action.hover',
+                      '&:hover': { bgcolor: 'action.selected' }
                     }}
                   >
-                    {isLoading ? <CircularProgress size={14} /> : isExpanded ? <Minus size={14} /> : <Plus size={14} />}
+                    {isLoading ? <CircularProgress size={14} color="inherit" /> : isExpanded ? <Minus size={14} /> : <Plus size={14} />}
                   </IconButton>
                 ) : (
                   <Box sx={{ width: 26, mr: 1.5 }} /> // Spacer for leaf nodes
                 )}
-                <Typography variant="body2" sx={{ fontWeight: node.level === 0 ? 600 : 400, color: '#1f2937' }}>
+                <Typography variant="body2" color="text.primary" sx={{ fontWeight: node.level === 0 ? 600 : 400 }}>
                   {node.name}
                 </Typography>
               </Box>
@@ -114,16 +117,27 @@ const TreeTableRow = memo(({ node, isExpanded, isLoading, onToggle, maxVisibleLe
         return (
           <TableCell 
             key={colIndex} 
-            sx={{ borderRight: '1px solid #e0e0e0', minWidth: 150, backgroundColor: '#f9fafb' }} 
+            sx={{ 
+              borderRight: 1, 
+              borderColor: 'divider', 
+              minWidth: 150, 
+              bgcolor: 'background.default' 
+            }} 
           />
         );
       })}
 
       {/* DATA COLUMNS */}
-      <TableCell align="right" sx={{ borderRight: '1px solid #e0e0e0', color: '#4b5563' }}>{formatCurrency(node.jan)}</TableCell>
-      <TableCell align="right" sx={{ borderRight: '1px solid #e0e0e0', color: '#4b5563' }}>{formatCurrency(node.feb)}</TableCell>
-      <TableCell align="right" sx={{ borderRight: '1px solid #e0e0e0', color: '#4b5563' }}>{formatCurrency(node.mar)}</TableCell>
-      <TableCell align="right" sx={{ fontWeight: 600, backgroundColor: '#f3f4f6', color: '#111827' }}>
+      <TableCell align="right" sx={{ borderRight: 1, borderColor: 'divider', color: 'text.secondary' }}>
+        {formatCurrency(node.jan)}
+      </TableCell>
+      <TableCell align="right" sx={{ borderRight: 1, borderColor: 'divider', color: 'text.secondary' }}>
+        {formatCurrency(node.feb)}
+      </TableCell>
+      <TableCell align="right" sx={{ borderRight: 1, borderColor: 'divider', color: 'text.secondary' }}>
+        {formatCurrency(node.mar)}
+      </TableCell>
+      <TableCell align="right" sx={{ fontWeight: 600, bgcolor: 'action.hover', color: 'text.primary' }}>
         {formatCurrency(total)}
       </TableCell>
     </TableRow>
@@ -212,11 +226,11 @@ export default function ReportAnalysisScreen() {
 
   return (
     // Outer Background Box
-    <Box sx={{ minHeight: '100vh', backgroundColor: '#e2e8f0', p: 4 }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', p: 4 }}>
       
       {/* Central Paper Component */}
       <Paper 
-        elevation={4} 
+        elevation={0} // Using 0 because your custom theme provides shadows via the component overrides
         sx={{ 
           maxWidth: '1400px', 
           mx: 'auto', 
@@ -224,16 +238,28 @@ export default function ReportAnalysisScreen() {
           display: 'flex', 
           flexDirection: 'column',
           overflow: 'hidden',
-          borderRadius: 2
+          borderRadius: 2,
+          boxShadow: 'baseShadow', // Matches your custom theme token
+          border: 1,
+          borderColor: 'divider'
         }}
       >
         {/* Top Header */}
-        <Box sx={{ backgroundColor: '#1e293b', px: 3, py: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Box 
+          sx={{ 
+            bgcolor: 'primary.main', 
+            px: 3, 
+            py: 2, 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center' 
+          }}
+        >
           <Box>
-            <Typography variant="h6" sx={{ color: 'white', fontWeight: 600, letterSpacing: '0.5px' }}>
+            <Typography variant="h6" sx={{ color: 'primary.contrastText', fontWeight: 600 }}>
               Enterprise Analytics Workspace
             </Typography>
-            <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+            <Typography variant="caption" sx={{ color: 'primary.contrastText', opacity: 0.8 }}>
               YTD Balance Sheet Drill-Down Matrix
             </Typography>
           </Box>
@@ -241,25 +267,40 @@ export default function ReportAnalysisScreen() {
             variant="outlined" 
             size="small" 
             startIcon={<Download size={16} />}
-            sx={{ color: '#e2e8f0', borderColor: '#475569', '&:hover': { borderColor: '#cbd5e1', backgroundColor: '#334155' } }}
+            sx={{ 
+              color: 'primary.contrastText', 
+              borderColor: 'rgba(255,255,255,0.3)', 
+              '&:hover': { borderColor: 'rgba(255,255,255,0.6)', bgcolor: 'rgba(255,255,255,0.1)' } 
+            }}
           >
             Export CSV
           </Button>
         </Box>
 
         {/* Toolbar Area */}
-        <Box sx={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0', px: 3, py: 1.5, display: 'flex', alignItems: 'center', gap: 2 }}>
+        <Box 
+          sx={{ 
+            bgcolor: 'background.glass', 
+            borderBottom: 1, 
+            borderColor: 'divider', 
+            px: 3, 
+            py: 1.5, 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: 2 
+          }}
+        >
           <Typography variant="body2" fontWeight={600} color="text.secondary">Rows:</Typography>
-          <Chip label={visibleHierarchyLevels.join(' > ')} size="small" sx={{ borderRadius: 1, backgroundColor: 'white', border: '1px solid #cbd5e1' }} />
+          <Chip label={visibleHierarchyLevels.join(' > ')} size="small" sx={{ borderRadius: 1, bgcolor: 'background.paper', border: 1, borderColor: 'divider' }} />
           <Typography variant="body2" fontWeight={600} color="text.secondary" sx={{ ml: 2 }}>Values:</Typography>
-          <Chip label="INR Balance" size="small" sx={{ borderRadius: 1, backgroundColor: 'white', border: '1px solid #cbd5e1' }} />
+          <Chip label="INR Balance" size="small" sx={{ borderRadius: 1, bgcolor: 'background.paper', border: 1, borderColor: 'divider' }} />
         </Box>
 
         {/* Material-UI Data Grid */}
-        <TableContainer sx={{ flexGrow: 1, backgroundColor: '#f1f5f9' }}>
+        <TableContainer sx={{ flexGrow: 1, bgcolor: 'background.default' }}>
           {isInitializing ? (
             <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-              <CircularProgress size={40} sx={{ mb: 2 }} />
+              <CircularProgress size={40} color="primary" sx={{ mb: 2 }} />
               <Typography variant="body1" color="text.secondary">Fetching Data Cube...</Typography>
             </Box>
           ) : (
@@ -271,20 +312,22 @@ export default function ReportAnalysisScreen() {
                     <TableCell 
                       key={level} 
                       sx={{ 
-                        backgroundColor: '#e2e8f0', 
+                        bgcolor: 'background.paper', 
+                        color: 'text.primary',
                         fontWeight: 700, 
-                        borderRight: '1px solid #cbd5e1',
-                        borderBottom: '2px solid #94a3b8',
+                        borderRight: 1,
+                        borderColor: 'divider',
+                        borderBottom: 2,
                         width: 200
                       }}
                     >
                       {level}
                     </TableCell>
                   ))}
-                  <TableCell align="right" sx={{ backgroundColor: '#e2e8f0', fontWeight: 700, borderRight: '1px solid #cbd5e1', borderBottom: '2px solid #94a3b8' }}>January</TableCell>
-                  <TableCell align="right" sx={{ backgroundColor: '#e2e8f0', fontWeight: 700, borderRight: '1px solid #cbd5e1', borderBottom: '2px solid #94a3b8' }}>February</TableCell>
-                  <TableCell align="right" sx={{ backgroundColor: '#e2e8f0', fontWeight: 700, borderRight: '1px solid #cbd5e1', borderBottom: '2px solid #94a3b8' }}>March</TableCell>
-                  <TableCell align="right" sx={{ backgroundColor: '#cbd5e1', fontWeight: 800, borderBottom: '2px solid #94a3b8' }}>YTD Total</TableCell>
+                  <TableCell align="right" sx={{ bgcolor: 'background.paper', color: 'text.primary', fontWeight: 700, borderRight: 1, borderColor: 'divider', borderBottom: 2 }}>January</TableCell>
+                  <TableCell align="right" sx={{ bgcolor: 'background.paper', color: 'text.primary', fontWeight: 700, borderRight: 1, borderColor: 'divider', borderBottom: 2 }}>February</TableCell>
+                  <TableCell align="right" sx={{ bgcolor: 'background.paper', color: 'text.primary', fontWeight: 700, borderRight: 1, borderColor: 'divider', borderBottom: 2 }}>March</TableCell>
+                  <TableCell align="right" sx={{ bgcolor: 'action.hover', color: 'text.primary', fontWeight: 800, borderBottom: 2, borderColor: 'divider' }}>YTD Total</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -304,11 +347,22 @@ export default function ReportAnalysisScreen() {
         </TableContainer>
         
         {/* Footer Status Bar */}
-        <Box sx={{ backgroundColor: '#f8fafc', borderTop: '1px solid #e2e8f0', px: 3, py: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Box 
+          sx={{ 
+            bgcolor: 'background.glass', 
+            borderTop: 1, 
+            borderColor: 'divider', 
+            px: 3, 
+            py: 1, 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center' 
+          }}
+        >
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#10b981' }} />
+            <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'success.main' }} />
             <Typography variant="caption" color="text.secondary">Connected to Engine</Typography>
-            <Box sx={{ width: 1, height: 16, backgroundColor: '#cbd5e1', mx: 1 }} />
+            <Box sx={{ width: 1, height: 16, bgcolor: 'divider', mx: 1 }} />
             <Typography variant="caption" color="text.secondary">Showing {visibleRows.length.toLocaleString()} rows</Typography>
           </Box>
         </Box>
