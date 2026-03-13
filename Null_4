@@ -1,1 +1,397 @@
+import { useState, useMemo, useCallback, useEffect, memo } from 'react';
+import { 
+  Box, Paper, Table, TableBody, TableCell, TableContainer, 
+  TableHead, TableRow, Typography, IconButton, CircularProgress, 
+  Button, Chip, useTheme
+} from '@mui/material';
+import { Plus, Minus, Download } from 'lucide-react';
+
+// --- UTILS & CONSTANTS ---
+const generateId = () => Math.random().toString(36).substr(2, 9);
+
+const formatCurrency = (value) => {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+};
+
+const HIERARCHY_LEVELS = ['Circle', 'Branch', 'Head', 'CGL'];
+
+// --- ACTUAL API LOGIC (Filter & Swap Engine) ---
+const fetchInitialData = async () => {
+  // 1. Initial Load: Group by 'circle' with NO filters.
+  const jsonPayload = {
+    dimensions: [HIERARCHY_LEVELS[0].toLowerCase()],
+    metrics: ['jan', 'feb', 'mar'],
+    filters: [] 
+  };
+
+  console.log("🚀 INITIAL LOAD - Sending to Spring Boot:", JSON.stringify(jsonPayload, null, 2));
+
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      const data = Array.from({ length: 5 }).map((_, i) => ({
+        id: `circle-${i}-${generateId()}`,
+        name: `Circle ${i + 1}`,
+        level: 0,
+        hasChildren: true,
+        jan: Math.random() * 100000 + 50000,
+        feb: Math.random() * 100000 + 50000,
+        mar: Math.random() * 100000 + 50000,
+        nodeFilters: [] // Pass empty filter history to root nodes
+      }));
+      resolve(data);
+    }, 600);
+  });
+};
+
+const fetchChildrenData = async (parentNode) => {
+  // 1. Swap the Dimension
+  const childLevel = parentNode.level + 1;
+  const nextDimension = HIERARCHY_LEVELS[childLevel].toLowerCase(); 
+
+  // 2. Build the Ancestry Filters
+  const currentFilters = [
+    ...(parentNode.nodeFilters || []), 
+    { 
+      field: HIERARCHY_LEVELS[parentNode.level].toLowerCase(), 
+      operator: 'EQUALS', 
+      value: parentNode.name 
+    }
+  ];
+
+  // 3. Assemble JSON Payload
+  const jsonPayload = {
+    dimensions: [nextDimension],
+    metrics: ['jan', 'feb', 'mar'],
+    filters: currentFilters
+  };
+
+  console.log(`📥 USER CLICKED [${parentNode.name}] - Sending to Spring Boot:`, JSON.stringify(jsonPayload, null, 2));
+
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      let childCount = Math.floor(Math.random() * 4) + 2; 
+
+      const children = Array.from({ length: childCount }).map((_, i) => ({
+        id: `${nextDimension}-${parentNode.id}-${i}-${generateId()}`,
+        name: `${HIERARCHY_LEVELS[childLevel]} ${i + 1}`,
+        level: childLevel,
+        hasChildren: childLevel < HIERARCHY_LEVELS.length - 1,
+        jan: (parentNode.jan / childCount) * (Math.random() * 0.2 + 0.9),
+        feb: (parentNode.feb / childCount) * (Math.random() * 0.2 + 0.9),
+        mar: (parentNode.mar / childCount) * (Math.random() * 0.2 + 0.9),
+        nodeFilters: currentFilters // Pass accumulated history to children
+      }));
+      resolve(children);
+    }, 400); 
+  });
+};
+
+// --- COMPONENTS ---
+
+// 1. The MUI Row Component
+const TreeTableRow = memo(({ node, isExpanded, isLoading, onToggle, maxVisibleLevel }) => {
+  const theme = useTheme();
+  const total = node.jan + node.feb + node.mar;
+
+  return (
+    <TableRow hover>
+      {/* DYNAMIC COLUMNS */}
+      {Array.from({ length: maxVisibleLevel + 1 }).map((_, colIndex) => {
+        if (colIndex === node.level) {
+          return (
+            <TableCell 
+              key={colIndex} 
+              sx={{ 
+                borderRight: 1, 
+                borderColor: 'divider', 
+                minWidth: 220,
+                bgcolor: 'background.paper'
+              }}
+            >
+              <Box sx={{ display: 'flex', alignItems: 'center', pl: node.level * 3 }}>
+                {node.hasChildren ? (
+                  <IconButton
+                    size="small"
+                    color="primary"
+                    onClick={() => onToggle(node)}
+                    disabled={isLoading}
+                    sx={{ 
+                      mr: 1.5, 
+                      border: 1,
+                      borderColor: 'divider', 
+                      borderRadius: 1, 
+                      p: 0.3,
+                      bgcolor: 'action.hover',
+                      '&:hover': { bgcolor: 'action.selected' }
+                    }}
+                  >
+                    {isLoading ? <CircularProgress size={14} color="inherit" /> : isExpanded ? <Minus size={14} /> : <Plus size={14} />}
+                  </IconButton>
+                ) : (
+                  <Box sx={{ width: 26, mr: 1.5 }} /> 
+                )}
+                <Typography variant="body2" color="text.primary" sx={{ fontWeight: node.level === 0 ? 600 : 400 }}>
+                  {node.name}
+                </Typography>
+              </Box>
+            </TableCell>
+          );
+        }
+        return (
+          <TableCell 
+            key={colIndex} 
+            sx={{ 
+              borderRight: 1, 
+              borderColor: 'divider', 
+              minWidth: 150, 
+              bgcolor: 'background.default' 
+            }} 
+          />
+        );
+      })}
+
+      {/* DATA COLUMNS */}
+      <TableCell align="right" sx={{ borderRight: 1, borderColor: 'divider', color: 'text.secondary' }}>
+        {formatCurrency(node.jan)}
+      </TableCell>
+      <TableCell align="right" sx={{ borderRight: 1, borderColor: 'divider', color: 'text.secondary' }}>
+        {formatCurrency(node.feb)}
+      </TableCell>
+      <TableCell align="right" sx={{ borderRight: 1, borderColor: 'divider', color: 'text.secondary' }}>
+        {formatCurrency(node.mar)}
+      </TableCell>
+      <TableCell align="right" sx={{ fontWeight: 600, bgcolor: 'action.hover', color: 'text.primary' }}>
+        {formatCurrency(total)}
+      </TableCell>
+    </TableRow>
+  );
+});
+
+TreeTableRow.displayName = 'TreeTableRow';
+
+// 2. The Main Screen Component
+export default function ReportAnalysisScreen() {
+  const [data, setData] = useState([]);
+  const [expandedIds, setExpandedIds] = useState(new Set());
+  const [loadingIds, setLoadingIds] = useState(new Set());
+  const [isInitializing, setIsInitializing] = useState(true);
+
+  useEffect(() => {
+    const loadRoot = async () => {
+      const rootData = await fetchInitialData();
+      setData(rootData);
+      setIsInitializing(false);
+    };
+    loadRoot();
+  }, []);
+
+  const appendChildrenToTree = useCallback((nodes, parentId, newChildren) => {
+    return nodes.map((node) => {
+      if (node.id === parentId) {
+        return { ...node, children: newChildren };
+      }
+      if (node.children) {
+        return { ...node, children: appendChildrenToTree(node.children, parentId, newChildren) };
+      }
+      return node;
+    });
+  }, []);
+
+  const handleToggle = useCallback(async (node) => {
+    const isExpanded = expandedIds.has(node.id);
+
+    if (isExpanded) {
+      setExpandedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(node.id);
+        return next;
+      });
+    } else {
+      if (!node.children && node.hasChildren) {
+        setLoadingIds((prev) => new Set(prev).add(node.id));
+        try {
+          const children = await fetchChildrenData(node);
+          setData((prevData) => appendChildrenToTree(prevData, node.id, children));
+        } catch (error) {
+          console.error("Failed to fetch children", error);
+        } finally {
+          setLoadingIds((prev) => {
+            const next = new Set(prev);
+            next.delete(node.id);
+            return next;
+          });
+        }
+      }
+      setExpandedIds((prev) => new Set(prev).add(node.id));
+    }
+  }, [expandedIds, appendChildrenToTree]);
+
+  const visibleRows = useMemo(() => {
+    const rows = [];
+    const traverse = (nodes) => {
+      for (const node of nodes) {
+        rows.push(node);
+        if (expandedIds.has(node.id) && node.children) {
+          traverse(node.children);
+        }
+      }
+    };
+    traverse(data);
+    return rows;
+  }, [data, expandedIds]);
+
+  const maxVisibleLevel = useMemo(() => {
+    if (visibleRows.length === 0) return 0;
+    return Math.max(...visibleRows.map(row => row.level));
+  }, [visibleRows]);
+
+  const visibleHierarchyLevels = HIERARCHY_LEVELS.slice(0, maxVisibleLevel + 1);
+
+  return (
+    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', p: 4 }}>
+      <Paper 
+        elevation={0} 
+        sx={{ 
+          maxWidth: '1400px', 
+          mx: 'auto', 
+          height: 'calc(100vh - 64px)', 
+          display: 'flex', 
+          flexDirection: 'column',
+          overflow: 'hidden',
+          borderRadius: 2,
+          boxShadow: 'baseShadow', 
+          border: 1,
+          borderColor: 'divider'
+        }}
+      >
+        {/* Top Header */}
+        <Box 
+          sx={{ 
+            bgcolor: 'primary.main', 
+            px: 3, 
+            py: 2, 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center' 
+          }}
+        >
+          <Box>
+            <Typography variant="h6" sx={{ color: 'primary.contrastText', fontWeight: 600 }}>
+              Enterprise Analytics Workspace
+            </Typography>
+            <Typography variant="caption" sx={{ color: 'primary.contrastText', opacity: 0.8 }}>
+              YTD Balance Sheet Drill-Down Matrix
+            </Typography>
+          </Box>
+          <Button 
+            variant="outlined" 
+            size="small" 
+            startIcon={<Download size={16} />}
+            sx={{ 
+              color: 'primary.contrastText', 
+              borderColor: 'rgba(255,255,255,0.3)', 
+              '&:hover': { borderColor: 'rgba(255,255,255,0.6)', bgcolor: 'rgba(255,255,255,0.1)' } 
+            }}
+          >
+            Export CSV
+          </Button>
+        </Box>
+
+        {/* Toolbar Area */}
+        <Box 
+          sx={{ 
+            bgcolor: 'background.glass', 
+            borderBottom: 1, 
+            borderColor: 'divider', 
+            px: 3, 
+            py: 1.5, 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: 2 
+          }}
+        >
+          <Typography variant="body2" fontWeight={600} color="text.secondary">Rows:</Typography>
+          <Chip label={visibleHierarchyLevels.join(' > ')} size="small" sx={{ borderRadius: 1, bgcolor: 'background.paper', border: 1, borderColor: 'divider' }} />
+          <Typography variant="body2" fontWeight={600} color="text.secondary" sx={{ ml: 2 }}>Values:</Typography>
+          <Chip label="INR Balance" size="small" sx={{ borderRadius: 1, bgcolor: 'background.paper', border: 1, borderColor: 'divider' }} />
+        </Box>
+
+        {/* Material-UI Data Grid */}
+        <TableContainer sx={{ flexGrow: 1, bgcolor: 'background.default' }}>
+          {isInitializing ? (
+            <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+              <CircularProgress size={40} color="primary" sx={{ mb: 2 }} />
+              <Typography variant="body1" color="text.secondary">Fetching Data Cube...</Typography>
+            </Box>
+          ) : (
+            <Table stickyHeader size="small" sx={{ minWidth: 1000 }}>
+              <TableHead>
+                <TableRow>
+                  {visibleHierarchyLevels.map((level) => (
+                    <TableCell 
+                      key={level} 
+                      sx={{ 
+                        bgcolor: 'background.paper', 
+                        color: 'text.primary',
+                        fontWeight: 700, 
+                        borderRight: 1,
+                        borderColor: 'divider',
+                        borderBottom: 2,
+                        width: 200
+                      }}
+                    >
+                      {level}
+                    </TableCell>
+                  ))}
+                  <TableCell align="right" sx={{ bgcolor: 'background.paper', color: 'text.primary', fontWeight: 700, borderRight: 1, borderColor: 'divider', borderBottom: 2 }}>January</TableCell>
+                  <TableCell align="right" sx={{ bgcolor: 'background.paper', color: 'text.primary', fontWeight: 700, borderRight: 1, borderColor: 'divider', borderBottom: 2 }}>February</TableCell>
+                  <TableCell align="right" sx={{ bgcolor: 'background.paper', color: 'text.primary', fontWeight: 700, borderRight: 1, borderColor: 'divider', borderBottom: 2 }}>March</TableCell>
+                  <TableCell align="right" sx={{ bgcolor: 'action.hover', color: 'text.primary', fontWeight: 800, borderBottom: 2, borderColor: 'divider' }}>YTD Total</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {visibleRows.map((row) => (
+                  <TreeTableRow
+                    key={row.id}
+                    node={row}
+                    isExpanded={expandedIds.has(row.id)}
+                    isLoading={loadingIds.has(row.id)}
+                    onToggle={handleToggle}
+                    maxVisibleLevel={maxVisibleLevel}
+                  />
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </TableContainer>
+        
+        {/* Footer Status Bar */}
+        <Box 
+          sx={{ 
+            bgcolor: 'background.glass', 
+            borderTop: 1, 
+            borderColor: 'divider', 
+            px: 3, 
+            py: 1, 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center' 
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'success.main' }} />
+            <Typography variant="caption" color="text.secondary">Connected to Engine</Typography>
+            <Box sx={{ width: 1, height: 16, bgcolor: 'divider', mx: 1 }} />
+            <Typography variant="caption" color="text.secondary">Showing {visibleRows.length.toLocaleString()} rows</Typography>
+          </Box>
+        </Box>
+      </Paper>
+    </Box>
+  );
+}
 
