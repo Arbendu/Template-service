@@ -1,1 +1,318 @@
 
+import { useState, useMemo, useCallback, useEffect, memo } from 'react';
+import { 
+  Box, Paper, Table, TableBody, TableCell, TableContainer, 
+  TableHead, TableRow, Typography, IconButton, CircularProgress, 
+  Button, Chip 
+} from '@mui/material';
+import { Plus, Minus, Download } from 'lucide-react';
+
+// --- MOCK API & DATA GENERATION ---
+const generateId = () => Math.random().toString(36).substr(2, 9);
+
+const formatCurrency = (value) => {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+};
+
+const HIERARCHY_LEVELS = ['Circle', 'Branch', 'Head', 'CGL'];
+
+const fetchInitialData = async () => {
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      const data = Array.from({ length: 50 }).map((_, i) => ({
+        id: `circle-${i}-${generateId()}`,
+        name: `Circle ${i + 1}`,
+        level: 0,
+        hasChildren: true,
+        jan: Math.random() * 1000000 + 50000,
+        feb: Math.random() * 1000000 + 50000,
+        mar: Math.random() * 1000000 + 50000,
+      }));
+      resolve(data);
+    }, 600);
+  });
+};
+
+const fetchChildrenData = async (parentNode) => {
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      const childLevel = parentNode.level + 1;
+      const type = HIERARCHY_LEVELS[childLevel];
+      
+      let childCount = 0;
+      if (childLevel === 1) childCount = Math.floor(Math.random() * 5) + 2; 
+      if (childLevel === 2) childCount = Math.floor(Math.random() * 8) + 2;    
+      if (childLevel === 3) childCount = Math.floor(Math.random() * 10) + 3;    
+
+      const children = Array.from({ length: childCount }).map((_, i) => ({
+        id: `${type.toLowerCase()}-${parentNode.id}-${i}-${generateId()}`,
+        name: `${type} ${i + 1}`,
+        level: childLevel,
+        hasChildren: childLevel < HIERARCHY_LEVELS.length - 1,
+        jan: (parentNode.jan / childCount) * (Math.random() * 0.2 + 0.9),
+        feb: (parentNode.feb / childCount) * (Math.random() * 0.2 + 0.9),
+        mar: (parentNode.mar / childCount) * (Math.random() * 0.2 + 0.9),
+      }));
+      resolve(children);
+    }, 400); 
+  });
+};
+
+// --- COMPONENTS ---
+
+// 1. The MUI Row Component
+const TreeTableRow = memo(({ node, isExpanded, isLoading, onToggle, maxVisibleLevel }) => {
+  const total = node.jan + node.feb + node.mar;
+
+  return (
+    <TableRow hover>
+      {/* DYNAMIC COLUMNS */}
+      {Array.from({ length: maxVisibleLevel + 1 }).map((_, colIndex) => {
+        if (colIndex === node.level) {
+          return (
+            <TableCell 
+              key={colIndex} 
+              sx={{ 
+                borderRight: '1px solid #e0e0e0', 
+                minWidth: 220,
+                backgroundColor: '#ffffff'
+              }}
+            >
+              <Box sx={{ display: 'flex', alignItems: 'center', pl: node.level * 3 }}>
+                {node.hasChildren ? (
+                  <IconButton
+                    size="small"
+                    onClick={() => onToggle(node)}
+                    disabled={isLoading}
+                    sx={{ 
+                      mr: 1.5, 
+                      border: '1px solid #bdbdbd', 
+                      borderRadius: 1, 
+                      p: 0.3,
+                      backgroundColor: '#f5f5f5',
+                      '&:hover': { backgroundColor: '#e3f2fd', borderColor: '#2196f3' }
+                    }}
+                  >
+                    {isLoading ? <CircularProgress size={14} /> : isExpanded ? <Minus size={14} /> : <Plus size={14} />}
+                  </IconButton>
+                ) : (
+                  <Box sx={{ width: 26, mr: 1.5 }} /> // Spacer for leaf nodes
+                )}
+                <Typography variant="body2" sx={{ fontWeight: node.level === 0 ? 600 : 400, color: '#1f2937' }}>
+                  {node.name}
+                </Typography>
+              </Box>
+            </TableCell>
+          );
+        }
+        // Empty placeholder cells for the "staircase" effect
+        return (
+          <TableCell 
+            key={colIndex} 
+            sx={{ borderRight: '1px solid #e0e0e0', minWidth: 150, backgroundColor: '#f9fafb' }} 
+          />
+        );
+      })}
+
+      {/* DATA COLUMNS */}
+      <TableCell align="right" sx={{ borderRight: '1px solid #e0e0e0', color: '#4b5563' }}>{formatCurrency(node.jan)}</TableCell>
+      <TableCell align="right" sx={{ borderRight: '1px solid #e0e0e0', color: '#4b5563' }}>{formatCurrency(node.feb)}</TableCell>
+      <TableCell align="right" sx={{ borderRight: '1px solid #e0e0e0', color: '#4b5563' }}>{formatCurrency(node.mar)}</TableCell>
+      <TableCell align="right" sx={{ fontWeight: 600, backgroundColor: '#f3f4f6', color: '#111827' }}>
+        {formatCurrency(total)}
+      </TableCell>
+    </TableRow>
+  );
+});
+
+TreeTableRow.displayName = 'TreeTableRow';
+
+// 2. The Main Screen Component
+export default function ReportAnalysisScreen() {
+  const [data, setData] = useState([]);
+  const [expandedIds, setExpandedIds] = useState(new Set());
+  const [loadingIds, setLoadingIds] = useState(new Set());
+  const [isInitializing, setIsInitializing] = useState(true);
+
+  useEffect(() => {
+    const loadRoot = async () => {
+      const rootData = await fetchInitialData();
+      setData(rootData);
+      setIsInitializing(false);
+    };
+    loadRoot();
+  }, []);
+
+  const appendChildrenToTree = useCallback((nodes, parentId, newChildren) => {
+    return nodes.map((node) => {
+      if (node.id === parentId) {
+        return { ...node, children: newChildren };
+      }
+      if (node.children) {
+        return { ...node, children: appendChildrenToTree(node.children, parentId, newChildren) };
+      }
+      return node;
+    });
+  }, []);
+
+  const handleToggle = useCallback(async (node) => {
+    const isExpanded = expandedIds.has(node.id);
+
+    if (isExpanded) {
+      setExpandedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(node.id);
+        return next;
+      });
+    } else {
+      if (!node.children && node.hasChildren) {
+        setLoadingIds((prev) => new Set(prev).add(node.id));
+        try {
+          const children = await fetchChildrenData(node);
+          setData((prevData) => appendChildrenToTree(prevData, node.id, children));
+        } catch (error) {
+          console.error("Failed to fetch children", error);
+        } finally {
+          setLoadingIds((prev) => {
+            const next = new Set(prev);
+            next.delete(node.id);
+            return next;
+          });
+        }
+      }
+      setExpandedIds((prev) => new Set(prev).add(node.id));
+    }
+  }, [expandedIds, appendChildrenToTree]);
+
+  const visibleRows = useMemo(() => {
+    const rows = [];
+    const traverse = (nodes) => {
+      for (const node of nodes) {
+        rows.push(node);
+        if (expandedIds.has(node.id) && node.children) {
+          traverse(node.children);
+        }
+      }
+    };
+    traverse(data);
+    return rows;
+  }, [data, expandedIds]);
+
+  const maxVisibleLevel = useMemo(() => {
+    if (visibleRows.length === 0) return 0;
+    return Math.max(...visibleRows.map(row => row.level));
+  }, [visibleRows]);
+
+  const visibleHierarchyLevels = HIERARCHY_LEVELS.slice(0, maxVisibleLevel + 1);
+
+  return (
+    // Outer Background Box
+    <Box sx={{ minHeight: '100vh', backgroundColor: '#e2e8f0', p: 4 }}>
+      
+      {/* Central Paper Component */}
+      <Paper 
+        elevation={4} 
+        sx={{ 
+          maxWidth: '1400px', 
+          mx: 'auto', 
+          height: 'calc(100vh - 64px)', 
+          display: 'flex', 
+          flexDirection: 'column',
+          overflow: 'hidden',
+          borderRadius: 2
+        }}
+      >
+        {/* Top Header */}
+        <Box sx={{ backgroundColor: '#1e293b', px: 3, py: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Box>
+            <Typography variant="h6" sx={{ color: 'white', fontWeight: 600, letterSpacing: '0.5px' }}>
+              Enterprise Analytics Workspace
+            </Typography>
+            <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+              YTD Balance Sheet Drill-Down Matrix
+            </Typography>
+          </Box>
+          <Button 
+            variant="outlined" 
+            size="small" 
+            startIcon={<Download size={16} />}
+            sx={{ color: '#e2e8f0', borderColor: '#475569', '&:hover': { borderColor: '#cbd5e1', backgroundColor: '#334155' } }}
+          >
+            Export CSV
+          </Button>
+        </Box>
+
+        {/* Toolbar Area */}
+        <Box sx={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0', px: 3, py: 1.5, display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Typography variant="body2" fontWeight={600} color="text.secondary">Rows:</Typography>
+          <Chip label={visibleHierarchyLevels.join(' > ')} size="small" sx={{ borderRadius: 1, backgroundColor: 'white', border: '1px solid #cbd5e1' }} />
+          <Typography variant="body2" fontWeight={600} color="text.secondary" sx={{ ml: 2 }}>Values:</Typography>
+          <Chip label="INR Balance" size="small" sx={{ borderRadius: 1, backgroundColor: 'white', border: '1px solid #cbd5e1' }} />
+        </Box>
+
+        {/* Material-UI Data Grid */}
+        <TableContainer sx={{ flexGrow: 1, backgroundColor: '#f1f5f9' }}>
+          {isInitializing ? (
+            <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+              <CircularProgress size={40} sx={{ mb: 2 }} />
+              <Typography variant="body1" color="text.secondary">Fetching Data Cube...</Typography>
+            </Box>
+          ) : (
+            <Table stickyHeader size="small" sx={{ minWidth: 1000 }}>
+              <TableHead>
+                <TableRow>
+                  {/* DYNAMIC HEADER COLUMNS */}
+                  {visibleHierarchyLevels.map((level) => (
+                    <TableCell 
+                      key={level} 
+                      sx={{ 
+                        backgroundColor: '#e2e8f0', 
+                        fontWeight: 700, 
+                        borderRight: '1px solid #cbd5e1',
+                        borderBottom: '2px solid #94a3b8',
+                        width: 200
+                      }}
+                    >
+                      {level}
+                    </TableCell>
+                  ))}
+                  <TableCell align="right" sx={{ backgroundColor: '#e2e8f0', fontWeight: 700, borderRight: '1px solid #cbd5e1', borderBottom: '2px solid #94a3b8' }}>January</TableCell>
+                  <TableCell align="right" sx={{ backgroundColor: '#e2e8f0', fontWeight: 700, borderRight: '1px solid #cbd5e1', borderBottom: '2px solid #94a3b8' }}>February</TableCell>
+                  <TableCell align="right" sx={{ backgroundColor: '#e2e8f0', fontWeight: 700, borderRight: '1px solid #cbd5e1', borderBottom: '2px solid #94a3b8' }}>March</TableCell>
+                  <TableCell align="right" sx={{ backgroundColor: '#cbd5e1', fontWeight: 800, borderBottom: '2px solid #94a3b8' }}>YTD Total</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {visibleRows.map((row) => (
+                  <TreeTableRow
+                    key={row.id}
+                    node={row}
+                    isExpanded={expandedIds.has(row.id)}
+                    isLoading={loadingIds.has(row.id)}
+                    onToggle={handleToggle}
+                    maxVisibleLevel={maxVisibleLevel}
+                  />
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </TableContainer>
+        
+        {/* Footer Status Bar */}
+        <Box sx={{ backgroundColor: '#f8fafc', borderTop: '1px solid #e2e8f0', px: 3, py: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#10b981' }} />
+            <Typography variant="caption" color="text.secondary">Connected to Engine</Typography>
+            <Box sx={{ width: 1, height: 16, backgroundColor: '#cbd5e1', mx: 1 }} />
+            <Typography variant="caption" color="text.secondary">Showing {visibleRows.length.toLocaleString()} rows</Typography>
+          </Box>
+        </Box>
+      </Paper>
+    </Box>
+  );
+}
