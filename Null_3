@@ -1,1 +1,156 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Container, Paper, Table, TableBody, TableCell, TableContainer, 
+  TableHead, TableRow, Typography, Button, Box, Breadcrumbs 
+} from '@mui/material';
+
+// The exact path from Bhargav's message for the Admin role
+const ADMIN_PATH = ['comp_code', 'cgl', 'circle', 'branch', 'product'];
+
+export default function AdminDrillDown() {
+  const [currentStep, setCurrentStep] = useState(0);
+  const [activeFilters, setActiveFilters] = useState([]);
+  const [tableData, setTableData] = useState([]);
+
+  // This simulates your Spring Boot + Druid backend returning data
+  const fetchMockData = (stepIndex) => {
+    const dimensionName = ADMIN_PATH[stepIndex];
+    
+    // Dummy data generation based on the current dimension level
+    if (dimensionName === 'comp_code') {
+      return [
+        { id: 'COMP-01', description: 'Main Server Terminal', inr_balance: 1500000 },
+        { id: 'COMP-99', description: 'Backup Terminal', inr_balance: 450000 }
+      ];
+    } else if (dimensionName === 'cgl') {
+      return [
+        { id: '1001', description: 'Cash in Vault', inr_balance: 800000 },
+        { id: '2005', description: 'Service Fees', inr_balance: 200000 }
+      ];
+    } else if (dimensionName === 'circle') {
+      return [
+        { id: 'CIR-N', description: 'North Circle', inr_balance: 600000 },
+        { id: 'CIR-S', description: 'South Circle', inr_balance: 200000 }
+      ];
+    } else if (dimensionName === 'branch') {
+      return [
+        { id: 'BR-101', description: 'Delhi Main Branch', inr_balance: 400000 },
+        { id: 'BR-102', description: 'Gurgaon Branch', inr_balance: 200000 }
+      ];
+    } else if (dimensionName === 'product') {
+      return [
+        { id: 'PROD-SAV', description: 'Savings Account', inr_balance: 300000 },
+        { id: 'PROD-LOAN', description: 'Home Loan', inr_balance: 100000 }
+      ];
+    }
+    return [];
+  };
+
+  // Load initial data when component mounts or step changes
+  useEffect(() => {
+    const data = fetchMockData(currentStep);
+    setTableData(data);
+  }, [currentStep]);
+
+  // The logic that fires when a user clicks a row
+  const handleRowClick = (row) => {
+    // 1. Check if we are at the end of the path
+    if (currentStep >= ADMIN_PATH.length - 1) {
+      alert("You have reached the lowest level (Product)!");
+      return;
+    }
+
+    // 2. Save what they clicked as a filter
+    const currentDimension = ADMIN_PATH[currentStep];
+    const newFilter = { field: currentDimension, operator: 'EQUALS', value: row.id };
+    setActiveFilters([...activeFilters, newFilter]);
+
+    // 3. Move to the next dimension level
+    setCurrentStep(currentStep + 1);
+  };
+
+  // Reset the dashboard back to the start
+  const handleReset = () => {
+    setCurrentStep(0);
+    setActiveFilters([]);
+  };
+
+  const currentDimensionLabel = ADMIN_PATH[currentStep].toUpperCase();
+
+  return (
+    <Container maxWidth="md" sx={{ mt: 5 }}>
+      <Paper elevation={3} sx={{ p: 4 }}>
+        
+        {/* Header Section */}
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+          <Typography variant="h5" color="primary">
+            Admin Drill-Down Report
+          </Typography>
+          <Button variant="outlined" color="error" onClick={handleReset}>
+            Reset Report
+          </Button>
+        </Box>
+
+        {/* Display the JSON exactly as it would be sent to Spring Boot */}
+        <Box mb={4} p={2} sx={{ backgroundColor: '#f5f5f5', borderRadius: 1 }}>
+          <Typography variant="subtitle2" color="textSecondary" gutterBottom>
+            Real-Time JSON Payload (Sending to Spring Boot):
+          </Typography>
+          <pre style={{ margin: 0, fontSize: '13px' }}>
+            {JSON.stringify({
+              dimensions: [ADMIN_PATH[currentStep]],
+              metrics: ["inr_balance"],
+              filters: activeFilters
+            }, null, 2)}
+          </pre>
+        </Box>
+
+        {/* Dynamic Breadcrumbs to show where the user is */}
+        <Breadcrumbs sx={{ mb: 2 }}>
+          {ADMIN_PATH.slice(0, currentStep + 1).map((step, index) => (
+            <Typography 
+              key={step} 
+              color={index === currentStep ? "textPrimary" : "textSecondary"}
+              fontWeight={index === currentStep ? "bold" : "normal"}
+            >
+              {step.toUpperCase()}
+            </Typography>
+          ))}
+        </Breadcrumbs>
+
+        {/* The Dynamic Table */}
+        <TableContainer>
+          <Table hover>
+            <TableHead>
+              <TableRow sx={{ backgroundColor: '#e0e0e0' }}>
+                <TableCell><strong>{currentDimensionLabel} ID</strong></TableCell>
+                <TableCell><strong>DESCRIPTION</strong></TableCell>
+                <TableCell align="right"><strong>INR BALANCE (₹)</strong></TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {tableData.map((row) => (
+                <TableRow 
+                  key={row.id} 
+                  hover 
+                  onClick={() => handleRowClick(row)}
+                  sx={{ cursor: 'pointer', '&:hover': { backgroundColor: '#f0f8ff' } }}
+                >
+                  <TableCell>{row.id}</TableCell>
+                  <TableCell>{row.description}</TableCell>
+                  <TableCell align="right">₹ {row.inr_balance.toLocaleString()}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+        
+        <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 2 }}>
+          * Click on any row to drill down to the next level.
+        </Typography>
+
+      </Paper>
+    </Container>
+  );
+}
 
