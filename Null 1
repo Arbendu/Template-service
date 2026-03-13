@@ -1,10 +1,1 @@
-SELECT DISTINCT 
-    gb.CGL AS cgl_number, 
-    cm.DESCRIPTION AS cgl_description
-FROM 
-    GL_BALANCE gb
-JOIN 
-    CGL_MASTER cm ON gb.CGL = cm.CGL_NUMBER
-WHERE 
-    gb.BRANCH_CODE = 'BR001'; -- Replace with your actual branch code
 
