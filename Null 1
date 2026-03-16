@@ -4,7 +4,7 @@ import {
   TableHead, TableRow, Typography, IconButton, CircularProgress, 
   Button, MenuItem, Select, FormControl, InputLabel
 } from '@mui/material';
-import { Plus, Minus, Download, FileText } from 'lucide-react';
+// import { Plus, Minus, Download, FileText } from 'lucide-react';
 
 // --- UTILS & CONSTANTS ---
 const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -47,7 +47,7 @@ const fetchInitialData = async (hierarchy) => {
 
   return new Promise((resolve) => {
     setTimeout(() => {
-      const data = Array.from({ length: 5 }).map((_, i) => ({
+      const data = Array.from({ length: 50 }).map((_, i) => ({
         id: `root-${i}-${generateId()}`,
         name: `${rootDimension.split('_')[0]} ${i + 1}`,
         level: 0,
@@ -125,11 +125,11 @@ const TreeTableRow = memo(({ node, isExpanded, isLoading, onToggle, maxVisibleLe
                     onClick={() => onToggle(node)}
                     disabled={isLoading}
                     sx={{ 
-                      mr: 1.5, border: 1, borderColor: 'divider', borderRadius: 1, p: 0.3,
+                      mr: 1.5, border: 1, borderColor: 'divider', borderRadius: "50%", height: 22, width: 22, p: 0.3,
                       bgcolor: 'action.hover', '&:hover': { bgcolor: 'action.selected' }
                     }}
                   >
-                    {isLoading ? <CircularProgress size={14} color="inherit" /> : isExpanded ? <Minus size={14} /> : <Plus size={14} />}
+                    {isLoading ? <CircularProgress size={14} color="inherit" /> : isExpanded ? "-" : "+"}
                   </IconButton>
                 ) : (
                   <Box sx={{ width: 26, mr: 1.5 }} /> 
@@ -240,11 +240,11 @@ export default function ReportAnalysisScreen() {
   const visibleHierarchyLevels = activeReportConfig.hierarchy.slice(0, maxVisibleLevel + 1);
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', p: 4 }}>
+    <Box>
       <Paper 
         elevation={0} 
         sx={{ 
-          maxWidth: '1400px', mx: 'auto', height: 'calc(100vh - 64px)', 
+          mx: 'auto', height: 'calc(100vh - 64px)', 
           display: 'flex', flexDirection: 'column', overflow: 'hidden',
           borderRadius: 2, boxShadow: 'baseShadow', border: 1, borderColor: 'divider'
         }}
@@ -252,10 +252,10 @@ export default function ReportAnalysisScreen() {
         {/* Top Header */}
         <Box sx={{ bgcolor: 'primary.main', px: 3, py: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Box display="flex" alignItems="center" gap={2}>
-            <FileText color="white" size={24} />
+            {/* <FileText color="white" size={24} /> */}
             <Box>
               <Typography variant="h6" sx={{ color: 'primary.contrastText', fontWeight: 600 }}>
-                Enterprise Analytics Workspace
+                Detailed Analytics Workspace
               </Typography>
               <Typography variant="caption" sx={{ color: 'primary.contrastText', opacity: 0.8 }}>
                 Dynamic Drill-Down Matrix
@@ -263,7 +263,8 @@ export default function ReportAnalysisScreen() {
             </Box>
           </Box>
           <Button 
-            variant="outlined" size="small" startIcon={<Download size={16} />}
+            variant="outlined" size="small" 
+            // startIcon={<Download size={16} />}
             sx={{ color: 'primary.contrastText', borderColor: 'rgba(255,255,255,0.3)', '&:hover': { borderColor: 'rgba(255,255,255,0.6)', bgcolor: 'rgba(255,255,255,0.1)' } }}
           >
             Export CSV
@@ -341,8 +342,8 @@ export default function ReportAnalysisScreen() {
         {/* Footer Status Bar */}
         <Box sx={{ bgcolor: 'background.glass', borderTop: 1, borderColor: 'divider', px: 3, py: 1.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'success.main' }} />
-            <Typography variant="caption" color="text.secondary">Connected to Engine</Typography>
+            <Box sx={{ width: 30, height: 10, borderRadius: '50%', bgcolor: 'success.main' }} />
+            <Typography variant="caption" color="text.secondary">Connected</Typography>
             <Box sx={{ width: 1, height: 16, bgcolor: 'divider', mx: 1 }} />
             <Typography variant="caption" color="text.secondary">Showing {visibleRows.length.toLocaleString()} rows</Typography>
           </Box>
@@ -351,4 +352,3 @@ export default function ReportAnalysisScreen() {
     </Box>
   );
 }
-
