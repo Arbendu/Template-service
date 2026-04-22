@@ -1252,3 +1252,476 @@ export const FormulaBuilder = ({
     </Box>
   );
  };
+
+
+
+
+
+
+
+
+
+
+
+import React, { useState, useEffect } from 'react';
+import {
+  Box, Paper, Typography, Button, IconButton, TextField, Select,
+  MenuItem, Menu, Divider, Alert, Tooltip, Chip
+} from '@mui/material';
+import { alpha } from '@mui/material/styles';
+
+// MUI Icons
+import CalculateIcon from '@mui/icons-material/Calculate';
+import AddIcon from '@mui/icons-material/Add';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import AccountTreeIcon from '@mui/icons-material/AccountTree';
+import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
+import NumbersIcon from '@mui/icons-material/Numbers';
+import DataObjectIcon from '@mui/icons-material/DataObject';
+import FunctionsIcon from '@mui/icons-material/Functions';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import ContentPasteIcon from '@mui/icons-material/ContentPaste';
+
+// ============================================================================
+// CONFIGURATION 
+// ============================================================================
+const OPERATORS = [
+  { id: '+', label: '+' }, { id: '-', label: '-' },
+  { id: '*', label: '×' }, { id: '/', label: '÷' },
+  { id: '>', label: '>' }, { id: '<', label: '<' },
+  { id: '>=', label: '≥' }, { id: '<=', label: '≤' },
+  { id: '==', label: '=' }, { id: '!=', label: '≠' }
+];
+
+const FUNCTIONS = [
+  { id: 'math:abs', label: 'Absolute Value' },
+  { id: 'math:round', label: 'Round Number' },
+  { id: 'math:min', label: 'Minimum' },
+  { id: 'math:max', label: 'Maximum' }
+];
+
+// ============================================================================
+// AST NODE FACTORY & PARSER LOGIC
+// ============================================================================
+const generateId = () => Math.random().toString(36).substring(2, 9);
+
+const createNode = (type, clipboardNode = null) => {
+  if (clipboardNode && type === 'PASTE') {
+    const clone = JSON.parse(JSON.stringify(clipboardNode));
+    const regenIds = (node) => {
+      if (!node) return;
+      node.id = generateId();
+      if (node.left) regenIds(node.left);
+      if (node.right) regenIds(node.right);
+      if (node.arg) regenIds(node.arg);
+      if (node.condition) regenIds(node.condition);
+      if (node.trueBranch) regenIds(node.trueBranch);
+      if (node.falseBranch) regenIds(node.falseBranch);
+    };
+    regenIds(clone);
+    return clone;
+  }
+
+  const base = { id: generateId(), type };
+  switch (type) {
+    case 'IF_ELSE': return { ...base, condition: createNode('EMPTY'), trueBranch: createNode('EMPTY'), falseBranch: createNode('EMPTY') };
+    case 'BINARY_OP': return { ...base, left: createNode('EMPTY'), operator: '+', right: createNode('EMPTY') };
+    case 'FUNCTION': return { ...base, funcName: 'math:abs', arg: createNode('EMPTY') };
+    case 'VAR': return { ...base, value: 'SELECT_VAR' };
+    case 'NUMBER': return { ...base, value: 0 };
+    case 'EMPTY': default: return base;
+  }
+};
+
+const parseJexlToAST = (input) => {
+  const tokens = [];
+  let i = 0;
+  while (i < input.length) {
+    let char = input[i];
+    if (/\s/.test(char)) { i++; continue; }
+    if (char === '(' || char === ')' || char === '?' || char === ':') {
+      tokens.push({ type: 'PUNCT', value: char }); i++; continue;
+    }
+    const nextTwo = input.substring(i, i + 2);
+    if (['<=', '>=', '==', '!='].includes(nextTwo)) {
+      tokens.push({ type: 'OP', value: nextTwo }); i += 2; continue;
+    }
+    if ("+-*/><".includes(char)) {
+      tokens.push({ type: 'OP', value: char }); i++; continue;
+    }
+    if (/[0-9.]/.test(char)) {
+      let num = '';
+      while (i < input.length && /[0-9.]/.test(input[i])) num += input[i++];
+      tokens.push({ type: 'NUM', value: parseFloat(num) }); continue;
+    }
+    if (/[a-zA-Z_$]/.test(char)) {
+      let id = '';
+      while (i < input.length && /[a-zA-Z0-9_{}:.$]/.test(input[i])) id += input[i++];
+      tokens.push({ type: 'ID', value: id }); continue;
+    }
+    throw new Error(`Unexpected character at index ${i}: ${char}`);
+  }
+
+  let current = 0;
+  const peek = () => tokens[current];
+  const next = () => tokens[current++];
+  const consume = (expected) => {
+    if (current < tokens.length && tokens[current].value === expected) { current++; return true; }
+    return false;
+  };
+
+  const PRECEDENCE = { '==': 1, '!=': 1, '<': 2, '>': 2, '<=': 2, '>=': 2, '+': 3, '-': 3, '*': 4, '/': 4 };
+
+  const parsePrimary = () => {
+    const t = next();
+    if (!t) throw new Error("Unexpected end of expression");
+    if (t.type === 'NUM') return { id: generateId(), type: 'NUMBER', value: t.value };
+    if (t.type === 'ID') {
+      if (current < tokens.length && peek().value === '(') {
+        consume('('); const arg = parseExpression();
+        if (!consume(')')) throw new Error(`Expected ')' after function ${t.value}`);
+        return { id: generateId(), type: 'FUNCTION', funcName: t.value, arg };
+      }
+      return { id: generateId(), type: 'VAR', value: t.value };
+    }
+    if (t.type === 'PUNCT' && t.value === '(') {
+      const node = parseExpression();
+      if (!consume(')')) throw new Error("Expected closing parenthesis ')'");
+      return node;
+    }
+    if (t.type === 'OP' && t.value === '-') {
+      const rightToken = peek();
+      if (rightToken && rightToken.type === 'NUM') { next(); return { id: generateId(), type: 'NUMBER', value: -rightToken.value }; }
+      const right = parsePrimary();
+      return { id: generateId(), type: 'BINARY_OP', left: { id: generateId(), type: 'NUMBER', value: -1 }, operator: '*', right };
+    }
+    throw new Error(`Unexpected token: ${t.value}`);
+  };
+
+  const parseBinary = (minPrec) => {
+    let left = parsePrimary();
+    while (current < tokens.length && peek().type === 'OP' && PRECEDENCE[peek().value] >= minPrec) {
+      const op = next().value; const prec = PRECEDENCE[op]; const right = parseBinary(prec + 1);
+      left = { id: generateId(), type: 'BINARY_OP', left, operator: op, right };
+    }
+    return left;
+  };
+
+  const parseExpression = () => {
+    let node = parseBinary(0);
+    if (consume('?')) {
+      const trueBranch = parseExpression();
+      if (!consume(':')) throw new Error("Expected ':' in ternary condition");
+      const falseBranch = parseExpression();
+      return { id: generateId(), type: 'IF_ELSE', condition: node, trueBranch, falseBranch };
+    }
+    return node;
+  };
+
+  const ast = parseExpression();
+  if (current < tokens.length) throw new Error("Unexpected tokens at end of expression.");
+  return ast;
+};
+
+const compileJexl = (node) => {
+  if (!node) return "";
+  switch (node.type) {
+    case 'EMPTY': return "___";
+    case 'VAR': 
+      return node.value === 'SELECT_VAR' ? "___" : node.value;
+    case 'NUMBER': return node.value;
+    case 'BINARY_OP': return `(${compileJexl(node.left)} ${node.operator} ${compileJexl(node.right)})`;
+    case 'FUNCTION': return `${node.funcName}(${compileJexl(node.arg)})`;
+    case 'IF_ELSE': return `(${compileJexl(node.condition)} ? ${compileJexl(node.trueBranch)} : ${compileJexl(node.falseBranch)})`;
+    default: return "";
+  }
+};
+
+// ============================================================================
+// RECURSIVE NODE UI COMPONENT
+// ============================================================================
+const ExpressionNode = ({ node, onChange, onRemove, clipboard, setClipboard, availableVariables }) => {
+  const [anchorEl, setAnchorEl] = useState(null);
+
+  if (!node) return null;
+
+  const dynamicVarList = availableVariables ? Object.keys(availableVariables) : [];
+
+  // --- RENDERING EMPTY SLOT ---
+  if (node.type === 'EMPTY') {
+    return (
+      <Box display="inline-block" position="relative" m={0.5}>
+        <Button
+          variant="outlined"
+          size="small"
+          onClick={(e) => setAnchorEl(e.currentTarget)}
+          startIcon={<AddIcon />}
+          sx={{ borderStyle: 'dashed', bgcolor: 'background.default', color: 'text.secondary', borderColor: 'divider', '&:hover': { bgcolor: 'background.paper' } }}
+        >
+          Add Block
+        </Button>
+        <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={() => setAnchorEl(null)}>
+          <MenuItem onClick={() => { onChange(createNode('VAR')); setAnchorEl(null); }}>
+            <DataObjectIcon sx={{ fontSize: 18, color: 'info.main', mr: 1 }} /> Variable
+          </MenuItem>
+          <MenuItem onClick={() => { onChange(createNode('NUMBER')); setAnchorEl(null); }}>
+            <NumbersIcon sx={{ fontSize: 18, color: 'warning.main', mr: 1 }} /> Number
+          </MenuItem>
+          <MenuItem onClick={() => { onChange(createNode('BINARY_OP')); setAnchorEl(null); }}>
+            <CompareArrowsIcon sx={{ fontSize: 18, color: 'success.main', mr: 1 }} /> Math / Compare
+          </MenuItem>
+          <MenuItem onClick={() => { onChange(createNode('FUNCTION')); setAnchorEl(null); }}>
+            <FunctionsIcon sx={{ fontSize: 18, color: 'secondary.main', mr: 1 }} /> Math Function
+          </MenuItem>
+          <Divider />
+          <MenuItem onClick={() => { onChange(createNode('IF_ELSE')); setAnchorEl(null); }}>
+            <AccountTreeIcon sx={{ fontSize: 18, color: 'primary.main', mr: 1 }} /> If / Then / Else
+          </MenuItem>
+          {clipboard && (
+            <Box>
+              <Divider />
+              <MenuItem onClick={() => { onChange(createNode('PASTE', clipboard)); setAnchorEl(null); }}>
+                <ContentPasteIcon sx={{ fontSize: 18, color: 'primary.main', mr: 1 }} /> Paste Block
+              </MenuItem>
+            </Box>
+          )}
+        </Menu>
+      </Box>
+    );
+  }
+
+  // Common Wrapper
+  const BlockWrapper = ({ children, borderColor, title, icon: Icon }) => (
+    <Paper variant="outlined" sx={{ p: 1.5, m: 0.5, borderColor: borderColor, borderWidth: 2, position: 'relative', bgcolor: 'background.paper' }}>
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+        <Typography variant="caption" fontWeight="bold" sx={{ color: borderColor, display: 'flex', alignItems: 'center', gap: 0.5, textTransform: 'uppercase' }}>
+          <Icon sx={{ fontSize: 16 }} /> {title}
+        </Typography>
+        <Box>
+          <Tooltip title="Copy Block">
+            <IconButton size="small" sx={{ color: 'text.secondary' }} onClick={() => setClipboard(node)}><ContentCopyIcon fontSize="small" /></IconButton>
+          </Tooltip>
+          <Tooltip title="Delete Block">
+            <IconButton size="small" onClick={onRemove} color="error"><DeleteOutlineIcon fontSize="small" /></IconButton>
+          </Tooltip>
+        </Box>
+      </Box>
+      {children}
+    </Paper>
+  );
+
+  // --- LEAF NODES ---
+  if (node.type === 'VAR') {
+    const isKnownVar = dynamicVarList.includes(node.value);
+    return (
+      <Box display="inline-flex" alignItems="center" gap={0.5} m={0.5}>
+        <Select
+          size="small"
+          value={isKnownVar ? node.value : (node.value || 'SELECT_VAR')}
+          onChange={(e) => onChange({ ...node, value: e.target.value })}
+          sx={{ bgcolor: (theme) => alpha(theme.palette.info.main, 0.1), color: 'info.main', fontWeight: 'bold', minWidth: 140 }}
+        >
+          <MenuItem value="SELECT_VAR" disabled>
+            <em>Select Variable</em>
+          </MenuItem>
+          {dynamicVarList.map(varName => (
+            <MenuItem key={varName} value={varName}>{varName}</MenuItem>
+          ))}
+          {!isKnownVar && node.value !== 'SELECT_VAR' && node.value !== '' && (
+            <MenuItem value={node.value}>{node.value} (Custom)</MenuItem>
+          )}
+        </Select>
+        <IconButton size="small" onClick={onRemove} color="error"><DeleteOutlineIcon fontSize="small" /></IconButton>
+      </Box>
+    );
+  }
+
+  if (node.type === 'NUMBER') {
+    return (
+      <Box display="inline-flex" alignItems="center" gap={0.5} m={0.5}>
+        <TextField
+          type="number"
+          size="small"
+          value={node.value}
+          onChange={(e) => onChange({ ...node, value: e.target.value })}
+          sx={{ bgcolor: (theme) => alpha(theme.palette.warning.main, 0.1), width: 100, input: { fontWeight: 'bold', color: 'warning.main' } }}
+        />
+        <IconButton size="small" onClick={onRemove} color="error"><DeleteOutlineIcon fontSize="small" /></IconButton>
+      </Box>
+    );
+  }
+
+  // --- LOGIC NODES ---
+  if (node.type === 'BINARY_OP') {
+    return (
+      <BlockWrapper borderColor="text.disabled" title="Calculate / Compare" icon={CompareArrowsIcon}>
+        <Box display="flex" flexWrap="wrap" alignItems="center" gap={1}>
+          <ExpressionNode node={node.left} availableVariables={availableVariables} onChange={(n) => onChange({ ...node, left: n })} onRemove={() => onChange({ ...node, left: createNode('EMPTY') })} setClipboard={setClipboard} clipboard={clipboard} />
+          <Select
+            size="small"
+            value={node.operator}
+            onChange={(e) => onChange({ ...node, operator: e.target.value })}
+            sx={{ bgcolor: (theme) => alpha(theme.palette.text.primary, 0.05), fontWeight: 'bold', minWidth: 60, color: 'text.primary' }}
+          >
+            {OPERATORS.map(o => <MenuItem key={o.id} value={o.id}>{o.label}</MenuItem>)}
+          </Select>
+          <ExpressionNode node={node.right} availableVariables={availableVariables} onChange={(n) => onChange({ ...node, right: n })} onRemove={() => onChange({ ...node, right: createNode('EMPTY') })} setClipboard={setClipboard} clipboard={clipboard} />
+        </Box>
+      </BlockWrapper>
+    );
+  }
+
+  if (node.type === 'FUNCTION') {
+    const isKnownFunc = FUNCTIONS.find(f => f.id === node.funcName);
+    return (
+      <BlockWrapper borderColor="secondary.main" title="Math Function" icon={FunctionsIcon}>
+        <Box display="flex" flexWrap="wrap" alignItems="center" gap={1}>
+          <Select
+            size="small"
+            value={isKnownFunc ? node.funcName : 'CUSTOM'}
+            onChange={(e) => onChange({ ...node, funcName: e.target.value })}
+            sx={{ bgcolor: (theme) => alpha(theme.palette.secondary.main, 0.1), color: 'secondary.main', fontWeight: 'bold' }}
+          >
+            {FUNCTIONS.map(f => <MenuItem key={f.id} value={f.id}>{f.label}</MenuItem>)}
+            {!isKnownFunc && <MenuItem value="CUSTOM">{node.funcName}()</MenuItem>}
+          </Select>
+          <Typography fontWeight="bold" color="secondary.main">(</Typography>
+          <ExpressionNode node={node.arg} availableVariables={availableVariables} onChange={(n) => onChange({ ...node, arg: n })} onRemove={() => onChange({ ...node, arg: createNode('EMPTY') })} setClipboard={setClipboard} clipboard={clipboard} />
+          <Typography fontWeight="bold" color="secondary.main">)</Typography>
+        </Box>
+      </BlockWrapper>
+    );
+  }
+
+  if (node.type === 'IF_ELSE') {
+    return (
+      <BlockWrapper borderColor="primary.main" title="Condition Rule" icon={AccountTreeIcon}>
+        <Box display="flex" flexDirection="column" gap={2} pl={1}>
+          <Box display="flex" alignItems="flex-start" gap={1}>
+            <Chip label="IF" size="small" color="primary" sx={{ mt: 1, fontWeight: 'bold' }} />
+            <Box flex={1}><ExpressionNode node={node.condition} availableVariables={availableVariables} onChange={(n) => onChange({ ...node, condition: n })} onRemove={() => onChange({ ...node, condition: createNode('EMPTY') })} setClipboard={setClipboard} clipboard={clipboard} /></Box>
+          </Box>
+          <Box display="flex" alignItems="flex-start" gap={1} sx={{ borderLeft: '2px solid', borderColor: 'success.main', pl: 2 }}>
+            <Chip label="THEN" size="small" color="success" sx={{ mt: 1, fontWeight: 'bold' }} />
+            <Box flex={1}><ExpressionNode node={node.trueBranch} availableVariables={availableVariables} onChange={(n) => onChange({ ...node, trueBranch: n })} onRemove={() => onChange({ ...node, trueBranch: createNode('EMPTY') })} setClipboard={setClipboard} clipboard={clipboard} /></Box>
+          </Box>
+          <Box display="flex" alignItems="flex-start" gap={1} sx={{ borderLeft: '2px solid', borderColor: 'error.main', pl: 2 }}>
+            <Chip label="ELSE" size="small" color="error" sx={{ mt: 1, fontWeight: 'bold' }} />
+            <Box flex={1}><ExpressionNode node={node.falseBranch} availableVariables={availableVariables} onChange={(n) => onChange({ ...node, falseBranch: n })} onRemove={() => onChange({ ...node, falseBranch: createNode('EMPTY') })} setClipboard={setClipboard} clipboard={clipboard} /></Box>
+          </Box>
+        </Box>
+      </BlockWrapper>
+    );
+  }
+
+  return null;
+};
+
+// ============================================================================
+// MAIN APPLICATION COMPONENT
+// ============================================================================
+export default function AdvancedBidirectionalBuilder({ initialExpression, availableVariables, onSave }) {
+  const [rootNode, setRootNode] = useState(createNode('EMPTY'));
+  const [clipboard, setClipboard] = useState(null);
+  
+  const jexlOutput = compileJexl(rootNode);
+  const isComplete = !jexlOutput.includes('___');
+
+  useEffect(() => {
+    if (initialExpression) {
+      try {
+        const ast = parseJexlToAST(initialExpression);
+        setRootNode(ast);
+      } catch (err) {
+        console.warn("Could not parse initial expression:", err);
+      }
+    }
+  }, [initialExpression]);
+
+  return (
+    <Box sx={{ p: 3, bgcolor: 'background.default', minHeight: '100%' }}>
+      <Box sx={{ maxWidth: 1000, mx: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
+        
+        {/* Header */}
+        <Paper elevation={0} sx={{ p: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid', borderColor: 'divider', bgcolor: 'background.paper' }}>
+          <Box>
+            <Typography variant="h5" color="text.primary" fontWeight="bold" display="flex" alignItems="center" gap={1}>
+              <CalculateIcon color="primary" /> Bidirectional Formula Builder
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Build rules visually to auto-generate the formula string.
+            </Typography>
+          </Box>
+          <Box display="flex" gap={1.5}>
+             <Button onClick={() => { setRootNode(createNode('EMPTY')); setClipboard(null); }} color="inherit" variant="outlined">
+              Reset Canvas
+            </Button>
+             <Button 
+              disabled={!isComplete || rootNode.type === 'EMPTY'}
+              onClick={() => onSave && onSave(jexlOutput)}
+              variant="contained" 
+              color="primary"
+              startIcon={<CheckCircleOutlineIcon />}
+            >
+              Save Formula
+            </Button>
+          </Box>
+        </Paper>
+
+        {/* CANVAS SECTION */}
+        <Paper elevation={0} sx={{ overflow: 'hidden', border: '1px solid', borderColor: 'divider' }}>
+          <Box sx={{ bgcolor: (theme) => alpha(theme.palette.text.primary, 0.05), p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid', borderColor: 'divider' }}>
+            <Typography variant="subtitle2" color="text.primary" fontWeight="bold" display="flex" alignItems="center" gap={1}>
+              <AccountTreeIcon sx={{ color: 'info.main' }} fontSize="small" /> Visual Rule Canvas
+            </Typography>
+            {clipboard && (
+              <Chip icon={<ContentCopyIcon fontSize="small"/>} label="Block copied to clipboard" size="small" color="info" variant="outlined" />
+            )}
+          </Box>
+          
+          <Box sx={{ p: 4, minHeight: 400, overflowX: 'auto', bgcolor: 'background.default' }}>
+            {rootNode.type === 'EMPTY' && (
+               <Alert severity="info" icon={<ArrowForwardIcon />} sx={{ mb: 4, maxWidth: 600 }}>
+                 <Typography variant="subtitle2" fontWeight="bold" mb={0.5}>How to use the Visual Builder:</Typography>
+                 <Typography variant="body2" component="ul" sx={{ pl: 2, m: 0 }}>
+                   <li>Start by clicking <b>Add Block</b> below.</li>
+                   <li>For nested conditions, add an <b>If / Then / Else</b> block, and put another one inside it!</li>
+                   <li>Use the Copy icon to copy a block and paste it in another empty slot to save time.</li>
+                 </Typography>
+               </Alert>
+            )}
+
+            <ExpressionNode 
+              node={rootNode} 
+              availableVariables={availableVariables}
+              onChange={setRootNode} 
+              onRemove={() => setRootNode(createNode('EMPTY'))} 
+              clipboard={clipboard}
+              setClipboard={setClipboard}
+            />
+          </Box>
+        </Paper>
+
+        {/* OUTPUT SECTION */}
+        <Paper elevation={0} sx={{ overflow: 'hidden', border: '1px solid', borderColor: 'divider', bgcolor: 'background.paper' }}>
+           <Box sx={{ p: 1.5, borderBottom: '1px solid', borderColor: 'divider', bgcolor: (theme) => alpha(theme.palette.text.primary, 0.02), display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography variant="caption" fontWeight="bold" color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
+              Live Generated JEXL Payload
+            </Typography>
+            {!isComplete && rootNode.type !== 'EMPTY' && (
+              <Chip label="Incomplete formula (fill in the blanks)" size="small" color="warning" sx={{ height: 20, fontSize: 10 }} />
+            )}
+          </Box>
+          <Box p={2}>
+            <Typography variant="body2" sx={{ fontFamily: 'monospace', wordBreak: 'break-all', color: (isComplete && rootNode.type !== 'EMPTY') ? 'success.main' : 'text.disabled' }}>
+              {jexlOutput === '___' ? 'Start building to see output...' : jexlOutput}
+            </Typography>
+          </Box>
+        </Paper>
+
+      </Box>
+    </Box>
+  );
+}
