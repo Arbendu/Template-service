@@ -1,0 +1,1390 @@
+// AdvancedBidirectionalBuilder.jsx
+
+import React, { useState, useEffect } from 'react';
+import { 
+  Calculator, Plus, Trash2, GitBranch, Binary, Hash, 
+  Variable, FunctionSquare, ArrowRight, CheckCircle2, 
+  Copy, ClipboardPaste, UploadCloud, AlertCircle 
+} from 'lucide-react';
+
+// ============================================================================
+// CONFIGURATION & MOCK DATA
+// ============================================================================
+const VARIABLES = [
+  { id: 'DebitPos', label: 'Debit Position', type: 'NUMBER' },
+  { id: 'SwingNeg', label: 'Swing Negative', type: 'NUMBER' },
+  { id: 'Balance', label: 'Account Balance', type: 'NUMBER' },
+  { id: '$G{REPORT_DATE}', label: 'Report Date', type: 'DATE' }
+];
+
+const OPERATORS = [
+  { id: '+', label: '+' }, { id: '-', label: '-' }, 
+  { id: '*', label: '×' }, { id: '/', label: '÷' },
+  { id: '>', label: '>' }, { id: '<', label: '<' },
+  { id: '>=', label: '≥' }, { id: '<=', label: '≤' },
+  { id: '==', label: '=' }, { id: '!=', label: '≠' }
+];
+
+const FUNCTIONS = [
+  { id: 'math:abs', label: 'Absolute Value' },
+  { id: 'math:round', label: 'Round Number' },
+  { id: 'math:min', label: 'Minimum' },
+  { id: 'math:max', label: 'Maximum' }
+];
+
+// ============================================================================
+// AST NODE FACTORY
+// ============================================================================
+const generateId = () => Math.random().toString(36).substring(2, 9);
+
+const createNode = (type, clipboardNode = null) => {
+  if (clipboardNode && type === 'PASTE') {
+    const clone = JSON.parse(JSON.stringify(clipboardNode));
+
+    // Regenerate IDs recursively to avoid React key collisions
+    const regenIds = (node) => {
+      if(!node) return;
+
+      node.id = generateId();
+      if(node.left) regenIds(node.left);
+      if(node.right) regenIds(node.right);
+      if(node.arg) regenIds(node.arg);
+      if(node.condition) regenIds(node.condition);
+      if(node.trueBranch) regenIds(node.trueBranch);
+      if(node.falseBranch) regenIds(node.falseBranch);
+    };
+    regenIds(clone);
+    return clone;
+
+  }
+
+  const base = { id: generateId(), type };
+
+  switch (type) {
+    case 'IF_ELSE':
+      return { ...base, condition: createNode('EMPTY'), trueBranch: createNode('EMPTY'), falseBranch: createNode('EMPTY') };
+
+    case 'BINARY_OP':
+      return { ...base, left: createNode('EMPTY'), operator: '+', right: createNode('EMPTY') };
+
+    case 'FUNCTION':
+      return { ...base, funcName: 'math:abs', arg: createNode('EMPTY') };
+
+    case 'VAR':
+      return { ...base, value: VARIABLES[0].id };
+
+    case 'NUMBER':
+      return { ...base, value: 0 };
+
+    case 'EMPTY':
+    default:
+      return base;
+  }
+};
+
+// ============================================================================
+// PARSER: JEXL -> AST (Lexer & Recursive Descent Parser)
+// ============================================================================
+const parseJexlToAST = (input) => {
+  // 1. Lexer (Tokenizer)
+  const tokens = [];
+
+  let i = 0;
+  while (i < input.length) {
+    let char = input[i];
+    if (/\s/.test(char)) { i++;
+
+      continue; }
+    
+    if (char === '(' || char === ')' || char === '?' || char === ':') {
+      tokens.push({ type: 'PUNCT', value: char });
+
+      i++; continue;
+    }
+    
+    // Multi-char operators
+    const nextTwo = input.substring(i, i + 2);
+
+    if (['<=', '>=', '==', '!='].includes(nextTwo)) {
+      tokens.push({ type: 'OP', value: nextTwo }); i += 2;
+
+      continue;
+    }
+    
+    // Single char operators
+    if ("+-*/><".includes(char)) {
+      tokens.push({ type: 'OP', value: char });
+
+      i++; continue;
+    }
+    
+    // Numbers
+    if (/[0-9.]/.test(char)) {
+      let num = '';
+
+      while (i < input.length && /[0-9.]/.test(input[i])) num += input[i++];
+      tokens.push({ type: 'NUM', value: parseFloat(num) }); continue;
+
+    }
+    
+    // Identifiers (Variables, Namespaces, Globals like $G{...})
+    if (/[a-zA-Z_$]/.test(char)) {
+      let id = '';
+
+      // Allow curly braces for $G{...} and colons for math:abs
+      while (i < input.length && /[a-zA-Z0-9_{}:.$]/.test(input[i])) id += input[i++];
+
+      tokens.push({ type: 'ID', value: id }); continue;
+    }
+    
+    throw new Error(`Unexpected character at index ${i}: ${char}`);
+
+  }
+
+  // 2. Parser (Recursive Descent)
+  let current = 0;
+  
+  const peek = () => tokens[current];
+
+  const next = () => tokens[current++];
+  const consume = (expected) => {
+    if (current < tokens.length && tokens[current].value === expected) {
+      current++;
+
+      return true;
+    }
+    return false;
+  };
+
+  const PRECEDENCE = {
+    '==': 1, '!=': 1, '<': 2, '>': 2, '<=': 2, '>=': 2,
+    '+': 3, '-': 3,
+    '*': 4, '/': 4
+  };
+
+  const parsePrimary = () => {
+    const t = next();
+
+    if (!t) throw new Error("Unexpected end of expression");
+    
+    if (t.type === 'NUM') return { id: generateId(), type: 'NUMBER', value: t.value };
+
+    if (t.type === 'ID') {
+      // Function Check
+      if (current < tokens.length && peek().value === '(') {
+        consume('(');
+        const arg = parseExpression();
+        if (!consume(')')) throw new Error(`Expected ')' after function ${t.value}`);
+
+        return { id: generateId(), type: 'FUNCTION', funcName: t.value, arg };
+
+      }
+      return { id: generateId(), type: 'VAR', value: t.value };
+
+    }
+    
+    if (t.type === 'PUNCT' && t.value === '(') {
+      const node = parseExpression();
+      if (!consume(')')) throw new Error("Expected closing parenthesis ')'");
+
+      return node;
+    }
+    
+    if (t.type === 'OP' && t.value === '-') {
+      // Unary Minus Handling (e.g. -1 * DebitPos -> Parses as NUMBER(-1) or BINARY(0 - x))
+      const rightToken = peek();
+
+      if (rightToken && rightToken.type === 'NUM') {
+        next();
+
+        return { id: generateId(), type: 'NUMBER', value: -rightToken.value };
+      }
+      // Or explicit -1 * logic if spaced differently
+      const right = parsePrimary();
+
+      return { 
+        id: generateId(), type: 'BINARY_OP', 
+        left: { id: generateId(), type: 'NUMBER', value: -1 }, 
+        operator: '*', right 
+      };
+
+    }
+    
+    throw new Error(`Unexpected token: ${t.value}`);
+  };
+
+  const parseBinary = (minPrec) => {
+    let left = parsePrimary();
+
+    while (current < tokens.length && peek().type === 'OP' && PRECEDENCE[peek().value] >= minPrec) {
+      const op = next().value;
+
+      const prec = PRECEDENCE[op];
+      const right = parseBinary(prec + 1);
+
+      left = { id: generateId(), type: 'BINARY_OP', left, operator: op, right };
+    }
+    return left;
+  };
+
+  const parseExpression = () => {
+    let node = parseBinary(0);
+
+    // Ternary Handler
+    if (consume('?')) {
+      const trueBranch = parseExpression();
+
+      if (!consume(':')) throw new Error("Expected ':' in ternary condition");
+      const falseBranch = parseExpression();
+
+      return { id: generateId(), type: 'IF_ELSE', condition: node, trueBranch, falseBranch };
+    }
+    return node;
+  };
+
+  const ast = parseExpression();
+  if (current < tokens.length) throw new Error("Unexpected tokens at end of expression. Check your parentheses.");
+
+  return ast;
+};
+
+// ============================================================================
+// COMPILER: AST -> JEXL
+// ============================================================================
+const compileJexl = (node) => {
+  if (!node) return "";
+
+  switch (node.type) {
+    case 'EMPTY': 
+      return "___";
+
+    case 'VAR': 
+    case 'NUMBER': 
+      return node.value;
+
+    case 'BINARY_OP': 
+      return `(${compileJexl(node.left)} ${node.operator} ${compileJexl(node.right)})`;
+
+    case 'FUNCTION': 
+      return `${node.funcName}(${compileJexl(node.arg)})`;
+
+    case 'IF_ELSE': 
+      return `(${compileJexl(node.condition)} ? ${compileJexl(node.trueBranch)} : ${compileJexl(node.falseBranch)})`;
+
+    default: 
+      return "";
+  }
+};
+
+// ============================================================================
+// RECURSIVE NODE UI COMPONENT
+// ============================================================================
+const ExpressionNode = ({ node, onChange, onRemove, clipboard, setClipboard }) => {
+  if (!node) return null;
+
+  // --- RENDERING EMPTY SLOT ---
+  if (node.type === 'EMPTY') {
+    return (
+      <div className="relative group inline-block">
+        <div className="flex items-center gap-1 px-3 py-2 bg-slate-100 border border-dashed border-slate-300 rounded-lg text-slate-500 hover:bg-white hover:border-blue-400 hover:text-blue-600 transition-all cursor-pointer">
+          <Plus size={16} />
+          <span className="text-sm font-medium">Add Block</span>
+        </div>
+        
+        <div className="absolute 
+
+ top-full left-0 mt-1 w-48 bg-white border border-slate-200 shadow-xl rounded-xl p-1 z-10 hidden group-hover:block">
+          <button onClick={() => onChange(createNode('VAR'))} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 rounded-lg flex items-center gap-2"><Variable size={14} className="text-blue-500"/> Variable</button>
+          <button onClick={() => onChange(createNode('NUMBER'))} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 rounded-lg flex items-center gap-2"><Hash size={14} className="text-amber-500"/> Number</button>
+          <button onClick={() => onChange(createNode('BINARY_OP'))} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 rounded-lg flex items-center gap-2"><Binary size={14} className="text-emerald-500"/> Math / Compare</button>
+        
+   <button onClick={() => onChange(createNode('FUNCTION'))} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 rounded-lg flex items-center gap-2"><FunctionSquare size={14} className="text-pink-500"/> Math Function</button>
+          <div className="border-t border-slate-100 my-1"></div>
+          <button onClick={() => onChange(createNode('IF_ELSE'))} className="w-full text-left px-3 py-2 text-sm hover:bg-purple-50 text-purple-700 font-medium rounded-lg flex items-center gap-2"><GitBranch size={14}/> If / Then / Else</button>
+          
+          {clipboard && (
+            <>
+   
+            <div className="border-t border-slate-100 my-1"></div>
+              <button onClick={() => onChange(createNode('PASTE', clipboard))} className="w-full text-left px-3 py-2 text-sm hover:bg-blue-50 text-blue-700 font-medium rounded-lg flex items-center gap-2">
+                <ClipboardPaste size={14}/> Paste Copied Block
+              </button>
+            </>
+          
+ )}
+        </div>
+      </div>
+    );
+
+}
+
+  // Common Wrapper
+  const BlockWrapper = ({ children, colorClass, title, icon: Icon }) => (
+    <div className={`relative flex flex-col gap-2 p-3 rounded-xl border-2 ${colorClass} bg-white shadow-sm transition-all`}>
+      <div className="flex justify-between items-center mb-1">
+        <span className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${colorClass.replace('border-', 'text-').replace('-200', '-600').replace('-300', '-700')}`}>
+          <Icon size={14} /> {title}
+        </span>
+        <div className="flex gap-1 opacity-0 hover:opacity-100 transition-opacity absolute right-2 top-2">
+  
+          <button onClick={() => setClipboard(node)} className="p-1 text-slate-400 hover:text-blue-600 bg-white rounded-md shadow-sm border border-slate-200" title="Copy Block">
+            <Copy size={14} />
+          </button>
+          <button onClick={onRemove} className="p-1 text-slate-400 hover:text-red-600 bg-white rounded-md shadow-sm border border-slate-200">
+            <Trash2 size={14} />
+          </button>
+        </div>
+   
+    </div>
+      {children}
+    </div>
+  );
+
+ // --- LEAF NODES ---
+  if (node.type === 'VAR') {
+    // If parsed variable isn't in mock data, show it anyway as custom
+    const isKnownVar = VARIABLES.find(v => v.id === node.value);
+
+ return (
+      <div className="inline-flex items-center gap-1">
+        <select 
+          value={isKnownVar ? node.value : 'CUSTOM'} 
+          onChange={(e) => onChange({ ...node, value: e.target.value })}
+          className="bg-blue-50 border border-blue-200 text-blue-800 text-sm font-semibold rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-blue-400 outline-none"
+        >
+          {VARIABLES.map(v => <option key={v.id} value={v.id}>{v.label}</option>)}
+       
+    {!isKnownVar && <option value="CUSTOM">{node.value} (Custom)</option>}
+        </select>
+        <button onClick={onRemove} className="text-slate-300 hover:text-red-500"><Trash2 size={14}/></button>
+      </div>
+    );
+
+}
+
+  if (node.type === 'NUMBER') {
+    return (
+      <div className="inline-flex items-center gap-1">
+        <input 
+          type="number" 
+          value={node.value} 
+          onChange={(e) => onChange({ ...node, value: e.target.value })}
+          className="bg-amber-50 border border-amber-200 text-amber-800 text-sm font-bold rounded-lg px-3 py-1.5 w-24 focus:ring-2 focus:ring-amber-400 outline-none"
+        />
+   
+      <button onClick={onRemove} className="text-slate-300 hover:text-red-500"><Trash2 size={14}/></button>
+      </div>
+    );
+
+}
+
+  // --- LOGIC NODES ---
+  if (node.type === 'BINARY_OP') {
+    return (
+      <BlockWrapper colorClass="border-slate-300" title="Calculate / Compare" icon={Binary}>
+        <div className="flex flex-wrap items-center gap-2">
+          <ExpressionNode node={node.left} onChange={(n) => onChange({...node, left: n})} onRemove={() => onChange({...node, left: createNode('EMPTY')})} setClipboard={setClipboard} clipboard={clipboard} />
+          <select 
+            value={node.operator} 
+            
+ onChange={(e) => onChange({ ...node, operator: e.target.value })}
+            className="bg-slate-100 border border-slate-300 text-slate-800 text-sm font-bold rounded-lg px-2 py-1.5 outline-none"
+          >
+            {OPERATORS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+          </select>
+          <ExpressionNode node={node.right} onChange={(n) => onChange({...node, right: n})} onRemove={() => onChange({...node, right: createNode('EMPTY')})} setClipboard={setClipboard} clipboard={clipboard} />
+        </div>
+     
+  </BlockWrapper>
+    );
+  }
+
+  if (node.type === 'FUNCTION') {
+    const isKnownFunc = FUNCTIONS.find(f => f.id === node.funcName);
+
+ return (
+      <BlockWrapper colorClass="border-pink-300" title="Math Function" icon={FunctionSquare}>
+        <div className="flex flex-wrap items-center gap-2">
+          <select 
+            value={isKnownFunc ? node.funcName : 'CUSTOM'} 
+            onChange={(e) => onChange({ ...node, funcName: e.target.value })}
+            className="bg-pink-50 border border-pink-200 text-pink-800 text-sm font-semibold rounded-lg px-3 py-1.5 outline-none"
+          
+ >
+            {FUNCTIONS.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+            {!isKnownFunc && <option value="CUSTOM">{node.funcName}()</option>}
+          </select>
+          <span className="text-pink-300 font-bold">(</span>
+          <ExpressionNode node={node.arg} onChange={(n) => onChange({...node, arg: n})} onRemove={() => onChange({...node, arg: createNode('EMPTY')})} setClipboard={setClipboard} clipboard={clipboard} />
+          <span className="text-pink-300 font-bold">)</span>
+        </div>
+   
+    </BlockWrapper>
+    );
+  }
+
+  if (node.type === 'IF_ELSE') {
+    return (
+      <BlockWrapper colorClass="border-purple-300" title="Condition Rule" icon={GitBranch}>
+        <div className="flex flex-col gap-3 pl-2">
+          <div className="flex items-start gap-3">
+            <span className="mt-2 text-xs font-bold bg-purple-100 text-purple-700 px-2 py-1 rounded">IF</span>
+            <div className="flex-1">
+             
+  <ExpressionNode node={node.condition} onChange={(n) => onChange({...node, condition: n})} onRemove={() => onChange({...node, condition: createNode('EMPTY')})} setClipboard={setClipboard} clipboard={clipboard} />
+            </div>
+          </div>
+          <div className="flex items-start gap-3 border-l-2 border-emerald-200 pl-4">
+            <span className="mt-2 text-xs font-bold bg-emerald-100 text-emerald-700 px-2 py-1 rounded">THEN</span>
+            <div className="flex-1">
+              
+ <ExpressionNode node={node.trueBranch} onChange={(n) => onChange({...node, trueBranch: n})} onRemove={() => onChange({...node, trueBranch: createNode('EMPTY')})} setClipboard={setClipboard} clipboard={clipboard} />
+            </div>
+          </div>
+          <div className="flex items-start gap-3 border-l-2 border-rose-200 pl-4">
+            <span className="mt-2 text-xs font-bold bg-rose-100 text-rose-700 px-2 py-1 rounded">ELSE</span>
+            <div className="flex-1">
+              <ExpressionNode 
+ node={node.falseBranch} onChange={(n) => onChange({...node, falseBranch: n})} onRemove={() => onChange({...node, falseBranch: createNode('EMPTY')})} setClipboard={setClipboard} clipboard={clipboard} />
+            </div>
+          </div>
+        </div>
+      </BlockWrapper>
+    );
+
+}
+
+  return null;
+};
+
+// ============================================================================
+// MAIN APPLICATION COMPONENT
+// ============================================================================
+// I added initialExpression and onSave as props
+export default function AdvancedBidirectionalBuilder({ initialExpression, onSave }) {
+  const [rootNode, setRootNode] = useState(createNode('EMPTY'));
+
+ const [clipboard, setClipboard] = useState(null);
+  
+  // Importer State
+  const [importText, setImportText] = useState('');
+  const [importError, setImportError] = useState(null);
+
+ const jexlOutput = compileJexl(rootNode);
+  const isComplete = !jexlOutput.includes('___');
+
+  // I added this useEffect to load the expression from the textfield automatically
+  useEffect(() => {
+    if (initialExpression) {
+      try {
+        const ast = parseJexlToAST(initialExpression);
+        setRootNode(ast);
+      } catch (err) {
+        console.warn("Could not parse initial expression for visual builder:", err);
+      }
+    }
+  }, [initialExpression]);
+
+  const handleImport = () => {
+    setImportError(null);
+
+ if (!importText.trim()) return;
+    try {
+      const ast = parseJexlToAST(importText);
+      setRootNode(ast);
+      setImportText('');
+
+ // Clear on success
+    } catch (err) {
+      setImportError(err.message);
+    }
+  };
+
+ // Demo shortcut
+  const loadDemo = () => {
+    setImportText('(DebitPos < 0 ? math:abs(DebitPos) : -1 * DebitPos) > SwingNeg ? (SwingNeg + DebitPos) : (DebitPos < 0 ? math:abs(DebitPos) : -1 * DebitPos)');
+
+ };
+
+  return (
+    <div className="min-h-screen bg-slate-100 p-6 font-sans text-slate-800">
+      <div className="max-w-6xl mx-auto space-y-6">
+        
+        {/* Header */}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex justify-between items-center">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
+              <Calculator className="text-blue-600" />
+ 
+              Bidirectional Formula Builder
+            </h1>
+            <p className="text-sm text-slate-500 mt-1">
+              Build rules visually, or paste a raw JEXL string to auto-generate the visual blocks.
+            </p>
+          </div>
+         
+  <div className="flex gap-3">
+             <button 
+              onClick={() => { setRootNode(createNode('EMPTY')); setClipboard(null); setImportError(null); }}
+              className="px-4 py-2 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg font-medium transition-colors"
+            >
+              Reset Canvas
+            </button>
+   
+          {/* Linked the onSave function to this button */}
+          <button 
+              disabled={!isComplete ||
+ rootNode.type === 'EMPTY'}
+              onClick={() => onSave && onSave(jexlOutput)}
+              className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white px-6 py-2.5 rounded-lg font-medium flex items-center gap-2 transition-colors"
+            >
+              <CheckCircle2 size={18} />
+              Save Formula
+            </button>
+          </div>
+        
+ </div>
+
+        {/* IMPORTER / PARSER SECTION */}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="bg-slate-50 p-4 border-b border-slate-200 flex justify-between items-center">
+            <h2 className="font-semibold text-slate-700 flex items-center gap-2">
+              <UploadCloud size={18} className="text-blue-500" />
+              Paste JEXL Formula
+      
+       </h2>
+            <button onClick={loadDemo} className="text-xs text-blue-600 font-medium hover:underline">
+              Load Example
+            </button>
+          </div>
+          <div className="p-4 flex flex-col gap-3">
+            <div className="flex gap-3">
+            
+   <textarea 
+                value={importText}
+                onChange={e => setImportText(e.target.value)}
+                placeholder="Paste your raw formula here e.g., ((DebitPos < 0) ?
+ math:abs(DebitPos) : -1 * DebitPos)..."
+                className="flex-1 border border-slate-300 rounded-lg p-3 text-sm font-mono h-20 focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+              />
+              <button 
+                onClick={handleImport}
+                className="bg-slate-800 hover:bg-slate-900 text-white px-6 rounded-lg font-medium transition-colors whitespace-nowrap"
+ 
+              >
+                Parse & Build UI
+              </button>
+            </div>
+            {importError && (
+              <div className="bg-red-50 text-red-600 border border-red-200 px-4 py-2 rounded-lg text-sm flex items-center gap-2">
+   
+              <AlertCircle size={16} />
+                <strong>Syntax Error:</strong> {importError}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* BUILDER CANVAS */}
+        <div className="bg-white rounded-xl shadow-sm 
+ border border-slate-200 overflow-hidden">
+          <div className="bg-slate-800 p-4 border-b border-slate-700 flex justify-between items-center text-white">
+            <h2 className="font-semibold flex items-center gap-2">
+              <GitBranch size={18} className="text-blue-400" />
+              Visual Rule Canvas
+            </h2>
+            {clipboard && (
+     
+          <span className="text-xs font-medium bg-blue-500/20 text-blue-300 px-3 py-1 rounded-full border border-blue-500/30 flex items-center gap-1">
+                <Copy size={12}/> Block copied to clipboard
+              </span>
+            )}
+          </div>
+          
+          <div className="p-8 
+ min-h-[400px] overflow-x-auto bg-slate-50/50">
+            {rootNode.type === 'EMPTY' && (
+               <div className="mb-6 p-4 bg-blue-50 border border-blue-100 rounded-xl text-blue-800 text-sm flex items-start gap-3 max-w-2xl">
+                 <div className="p-2 bg-blue-100 rounded-full text-blue-600"><ArrowRight size={16}/></div>
+                 <div>
+                
+    <p className="font-bold mb-1">How to use the Visual Builder:</p>
+                   <ul className="list-disc pl-4 space-y-1 text-blue-700/80">
+                     <li>Start by clicking <b>Add Block</b> below, OR paste a formula in the box above.</li>
+                     <li>For nested conditions, add an <b>If / Then / Else</b> block, and 
+ put another one inside it!</li>
+                     <li>Use the <Copy size={12} className="inline"/> icon to copy a block and paste it in another empty slot to save time.</li>
+                   </ul>
+                 </div>
+               </div>
+     
+        )}
+
+            <ExpressionNode 
+              node={rootNode} 
+              onChange={setRootNode} 
+              onRemove={() => setRootNode(createNode('EMPTY'))} 
+              clipboard={clipboard}
+              setClipboard={setClipboard}
+     
+        />
+          </div>
+        </div>
+
+        {/* OUTPUT SECTION */}
+        <div className="bg-slate-900 rounded-xl shadow-sm border border-slate-800 overflow-hidden">
+           <div className="bg-slate-800 p-3 border-b border-slate-700 flex justify-between items-center">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Live Generated JEXL Payload</span>
+            
+ {!isComplete && rootNode.type !== 'EMPTY' && (
+              <span className="text-xs text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded border border-amber-400/20">
+                Incomplete formula (fill in the blanks)
+              </span>
+            )}
+          </div>
+          <div className="p-4">
+    
+         <code className={`block w-full text-sm font-mono leading-relaxed break-all ${isComplete && rootNode.type !== 'EMPTY' ?
+ 'text-emerald-400' : 'text-slate-500'}`}>
+              {jexlOutput === '___' ?
+ 'Start building to see output...' : jexlOutput}
+            </code>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+
+}
+
+
+
+
+
+
+
+
+
+
+
+// FormulaBuilder.jsx
+
+import { useState, useEffect, useCallback, useMemo } from "react";
+import Box from "@mui/material/Box";
+import TextField from "@mui/material/TextField";
+import Button from "@mui/material/Button";
+import IconButton from "@mui/material/IconButton";
+import Typography from "@mui/material/Typography";
+import Chip from "@mui/material/Chip";
+import FormControl from "@mui/material/FormControl";
+import InputLabel from "@mui/material/InputLabel";
+import Select from "@mui/material/Select";
+import MenuItem from "@mui/material/MenuItem";
+import Dialog from "@mui/material/Dialog";
+import DialogTitle from "@mui/material/DialogTitle";
+import DialogContent from "@mui/material/DialogContent";
+import DialogActions from "@mui/material/DialogActions";
+import Alert from "@mui/material/Alert";
+import Autocomplete from "@mui/material/Autocomplete";
+import AddIcon from "@mui/icons-material/Add";
+import DeleteIcon from "@mui/icons-material/Delete";
+import EditIcon from "@mui/icons-material/Edit";
+import { useTableConfig } from "../../hooks/useTableConfig";
+import { FilterBuilder } from "./FilterBuilder";
+import CloseIcon from "@mui/icons-material/Close";
+
+// I imported the new icon and your Visual Builder Component here
+import AutoFixHighIcon from "@mui/icons-material/AutoFixHigh";
+import AdvancedBidirectionalBuilder from "./AdvancedBidirectionalBuilder"; // Ensure this path points to the correct file
+
+export const FormulaBuilder = ({
+  expression,
+  variables,
+  template,
+  currentCellRowId,
+  currentCellColId,
+  onExpressionChange,
+  onVariablesChange,
+  formulaMode,
+  onFormulaModeChange,
+}) => {
+  const { tableConfigs, getSelectableColumns } = useTableConfig();
+
+ const [showVariableDialog, setShowVariableDialog] = useState(false);
+  
+  // I added the state to control the visibility of the visual builder dialog
+  const [showVisualBuilderDialog, setShowVisualBuilderDialog] = useState(false);
+
+  const [newVarName, setNewVarName] = useState("");
+  const [newVarType, setNewVarType] = useState("CELL_REF");
+  const [newVarConfig, setNewVarConfig] = useState({});
+
+ const [validationErrors, setValidationErrors] = useState([]);
+  const [editingVarName, setEditingVarName] = useState(null);
+
+ const currentCellRef =
+    currentCellRowId && currentCellColId
+      ?
+ `cell_${currentCellRowId}_${currentCellColId}`
+      : null;
+
+  const rows = useMemo(
+    () => template?.reportData?.rows || [],
+    [template?.reportData?.rows]
+  );
+
+ const columns = useMemo(
+    () => template?.reportData?.columns || [],
+    [template?.reportData?.columns]
+  );
+
+ const dynamicRowIds = useMemo(
+    () => rows.filter((r) => r.rowType === "DYNAMIC").map((r) => r.id),
+    [rows]
+  );
+
+ const validateExpression = useCallback(
+    (expr) => {
+      const errors = [];
+
+      if (!expr.trim()) {
+        return errors;
+      }
+
+      let parenCount = 0;
+      for (const char of expr) {
+        if (char === "(") parenCount++;
+        if (char === ")") parenCount--;
+        if (parenCount < 0) {
+   
+        errors.push("Unbalanced parentheses: extra closing parenthesis");
+          break;
+        }
+      }
+      if (parenCount > 0) {
+        errors.push("Unbalanced parentheses: missing closing parenthesis");
+      }
+
+      const operatorPattern = /[+\-*/]{2,}/;
+      if (operatorPattern.test(expr.replace(/\s/g, ""))) {
+        errors.push("Consecutive operators detected (e.g., ++ or --)");
+     
+  }
+
+      const trimmed = expr.trim();
+      if (/^[+*/]/.test(trimmed)) {
+        errors.push("Expression cannot start with an operator (except -)");
+      }
+      if (/[+\-*/]$/.test(trimmed)) {
+        errors.push("Expression cannot end with an operator");
+      }
+
+      const knownVars = new Set([
+        ...Object.keys(variables ||
+ {}),
+        "math",
+        "abs",
+      ]);
+
+ const cellPattern = /cell_R__[A-Za-z0-9_]+_C__[A-Za-z0-9_]+/g;
+      const cellRefs = expr.match(cellPattern) || [];
+
+ if (currentCellRef && cellRefs.indexOf(currentCellRef) !== -1) {
+        errors.push(
+          "Cannot reference the current cell in its own formula (circular reference)"
+        );
+
+ }
+
+      cellRefs.forEach((ref) => {
+        const match = ref.match(/cell_(R__[A-Za-z0-9_]+)_(C__[A-Za-z0-9_]+)/);
+        if (match) {
+          const [, rowId, colId] = match;
+          const row = rows.find((r) => r.id === rowId);
+          const colExists = columns.some((c) => c.id === colId);
+
+          if (!row) {
+          
+            errors.push(
+              `Invalid cell reference: Row "${rowId}" does not exist`
+            );
+          } else if (row.rowType === "DYNAMIC") {
+            errors.push(
+              `Cannot reference dynamic row "${rowId}" in formula. Dynamic rows generate multiple rows at runtime.`
+          
+            );
+          }
+          if (!colExists) {
+            errors.push(
+              `Invalid cell reference: Column "${colId}" does not exist`
+            );
+          }
+        }
+      });
+
+ const variablePattern = /\b([a-zA-Z_][a-zA-Z0-9_]*)\b/g;
+      let varMatch;
+      while ((varMatch = variablePattern.exec(expr)) !== null) {
+        const varName = varMatch[1];
+
+ if (
+          !varName.startsWith("cell_") &&
+          !varName.startsWith("R__") &&
+          !varName.startsWith("C__") &&
+          !knownVars.has(varName)
+        ) {
+          const context = expr.substring(
+            Math.max(0, varMatch.index - 5),
+            varMatch.index + varName.length + 5
+   
+        );
+          if (!context.includes("cell_") && !context.includes("_C__")) {
+            errors.push(`Undefined variable: "${varName}"`);
+
+ }
+        }
+      }
+
+      return errors;
+
+ },
+    [rows, columns, variables, currentCellRef]
+  );
+
+ useEffect(() => {
+    const errors = validateExpression(expression);
+    setValidationErrors(errors);
+  }, [expression, validateExpression]);
+
+ useEffect(() => {
+    const handleCellSelected = (event) => {
+      const cellRef = event.detail;
+
+      if (currentCellRef && cellRef === currentCellRef) {
+        setValidationErrors((prev) => [
+          ...new Set([
+            ...prev,
+            "Cannot reference the current cell in its own formula",
+          ]),
+     
+         ]);
+        return;
+      }
+
+      const match = cellRef.match(/cell_(R__[A-Za-z0-9_]+)_(C__[A-Za-z0-9_]+)/);
+      if (match) {
+        const [, rowId] = match;
+        const row = rows.find((r) => r.id === rowId);
+        if (row?.rowType === "DYNAMIC") {
+          setValidationErrors((prev) => [
+            ...new Set([
+  
+              ...prev,
+              `Cannot reference dynamic row "${rowId}" in formula`,
+            ]),
+          ]);
+          return;
+        }
+      }
+
+      const trimmedExpr = expression.trim();
+      if (trimmedExpr && !trimmedExpr.match(/[+\-*/(\s]$/)) {
+   
+       onExpressionChange(expression + " + " + cellRef);
+      } else {
+        onExpressionChange(
+          expression +
+            (expression && !expression.endsWith(" ") ?
+ " " : "") +
+            cellRef
+        );
+
+ }
+    };
+
+    window.addEventListener("formula-cell-selected", handleCellSelected);
+    return () =>
+      window.removeEventListener("formula-cell-selected", handleCellSelected);
+
+ }, [expression, onExpressionChange, currentCellRef, rows]);
+
+  const selectableColumns = useMemo(
+    () => (newVarConfig.table ? getSelectableColumns(newVarConfig.table) : []),
+    [newVarConfig.table, getSelectableColumns]
+  );
+
+ const addOperator = useCallback(
+    (op) => {
+      onExpressionChange(expression + " " + op + " ");
+    },
+    [expression, onExpressionChange]
+  );
+
+ const toggleFormulaMode = useCallback(() => {
+    onFormulaModeChange(!formulaMode);
+  }, [formulaMode, onFormulaModeChange]);
+
+ const addVariable = useCallback(() => {
+    setNewVarName("");
+    setNewVarType("CELL_REF");
+    setNewVarConfig({});
+    setEditingVarName(null);
+    setShowVariableDialog(true);
+  }, []);
+
+ const editVariable = useCallback(
+    (name) => {
+      const config = variables[name];
+      setNewVarName(name);
+      if (config === "CELL_REF" || config?.type === "CELL_REF") {
+        setNewVarType("CELL_REF");
+        setNewVarConfig({});
+      } else {
+        setNewVarType(config?.type || "DB_VALUE");
+        setNewVarConfig({
+          table: config?.table || "",
+       
+           column: config?.column || "",
+          filters: config?.filters || {},
+        });
+      }
+      setEditingVarName(name);
+      setShowVariableDialog(true);
+    },
+    [variables]
+  );
+
+ const removeVariable = useCallback(
+    (name) => {
+      const newVars = { ...variables };
+      delete newVars[name];
+      onVariablesChange(newVars);
+    },
+    [variables, onVariablesChange]
+  );
+
+ const saveVariable = useCallback(() => {
+    if (!newVarName) return;
+
+    const newVars = { ...variables };
+
+    // If editing and name changed, remove old key
+    if (editingVarName && editingVarName !== newVarName) {
+      delete newVars[editingVarName];
+    }
+
+    if (newVarType === "CELL_REF") {
+      newVars[newVarName] = "CELL_REF";
+    } else {
+      newVars[newVarName] = {
+        type: newVarType,
+        
+ table: newVarConfig.table || "",
+        column: newVarConfig.column || "",
+        filters: newVarConfig.filters || {},
+      };
+    }
+
+    onVariablesChange(newVars);
+    setShowVariableDialog(false);
+    setEditingVarName(null);
+  }, [
+    newVarName,
+    newVarType,
+    newVarConfig,
+    variables,
+    editingVarName,
+    onVariablesChange,
+  ]);
+
+ return (
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <Box>
+        {/* I added a flexbox header here to place the title and the Visual Button side by side */}
+        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
+          <Typography
+            variant="caption"
+            fontWeight={600}
+            sx={{ display: "block" }}
+          >
+            EXPRESSION
+          </Typography>
+          
+          <Button 
+            size="small" 
+            variant="outlined" 
+            startIcon={<AutoFixHighIcon />}
+            onClick={() => setShowVisualBuilderDialog(true)}
+            sx={{ borderRadius: 2, textTransform: 'none' }}
+          >
+            Create Visually
+          </Button>
+        </Box>
+
+        <TextField
+    
+       value={expression}
+          onChange={(e) => onExpressionChange(e.target.value)}
+          placeholder="e.g., cell_R__R1_C__C1 + variable1"
+          size="small"
+          fullWidth
+          multiline
+          rows={4}
+          error={validationErrors.length > 0}
+          sx={{ fontFamily: "monospace" }}
+    
+     />
+        {validationErrors.length > 0 && (
+          <Alert severity="error" sx={{ mt: 1, py: 0 }}>
+            <Typography variant="caption">
+              {validationErrors.map((err, i) => (
+                <span key={i}>
+                  {err}
+  
+                 {i < validationErrors.length - 1 && <br />}
+                </span>
+              ))}
+            </Typography>
+          </Alert>
+        )}
+      </Box>
+
+      {/* I added the Dialog window for the visual builder here */}
+      <Dialog
+        open={showVisualBuilderDialog}
+        onClose={() => setShowVisualBuilderDialog(false)}
+        maxWidth="lg"
+        fullWidth
+        scroll="paper"
+      >
+        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          Visual Formula Editor
+          <IconButton onClick={() => setShowVisualBuilderDialog(false)}>
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: 0, bgcolor: '#f8fafc' }}>
+          <AdvancedBidirectionalBuilder 
+            initialExpression={expression} 
+            onSave={(newExpression) => {
+              onExpressionChange(newExpression);
+              setShowVisualBuilderDialog(false);
+            }} 
+          />
+        </DialogContent>
+      </Dialog>
+
+      <Box>
+     
+         <Typography
+          variant="caption"
+          fontWeight={600}
+          sx={{ mb: 1, display: "block" }}
+        >
+          OPERATORS
+        </Typography>
+        <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap" }}>
+          {["+", "-", "*", "/", "(", ")"].map((op) => (
+   
+          <Button
+              key={op}
+              variant="outlined"
+              size="small"
+              onClick={() => addOperator(op)}
+              sx={{ minWidth: 40 }}
+            >
+    
+           {op}
+            </Button>
+          ))}
+        </Box>
+      </Box>
+
+      <Box>
+        <Typography
+          variant="caption"
+          fontWeight={600}
+          sx={{ mb: 1, display: "block" }}
+     
+         >
+          INSERT
+        </Typography>
+        <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap" }}>
+          <Button
+            variant={formulaMode ?
+ "contained" : "outlined"}
+            size="small"
+            onClick={toggleFormulaMode}
+            sx={{
+              bgcolor: formulaMode ?
+ "#ff9800" : undefined,
+              color: formulaMode ?
+ "white" : undefined,
+              "&:hover": { bgcolor: formulaMode ?
+ "#f57c00" : undefined },
+            }}
+          >
+            {formulaMode
+              ?
+ "Click cells to add (Active)"
+              : "Select Cell from Canvas"}
+          </Button>
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<AddIcon />}
+            onClick={addVariable}
+         
+           >
+            Variable
+          </Button>
+        </Box>
+        {formulaMode && (
+          <Alert severity="info" sx={{ mt: 1, py: 0.5 }}>
+            <Typography variant="caption">
+              Click on cells in the canvas to add them to the formula. Dynamic
+   
+            rows and the current cell cannot be selected.
+            </Typography>
+          </Alert>
+        )}
+      </Box>
+
+      <Box>
+        <Typography
+          variant="caption"
+          fontWeight={600}
+          sx={{ mb: 
+ 1, display: "block" }}
+        >
+          VARIABLES ({Object.keys(variables || {}).length})
+        </Typography>
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+          {Object.entries(variables || {}).map(([name, config]) => (
+            <Box
+              key={name}
+           
+               sx={{
+                p: 1,
+                bgcolor: "background.paper",
+                border: "1px solid #e0e0e0",
+                borderRadius: 1,
+                display: "flex",
+          
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+              }}
+            >
+              <Box>
+                <Chip
+                  label={name}
+  
+                  size="small"
+                  color="primary"
+                  sx={{ mb: 0.5 }}
+                />
+                <Typography
+             
+                   variant="caption"
+                  display="block"
+                  color="text.secondary"
+                >
+                  {config === "CELL_REF"
+                    ?
+ "Cell Reference"
+                    : `${config.type} from ${config.table}.${config.column}`}
+                </Typography>
+              </Box>
+              <Box>
+                <IconButton
+                
+                   size="small"
+                  onClick={() => editVariable(name)}
+                  title="Edit variable"
+                >
+                  <EditIcon fontSize="small" />
+                </IconButton>
+       
+                  <IconButton
+                  size="small"
+                  onClick={() => removeVariable(name)}
+                  title="Delete variable"
+                >
+                  
+ <DeleteIcon fontSize="small" />
+                </IconButton>
+              </Box>
+            </Box>
+          ))}
+        </Box>
+      </Box>
+
+      <Dialog
+        open={showVariableDialog}
+        onClose={() => {
+        
+           setShowVariableDialog(false);
+          setEditingVarName(null);
+        }}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          <IconButton
+            onClick={() => {
+              setShowVariableDialog(false);
+ setEditingVarName(null);
+            }}
+            sx={{
+              width: 30,
+              height: 30,
+              position: "absolute",
+              right: 16,
+              top: 10,
+            
+             }}
+          >
+            <CloseIcon />
+          </IconButton>
+          <Typography sx={{ fontWeight: "bold" }}>
+            {editingVarName ?
+ "Edit Variable" : "Add Variable"}
+          </Typography>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}>
+            <TextField
+              label="Variable Name"
+              value={newVarName}
+         
+               onChange={(e) =>
+                setNewVarName(e.target.value.replace(/[^a-zA-Z0-9_]/g, ""))
+              }
+              placeholder="e.g., maxBalance"
+              size="small"
+              fullWidth
+              helperText="Only letters, numbers, and underscores"
+  
+             />
+
+            <FormControl size="small" fullWidth>
+              <InputLabel>Variable Type</InputLabel>
+              <Select
+                value={newVarType}
+                onChange={(e) => setNewVarType(e.target.value)}
+             
+                 label="Variable Type"
+              >
+                {/* <MenuItem value="CELL_REF">Cell Reference</MenuItem> */}
+                <MenuItem value="DB_VALUE">DB Value</MenuItem>
+                <MenuItem value="DB_SUM">DB Sum</MenuItem>
+                <MenuItem value="DB_COUNT">DB Count</MenuItem>
+        
+                 <MenuItem value="DB_AVG">DB Average</MenuItem>
+                <MenuItem value="DB_MIN">DB Min</MenuItem>
+                <MenuItem value="DB_MAX">DB Max</MenuItem>
+              </Select>
+            </FormControl>
+
+            {newVarType !== "CELL_REF" && (
+            
+               <>
+                <Autocomplete
+                  size="small"
+                  options={tableConfigs.map((t) => t.tableName)}
+                  value={newVarConfig.table ||
+ null}
+                  onChange={(_, newValue) =>
+                    setNewVarConfig({
+                      ...newVarConfig,
+                      table: newValue || "",
+             
+                       column: "",
+                    })
+                  }
+                  getOptionLabel={(option) => {
+                    const table = tableConfigs.find(
+         
+                       (t) => t.tableName === option
+                    );
+ return table
+                      ?
+ `${table.tableName} (${table.label})`
+                      : option;
+ }}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label="Table"
+                
+                       placeholder="Select table..."
+                    />
+                  )}
+                  fullWidth
+                />
+
+                <Autocomplete
+     
+                   size="small"
+                  options={selectableColumns}
+                  value={newVarConfig.column ||
+ null}
+                  onChange={(_, newValue) =>
+                    setNewVarConfig({ ...newVarConfig, column: newValue || "" })
+                  }
+                  disabled={!newVarConfig.table}
+                  
+ renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label="Column"
+                      placeholder={
+            
+                         newVarConfig.table
+                          ? "Select column..."
+                          : "Select table first"
+                      }
+         
+                     />
+                  )}
+                  fullWidth
+                />
+
+                <FilterBuilder
+                  filters={newVarConfig.filters ||
+ {}}
+                  onFiltersChange={(filters) =>
+                    setNewVarConfig({ ...newVarConfig, filters })
+                  }
+                  tableName={newVarConfig.table ||
+ ""}
+                />
+              </>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+        
+               setShowVariableDialog(false);
+              setEditingVarName(null);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={saveVariable}
+            variant="contained"
+            disabled={!newVarName}
+          >
+    
+             {editingVarName ?
+ "Save Changes" : "Add Variable"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
+ };
