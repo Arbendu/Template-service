@@ -19,8 +19,8 @@ import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import ContentPasteIcon from '@mui/icons-material/ContentPaste';
-import CloudUploadIcon from '@mui/icons-material/CloudUpload';
-import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+// import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+// import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 
 // ============================================================================
 // CONFIGURATION 
@@ -433,7 +433,7 @@ export default function AdvancedBidirectionalBuilder({ initialExpression, availa
         </Paper>
 
         {/* IMPORTER SECTION */}
-        <Paper elevation={0} sx={{ borderRadius: 2, overflow: 'hidden', border: '1px solid', borderColor: 'divider' }}>
+        {/* <Paper elevation={0} sx={{ borderRadius: 1, overflow: 'hidden', border: '1px solid', borderColor: 'divider' }}>
           <Box sx={{ bgcolor: 'grey.50', p: 2, borderBottom: '1px solid', borderColor: 'divider', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Typography variant="subtitle2" fontWeight="bold" display="flex" alignItems="center" gap={1}>
               <CloudUploadIcon color="primary" fontSize="small" /> Paste JEXL Formula
@@ -451,7 +451,7 @@ export default function AdvancedBidirectionalBuilder({ initialExpression, availa
                 fullWidth
                 InputProps={{ sx: { fontFamily: 'monospace', fontSize: 14 } }}
               />
-              <Button onClick={handleImport} variant="contained" color="inherit" sx={{ whiteSpace: 'nowrap', bgcolor: 'grey.800', color: 'white', '&:hover': { bgcolor: 'grey.900' } }}>
+              <Button onClick={handleImport} variant="contained"  sx={{ whiteSpace: 'nowrap'}}>
                 Parse & Build UI
               </Button>
             </Box>
@@ -461,7 +461,7 @@ export default function AdvancedBidirectionalBuilder({ initialExpression, availa
               </Alert>
             )}
           </Box>
-        </Paper>
+        </Paper> */}
 
         {/* CANVAS SECTION */}
         <Paper elevation={0} sx={{ borderRadius: 2, overflow: 'hidden', border: '1px solid', borderColor: 'divider' }}>
@@ -498,7 +498,7 @@ export default function AdvancedBidirectionalBuilder({ initialExpression, availa
         </Paper>
 
         {/* OUTPUT SECTION */}
-        <Paper elevation={0} sx={{ borderRadius: 2, overflow: 'hidden', border: '1px solid', borderColor: 'divider', bgcolor: 'grey.900' }}>
+        <Paper elevation={0} sx={{ borderRadius: 1, overflow: 'hidden', border: '1px solid', borderColor: 'divider', bgcolor: 'grey.900' }}>
            <Box sx={{ p: 1.5, borderBottom: '1px solid', borderColor: 'grey.800', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Typography variant="caption" fontWeight="bold" color="grey.500" sx={{ textTransform: 'uppercase', letterSpacing: 1 }}>
               Live Generated JEXL Payload
