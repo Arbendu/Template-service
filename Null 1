@@ -1,3 +1,5 @@
+// ReportAnaslysis.jsx ------------> Frontend
+
 import { useState, useMemo, useCallback, useEffect, memo } from "react";
 import {
   Box,
@@ -631,5 +633,100 @@ export default function ReportAnalysisScreen() {
         </Box>
       </Paper>
     </Box>
+
+
+
+
+
+
+
+// Api end point
+
+http://10.0.17.242:9020/api/analytics-reports/drill-down
+
+
+
+
+// Response
+
+{
+    "meta": {
+        "status": "SUCCESS",
+        "level": "Branch_name",
+        "rowCount": 6,
+        "executionTimeMs": 346
+    },
+    "data": [
+        {
+            "id": "branch_branch_north_1",
+            "name": "Branch North 1",
+            "jan": 176353.7,
+            "feb": 243452.1,
+            "mar": 172309.97,
+            "hasChildren": true
+        },
+        {
+            "id": "branch_branch_south_2",
+            "name": "Branch South 2",
+            "jan": 168426.49,
+            "feb": 246182.82,
+            "mar": 62133.12,
+            "hasChildren": true
+        },
+        {
+            "id": "branch_branch_east_3",
+            "name": "Branch East 3",
+            "jan": 153582.05,
+            "feb": 92336.62,
+            "mar": 106589.57,
+            "hasChildren": true
+        },
+        {
+            "id": "branch_branch_west_4",
+            "name": "Branch West 4",
+            "jan": 148613.35,
+            "feb": 61967.09,
+            "mar": 249753.83,
+            "hasChildren": true
+        },
+        {
+            "id": "branch_branch_central_5",
+            "name": "Branch Central 5",
+            "jan": 116903.82,
+            "feb": 189212.29,
+            "mar": 94263.69,
+            "hasChildren": true
+        },
+        {
+            "id": "branch_branch_main_6",
+            "name": "Branch Main 6",
+            "jan": 140379.5,
+            "feb": 150522.05,
+            "mar": 173060.8,
+            "hasChildren": true
+        }
+    ]
+}
+
+
+
+
+
+
+// Request body
+
+{ 
+"dimensions": ["Branch_name"], 
+"metrics": ["jan", "feb", "mar"], 
+"hierarchy": ["Circle_name", "Branch_name", "comp_code", 
+"CGL_Number"], 
+"filters": [ 
+{ 
+"field": "Circle_name", 
+"operator": "EQUALS", 
+"value": "North Circle" 
+} 
+] 
+} 
   );
 }
