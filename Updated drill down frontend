@@ -466,3 +466,123 @@ export default function ReportAnalysisScreen() {
     </Box>
   );
 }
+
+
+
+
+
+
+// CallApi.js
+
+
+import { useState, useCallback, useRef, useEffect } from "react";
+import { useSelector } from "react-redux";
+import { useLocation } from "react-router-dom";
+import api from "../config/axiosConfig";
+import { resolveConfig } from "../config/EnvironmentConfig";
+import { convertToKebabCase } from "../utils/CommonUtilities";
+
+const useApi = () => {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const activeRequests = useRef(new Set());
+  const location = useLocation();
+
+  const menus = useSelector((state) => state.menus.menus);
+  const selectedMenuItem = useSelector((state) => state.menus.selectedMenuItem);
+
+  const findMenuItem = useCallback((items, route) => {
+    if (!items?.length) return null;
+    for (const item of items) {
+      if (item.route === route) return item;
+      if (item.children?.length) {
+        if (route.includes("/choose-option/")) {
+          const param = route.split("/choose-option/")[1];
+          if (param === convertToKebabCase(item.title)) return item;
+        }
+        const found = findMenuItem(item.children, route);
+        if (found) return found;
+      }
+    }
+    return null;
+  }, []);
+
+  const xRequestType = (() => {
+    const currentMenu = findMenuItem(menus, location.pathname);
+    return currentMenu?.requestType || selectedMenuItem?.requestType || "*";
+  })();
+
+  const cancelAllRequests = useCallback(() => {
+    activeRequests.current.forEach((controller) => controller.abort());
+    activeRequests.current.clear();
+  }, []);
+
+  useEffect(() => () => cancelAllRequests(), [cancelAllRequests]);
+
+  const callApi = useCallback(
+    async (
+      url,
+      payload = null,
+      method = "GET",
+      responseType = "json",
+      contentType = "application/json",
+      extraConfig = {},
+      returnDataOnly = true,
+    ) => {
+      setLoading(true);
+      setError(null);
+
+      // Build final URL using service resolution
+      const parts = url.split("/");
+      const service = parts[1];
+      const resolved = resolveConfig(`/${service}`);
+      parts[1] = resolved;
+      const finalUrl = parts.slice(1).join("/");
+
+      const controller = new AbortController();
+      activeRequests.current.add(controller);
+
+      try {
+        const config = {
+          method,
+          url: finalUrl,
+          data: method !== "GET" ? payload : undefined,
+          params: method === "GET" ? payload : undefined,
+          responseType,
+          signal: controller.signal,
+          headers: {
+            "Content-Type": contentType,
+            "X-Request-Type": xRequestType,
+            ...(extraConfig.headers || {}),
+          },
+          ...extraConfig,
+        };
+
+        const response = await api(config);
+        setData(response.data);
+        return returnDataOnly ? response.data : response;
+      } catch (err) {
+        setError(err);
+        if (err.response?.status !== 401) {
+          console.error(
+            err.response?.data?.message ||
+              err.response?.data?.error ||
+              "An error occurred",
+          );
+        }
+        throw err?.response?.data;
+      } finally {
+        activeRequests.current.delete(controller);
+        setLoading(false);
+      }
+    },
+    [xRequestType],
+  );
+
+  return { data, error, loading, callApi, cancelAllRequests };
+};
+
+export default useApi;
+
