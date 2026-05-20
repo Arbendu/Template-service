@@ -20,9 +20,10 @@ import {
 import AnalyticsIcon from "@mui/icons-material/Analytics";
 import FileDownloadIcon from "@mui/icons-material/FileDownload";
 import LinkIcon from "@mui/icons-material/Link";
+import useApi from "../../hooks/useApi";
 
 // --- CONFIGURATION & CONSTANTS ---
-const API_ENDPOINT = "http://10.0.17.242:9020/api/analytics-reports/drill-down";
+//const DRILL_DOWN_API_ENDPOINT = "AS/analytics-reports/drill-down";
 
 const formatCurrency = (value) => {
   return new Intl.NumberFormat("en-US", {
@@ -54,14 +55,16 @@ const REPORT_TYPES = {
  */
 const fetchAnalyticsData = async (payload) => {
   try {
-    const response = await fetch(API_ENDPOINT, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        // "Authorization": "Bearer YOUR_JWT_TOKEN" // Uncomment and configure when auth is ready
-      },
-      body: JSON.stringify(payload),
-    });
+    // const response = await fetch(DRILL_DOWN_API_ENDPOINT, {
+    //   method: "POST",
+    //   body: JSON.stringify(payload),
+    // });
+
+    const response = await callApi(
+      "AS/analytics-reports/drill-down",
+      JSON.stringify(payload),
+      "POST",
+    );
 
     if (!response.ok) {
       throw new Error(`API error: ${response.status} ${response.statusText}`);
@@ -237,6 +240,7 @@ export default function ReportAnalysisScreen() {
   const [expandedIds, setExpandedIds] = useState(new Set());
   const [loadingIds, setLoadingIds] = useState(new Set());
   const [isInitializing, setIsInitializing] = useState(true);
+  const { callApi } = useApi();
 
   const activeReportConfig = REPORT_TYPES[activeReportKey];
 
@@ -462,4 +466,3 @@ export default function ReportAnalysisScreen() {
     </Box>
   );
 }
-
