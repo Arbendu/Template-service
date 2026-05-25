@@ -234,7 +234,7 @@ export default function ReportAnalysisScreen() {
   const [isInitializing, setIsInitializing] = useState(false);
   
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
 
   const activeHierarchyConfig = HIERARCHY_VIEWS[activeHierarchyKey];
   
@@ -619,7 +619,7 @@ const TreeTableRow = memo(
                   {node.hasChildren ? (
                     <IconButton
                       size="small"
-                      color="secondary"
+                      color="primary"
                       onClick={() => onToggle(node)}
                       disabled={isLoading}
                       sx={{ mr: 1.5, border: 1, borderColor: "divider", borderRadius: "50%", height: 22, width: 22, p: 0.3, bgcolor: "action.hover", "&:hover": { bgcolor: "action.selected" } }}
@@ -663,7 +663,7 @@ export default function AdminReportAnalysisScreen() {
   const [isInitializing, setIsInitializing] = useState(false);
 
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
 
   const activeHierarchyConfig = ADMIN_HIERARCHY_VIEWS[activeHierarchyKey];
 
@@ -801,14 +801,14 @@ export default function AdminReportAnalysisScreen() {
       <Paper elevation={0} sx={{ mx: "auto", height: "calc(100vh - 64px)", display: "flex", flexDirection: "column", overflow: "hidden", borderRadius: 1, boxShadow: "baseShadow", border: 1, borderColor: "divider" }}>
         
         {/* Top Header */}
-        <Box sx={{ bgcolor: "secondary.main", px: 3, py: 2, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <Box sx={{ bgcolor: "primary.main", px: 3, py: 2, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <Box display="flex" alignItems="center" gap={2}>
-            <Box sx={{ backgroundColor: "secondary.light", borderRadius: "50%", width: 50, height: 50, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <AdminPanelSettingsIcon sx={{ color: "secondary.contrastText", fontSize: 30 }} />
+            <Box sx={{ backgroundColor: "primary.light", borderRadius: "50%", width: 50, height: 50, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <AdminPanelSettingsIcon sx={{ color: "primary.contrastText", fontSize: 30 }} />
             </Box>
             <Box>
-              <Typography variant="h6" sx={{ color: "secondary.contrastText", fontWeight: 600 }}>{activeReportName}</Typography>
-              <Typography variant="caption" sx={{ color: "secondary.contrastText", opacity: 0.8 }}>System Administrator Drill-Down Matrix</Typography>
+              <Typography variant="h6" sx={{ color: "primary.contrastText", fontWeight: 600 }}>{activeReportName}</Typography>
+              <Typography variant="caption" sx={{ color: "primary.contrastText", opacity: 0.8 }}>System Administrator Drill-Down Matrix</Typography>
             </Box>
           </Box>
         </Box>
@@ -855,7 +855,7 @@ export default function AdminReportAnalysisScreen() {
             <Typography variant="body2" color="text.secondary" sx={{ mr: 1, fontWeight: 500 }}>Path:</Typography>
             {activeHierarchyConfig.hierarchy.map((item, index) => (
               <Box key={index} display="flex" alignItems="center">
-                <Box sx={{ px: 1.5, py: 0.5, bgcolor: index <= maxVisibleLevel ? "secondary.main" : "background.paper", color: index <= maxVisibleLevel ? "secondary.contrastText" : "text.primary", borderRadius: 1, border: 1, borderColor: index <= maxVisibleLevel ? "secondary.main" : "divider", fontSize: "0.75rem", fontWeight: 600, textTransform: "capitalize" }}>
+                <Box sx={{ px: 1.5, py: 0.5, bgcolor: index <= maxVisibleLevel ? "primary.main" : "background.paper", color: index <= maxVisibleLevel ? "primary.contrastText" : "text.primary", borderRadius: 1, border: 1, borderColor: index <= maxVisibleLevel ? "primary.main" : "divider", fontSize: "0.75rem", fontWeight: 600, textTransform: "capitalize" }}>
                   {item.replace("_", " ")}
                 </Box>
                 {index < activeHierarchyConfig.hierarchy.length - 1 && <ChevronRightIcon sx={{ color: "text.primary", fontSize: 18, ml: 0.5 }} />}
