@@ -23,6 +23,7 @@ import {
 import AnalyticsIcon from "@mui/icons-material/Analytics";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import DatasetIcon from "@mui/icons-material/Dataset";
+import { useTheme } from "@mui/material/styles";
 import useApi from "../../hooks/useApi";
 import useCustomSnackbar from "../../utils/useCustomSnackbar";
 
@@ -75,7 +76,7 @@ const fetchInitialData = async (callApi, showSnackBar, hierarchy, fileName) => {
     hierarchy: hierarchy,
     filters: [],
   };
-  
+
   const apiData = await fetchAnalyticsData(callApi, showSnackBar, payload);
 
   return (apiData || []).map((row) => ({
@@ -83,11 +84,17 @@ const fetchInitialData = async (callApi, showSnackBar, hierarchy, fileName) => {
     level: 0,
     nodeFilters: [],
     // FIX 1: Generate a guaranteed unique root ID
-    id: `root-${row.name}`, 
+    id: `root-${row.name}`,
   }));
 };
 
-const fetchChildrenData = async (callApi, showSnackBar, parentNode, hierarchy, fileName) => {
+const fetchChildrenData = async (
+  callApi,
+  showSnackBar,
+  parentNode,
+  hierarchy,
+  fileName,
+) => {
   const childLevel = parentNode.level + 1;
   const nextDimension = hierarchy[childLevel];
 
@@ -99,7 +106,7 @@ const fetchChildrenData = async (callApi, showSnackBar, parentNode, hierarchy, f
       value: parentNode.name,
     },
   ];
-  
+
   const payload = {
     fileName: fileName,
     dimensions: [nextDimension],
@@ -107,7 +114,7 @@ const fetchChildrenData = async (callApi, showSnackBar, parentNode, hierarchy, f
     hierarchy: hierarchy,
     filters: currentFilters,
   };
-  
+
   const apiData = await fetchAnalyticsData(callApi, showSnackBar, payload);
 
   return (apiData || []).map((row) => ({
@@ -200,16 +207,44 @@ const TreeTableRow = memo(
           );
         })}
 
-        <TableCell align="right" sx={{ borderRight: 1, borderColor: "divider", color: "text.secondary" }}>
+        <TableCell
+          align="right"
+          sx={{
+            borderRight: 1,
+            borderColor: "divider",
+            color: "text.secondary",
+          }}
+        >
           {formatCurrency(node.jan)}
         </TableCell>
-        <TableCell align="right" sx={{ borderRight: 1, borderColor: "divider", color: "text.secondary" }}>
+        <TableCell
+          align="right"
+          sx={{
+            borderRight: 1,
+            borderColor: "divider",
+            color: "text.secondary",
+          }}
+        >
           {formatCurrency(node.feb)}
         </TableCell>
-        <TableCell align="right" sx={{ borderRight: 1, borderColor: "divider", color: "text.secondary" }}>
+        <TableCell
+          align="right"
+          sx={{
+            borderRight: 1,
+            borderColor: "divider",
+            color: "text.secondary",
+          }}
+        >
           {formatCurrency(node.mar)}
         </TableCell>
-        <TableCell align="right" sx={{ fontWeight: 600, bgcolor: "action.hover", color: "text.primary" }}>
+        <TableCell
+          align="right"
+          sx={{
+            fontWeight: 600,
+            bgcolor: "action.hover",
+            color: "text.primary",
+          }}
+        >
           {formatCurrency(total)}
         </TableCell>
       </TableRow>
@@ -223,27 +258,33 @@ export default function ReportAnalysisScreen() {
   const { callApi } = useApi();
   const user = useSelector((state) => state.auth.user);
   const showSnackBar = useCustomSnackbar();
-  
+
   const [availableReports, setAvailableReports] = useState([]);
   const [selectedReportFile, setSelectedReportFile] = useState("");
-  const [activeHierarchyKey, setActiveHierarchyKey] = useState(HIERARCHY_VIEWS.CIRCLE_WISE.id);
+  const [activeHierarchyKey, setActiveHierarchyKey] = useState(
+    HIERARCHY_VIEWS.CIRCLE_WISE.id,
+  );
 
   const [data, setData] = useState([]);
   const [expandedIds, setExpandedIds] = useState(new Set());
   const [loadingIds, setLoadingIds] = useState(new Set());
   const [isInitializing, setIsInitializing] = useState(false);
-  
+
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
 
+  const theme = useTheme();
+
   const activeHierarchyConfig = HIERARCHY_VIEWS[activeHierarchyKey];
-  
+
   const activeReportName = useMemo(() => {
     if (!selectedReportFile) return "Financial Analytics";
-    const reportObj = availableReports.find((r) => r.fileName === selectedReportFile);
+    const reportObj = availableReports.find(
+      (r) => r.fileName === selectedReportFile,
+    );
     return reportObj ? reportObj.reportName : "Financial Analytics";
   }, [selectedReportFile, availableReports]);
-  
+
   useEffect(() => {
     const fetchReportTypes = async () => {
       try {
@@ -257,11 +298,11 @@ export default function ReportAnalysisScreen() {
     };
     if (user) fetchReportTypes();
   }, [callApi, user, showSnackBar]);
-  
+
   useEffect(() => {
     setPage(0);
   }, [selectedReportFile, activeHierarchyKey]);
-  
+
   useEffect(() => {
     const loadRoot = async () => {
       if (!selectedReportFile) {
@@ -273,7 +314,12 @@ export default function ReportAnalysisScreen() {
       setExpandedIds(new Set());
 
       try {
-        const rootData = await fetchInitialData(callApi, showSnackBar, activeHierarchyConfig.hierarchy, selectedReportFile);
+        const rootData = await fetchInitialData(
+          callApi,
+          showSnackBar,
+          activeHierarchyConfig.hierarchy,
+          selectedReportFile,
+        );
         setData(rootData);
       } catch (error) {
         console.error("Failed to load initial data", error);
@@ -282,17 +328,26 @@ export default function ReportAnalysisScreen() {
       }
     };
     loadRoot();
-  }, [selectedReportFile, activeHierarchyKey, activeHierarchyConfig.hierarchy, callApi, showSnackBar]);
-  
+  }, [
+    selectedReportFile,
+    activeHierarchyKey,
+    activeHierarchyConfig.hierarchy,
+    callApi,
+    showSnackBar,
+  ]);
+
   const appendChildrenToTree = useCallback((nodes, parentId, newChildren) => {
     return nodes.map((node) => {
       if (node.id === parentId) return { ...node, children: newChildren };
       if (node.children)
-        return { ...node, children: appendChildrenToTree(node.children, parentId, newChildren) };
+        return {
+          ...node,
+          children: appendChildrenToTree(node.children, parentId, newChildren),
+        };
       return node;
     });
   }, []);
-  
+
   const handleToggle = useCallback(
     async (node) => {
       const isExpanded = expandedIds.has(node.id);
@@ -301,7 +356,7 @@ export default function ReportAnalysisScreen() {
         setExpandedIds((prev) => {
           const next = new Set(prev);
           next.delete(node.id);
-          
+
           // FIX 2: Recursively find all children/grandchildren and remove them from expandedIds
           const removeDescendants = (currentNode) => {
             if (currentNode.children) {
@@ -312,15 +367,23 @@ export default function ReportAnalysisScreen() {
             }
           };
           removeDescendants(node);
-          
+
           return next;
         });
       } else {
         if (!node.children && node.hasChildren) {
           setLoadingIds((prev) => new Set(prev).add(node.id));
           try {
-            const children = await fetchChildrenData(callApi, showSnackBar, node, activeHierarchyConfig.hierarchy, selectedReportFile);
-            setData((prevData) => appendChildrenToTree(prevData, node.id, children));
+            const children = await fetchChildrenData(
+              callApi,
+              showSnackBar,
+              node,
+              activeHierarchyConfig.hierarchy,
+              selectedReportFile,
+            );
+            setData((prevData) =>
+              appendChildrenToTree(prevData, node.id, children),
+            );
           } catch (error) {
             console.error("Failed to fetch children", error);
           } finally {
@@ -334,9 +397,16 @@ export default function ReportAnalysisScreen() {
         setExpandedIds((prev) => new Set(prev).add(node.id));
       }
     },
-    [expandedIds, appendChildrenToTree, activeHierarchyConfig.hierarchy, selectedReportFile, callApi, showSnackBar],
+    [
+      expandedIds,
+      appendChildrenToTree,
+      activeHierarchyConfig.hierarchy,
+      selectedReportFile,
+      callApi,
+      showSnackBar,
+    ],
   );
-  
+
   const visibleRows = useMemo(() => {
     const rows = [];
     const traverse = (nodes) => {
@@ -348,142 +418,395 @@ export default function ReportAnalysisScreen() {
     traverse(data);
     return rows;
   }, [data, expandedIds]);
-  
+
   const maxVisibleLevel = useMemo(() => {
     if (visibleRows.length === 0) return 0;
     return Math.max(...visibleRows.map((row) => row.level));
   }, [visibleRows]);
-  
-  const visibleHierarchyLevels = activeHierarchyConfig.hierarchy.slice(0, maxVisibleLevel + 1);
-  
+
+  const visibleHierarchyLevels = activeHierarchyConfig.hierarchy.slice(
+    0,
+    maxVisibleLevel + 1,
+  );
+
   const paginatedRows = useMemo(() => {
     const startIndex = page * rowsPerPage;
     return visibleRows.slice(startIndex, startIndex + rowsPerPage);
   }, [visibleRows, page, rowsPerPage]);
-  
+
   const handleChangePage = (event, newPage) => setPage(newPage);
   const handleChangeRowsPerPage = (event) => {
     setRowsPerPage(parseInt(event.target.value, 10));
     setPage(0);
   };
-  
+
   return (
     <Box>
-      <Paper elevation={0} sx={{ mx: "auto", height: "calc(100vh - 64px)", display: "flex", flexDirection: "column", overflow: "hidden", borderRadius: 1, boxShadow: "baseShadow", border: 1, borderColor: "divider" }}>
-        
+      <Paper
+        elevation={0}
+        sx={{
+          mx: "auto",
+          height: "calc(100vh - 64px)",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          borderRadius: 1,
+          boxShadow: "baseShadow",
+          border: 1,
+          borderColor: "divider",
+        }}
+      >
         {/* Top Header */}
-        <Box sx={{ bgcolor: "primary.main", px: 3, py: 2, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <Box
+          sx={{
+            bgcolor: "primary.main",
+            px: 3,
+            py: 2,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
           <Box display="flex" alignItems="center" gap={2}>
-            <Box sx={{ backgroundColor: "primary.light", borderRadius: "50%", width: 50, height: 50, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <AnalyticsIcon sx={{ color: "primary.contrastText", fontSize: 30 }} />
+            <Box
+              sx={{
+                backgroundColor: "primary.light",
+                borderRadius: "50%",
+                width: 50,
+                height: 50,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <AnalyticsIcon
+                sx={{ color: "primary.contrastText", fontSize: 30 }}
+              />
             </Box>
             <Box>
-              <Typography variant="h6" sx={{ color: "primary.contrastText", fontWeight: 600 }}>{activeReportName}</Typography>
-              <Typography variant="caption" sx={{ color: "primary.contrastText", opacity: 0.8 }}>Dynamic Drill-Down Matrix</Typography>
+              <Typography
+                variant="h6"
+                sx={{ color: "primary.contrastText", fontWeight: 600 }}
+              >
+                {activeReportName}
+              </Typography>
+              <Typography
+                variant="caption"
+                sx={{ color: "primary.contrastText", opacity: 0.8 }}
+              >
+                Dynamic Drill-Down Matrix
+              </Typography>
             </Box>
           </Box>
         </Box>
 
         {/* Toolbar Area */}
-        <Box sx={{ bgcolor: "background.glass", borderBottom: 1, borderColor: "divider", px: 3, py: 2, display: "flex", alignItems: "center", gap: 3 }}>
-          <FormControl size="small" sx={{ minWidth: 300, bgcolor: "background.paper", borderRadius: 1 }}>
-            <InputLabel id="report-source-label" shrink>Database Report</InputLabel>
+        <Box
+          sx={{
+            bgcolor: "background.glass",
+            borderBottom: 1,
+            borderColor: "divider",
+            px: 3,
+            py: 2,
+            display: "flex",
+            alignItems: "center",
+            gap: 3,
+          }}
+        >
+          <FormControl
+            size="small"
+            sx={{ minWidth: 300, bgcolor: "background.paper", borderRadius: 1 }}
+          >
+            <InputLabel id="report-source-label" shrink>
+              Database Report
+            </InputLabel>
             <Select
               labelId="report-source-label"
               value={selectedReportFile}
               label="Database Report"
               onChange={(e) => setSelectedReportFile(e.target.value)}
-              displayEmpty notched
-              MenuProps={{ anchorOrigin: { vertical: "bottom", horizontal: "left" }, transformOrigin: { vertical: "top", horizontal: "left" }, PaperProps: { sx: { bgcolor: "background.paper", boxShadow: 3 } } }}
+              displayEmpty
+              notched
+              MenuProps={{
+                anchorOrigin: { vertical: "bottom", horizontal: "left" },
+                transformOrigin: { vertical: "top", horizontal: "left" },
+                PaperProps: {
+                  sx: { bgcolor: "background.paper", boxShadow: 3 },
+                },
+              }}
             >
-              <MenuItem value="" disabled><em>Please select the report</em></MenuItem>
+              <MenuItem value="" disabled>
+                <em>Please select the report</em>
+              </MenuItem>
               {availableReports.map((report) => (
-                <MenuItem key={report.fileName} value={report.fileName}>{report.reportName}</MenuItem>
+                <MenuItem key={report.fileName} value={report.fileName}>
+                  {report.reportName}
+                </MenuItem>
               ))}
             </Select>
           </FormControl>
 
-          <FormControl size="small" sx={{ minWidth: 220, bgcolor: "background.paper", borderRadius: 1 }}>
+          <FormControl
+            size="small"
+            sx={{ minWidth: 220, bgcolor: "background.paper", borderRadius: 1 }}
+          >
             <InputLabel id="hierarchy-view-label">Hierarchy View</InputLabel>
             <Select
               labelId="hierarchy-view-label"
               value={activeHierarchyKey}
               label="Hierarchy View"
               onChange={(e) => setActiveHierarchyKey(e.target.value)}
-              MenuProps={{ anchorOrigin: { vertical: "bottom", horizontal: "left" }, transformOrigin: { vertical: "top", horizontal: "left" }, PaperProps: { sx: { bgcolor: "background.paper", boxShadow: 3, mt: 0.5 } } }}
+              MenuProps={{
+                anchorOrigin: { vertical: "bottom", horizontal: "left" },
+                transformOrigin: { vertical: "top", horizontal: "left" },
+                PaperProps: {
+                  sx: { bgcolor: "background.paper", boxShadow: 3, mt: 0.5 },
+                },
+              }}
             >
               {Object.values(HIERARCHY_VIEWS).map((view) => (
-                <MenuItem key={view.id} value={view.id}>{view.label}</MenuItem>
+                <MenuItem key={view.id} value={view.id}>
+                  {view.label}
+                </MenuItem>
               ))}
             </Select>
           </FormControl>
 
-          <Box sx={{ borderLeft: 1, borderColor: "divider", height: 30, mx: 1 }} />
+          <Box
+            sx={{ borderLeft: 1, borderColor: "divider", height: 30, mx: 1 }}
+          />
 
           {/* Breadcrumbs */}
           <Box display="flex" alignItems="center" gap={1}>
-            <Typography variant="body2" color="text.secondary" sx={{ mr: 1, fontWeight: 500 }}>Path:</Typography>
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{ mr: 1, fontWeight: 500 }}
+            >
+              Path:
+            </Typography>
             {activeHierarchyConfig.hierarchy.map((item, index) => (
               <Box key={index} display="flex" alignItems="center">
-                <Box sx={{ px: 1.5, py: 0.5, bgcolor: index <= maxVisibleLevel ? "primary.main" : "background.paper", color: index <= maxVisibleLevel ? "primary.contrastText" : "text.primary", borderRadius: 1, border: 1, borderColor: index <= maxVisibleLevel ? "primary.main" : "divider", fontSize: "0.75rem", fontWeight: 600, textTransform: "capitalize" }}>
+                <Box
+                  sx={{
+                    px: 1.5,
+                    py: 0.5,
+                    bgcolor:
+                      index <= maxVisibleLevel
+                        ? "primary.main"
+                        : "background.paper",
+                    color:
+                      index <= maxVisibleLevel
+                        ? "primary.contrastText"
+                        : "text.primary",
+                    borderRadius: 1,
+                    border: 1,
+                    borderColor:
+                      index <= maxVisibleLevel ? "primary.main" : "divider",
+                    fontSize: "0.75rem",
+                    fontWeight: 600,
+                    textTransform: "capitalize",
+                  }}
+                >
                   {item.replace("_", " ")}
                 </Box>
-                {index < activeHierarchyConfig.hierarchy.length - 1 && <ChevronRightIcon sx={{ mx: 0.5, color: "text.disabled", fontSize: 18 }} />}
+                {index < activeHierarchyConfig.hierarchy.length - 1 && (
+                  <ChevronRightIcon
+                    sx={{ mx: 0.5, color: "text.disabled", fontSize: 18 }}
+                  />
+                )}
               </Box>
             ))}
           </Box>
         </Box>
 
         {/* Data Grid */}
-        <TableContainer sx={{ flexGrow: 1, bgcolor: "background.default", position: "relative" }}>
+        <TableContainer
+          sx={{
+            flexGrow: 1,
+            bgcolor: "background.default",
+            position: "relative",
+          }}
+        >
           {!selectedReportFile && (
-            <Box sx={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 10 }}>
-              <DatasetIcon sx={{ fontSize: 60, color: "action.disabled", mb: 1 }} />
-              <Typography variant="h6" color="text.secondary">No Data to Display</Typography>
-              <Typography variant="body2" color="text.disabled">Please select a database report from the dropdown above to begin analysis.</Typography>
+            <Box
+              sx={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 10,
+              }}
+            >
+              <DatasetIcon
+                sx={{ fontSize: 60, color: "action.disabled", mb: 1 }}
+              />
+              <Typography variant="h6" color="text.secondary">
+                No Data to Display
+              </Typography>
+              <Typography variant="body2" color="text.disabled">
+                Please select a database report from the dropdown above to begin
+                analysis.
+              </Typography>
             </Box>
           )}
 
           {isInitializing ? (
-            <Box sx={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+            <Box
+              sx={{
+                height: "100%",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
               <CircularProgress size={40} color="primary" sx={{ mb: 2 }} />
-              <Typography variant="body1" color="text.secondary">Executing Query ...</Typography>
+              <Typography variant="body1" color="text.secondary">
+                Executing Query ...
+              </Typography>
             </Box>
           ) : (
             <Table stickyHeader size="small" sx={{ minWidth: 1000 }}>
               <TableHead>
                 <TableRow>
                   {visibleHierarchyLevels.map((levelName) => (
-                    <TableCell key={levelName} sx={{ bgcolor: "background.paper", color: "text.primary", fontWeight: 700, borderRight: 1, borderColor: "divider", borderBottom: 2, width: 220 }}>
+                    <TableCell
+                      key={levelName}
+                      sx={{
+                        backgroundColor: theme.palette.purple[50],
+                        color: "text.primary",
+                        fontWeight: 700,
+                        borderRight: 1,
+                        borderColor: "divider",
+                        borderBottom: 2,
+                        width: 220,
+                        WebkitBackdropFilter: "blur(8px)",
+                      }}
+                    >
                       {levelName.replace("_", " ").toUpperCase()}
                     </TableCell>
                   ))}
-                  <TableCell align="right" sx={{ bgcolor: "background.paper", color: "text.primary", fontWeight: 700, borderRight: 1, borderColor: "divider", borderBottom: 2 }}>January</TableCell>
-                  <TableCell align="right" sx={{ bgcolor: "background.paper", color: "text.primary", fontWeight: 700, borderRight: 1, borderColor: "divider", borderBottom: 2 }}>February</TableCell>
-                  <TableCell align="right" sx={{ bgcolor: "background.paper", color: "text.primary", fontWeight: 700, borderRight: 1, borderColor: "divider", borderBottom: 2 }}>March</TableCell>
-                  <TableCell align="right" sx={{ bgcolor: "action.hover", color: "text.primary", fontWeight: 800, borderBottom: 2, borderColor: "divider" }}>YTD Total</TableCell>
+                  <TableCell
+                    align="right"
+                    sx={{
+                      backgroundColor: theme.palette.purple[100],
+                      color: "text.primary",
+                      fontWeight: 700,
+                      borderRight: 1,
+                      borderColor: "divider",
+                      borderBottom: 2,
+                    }}
+                  >
+                    January
+                  </TableCell>
+                  <TableCell
+                    align="right"
+                    sx={{
+                      backgroundColor: theme.palette.purple[100],
+                      color: "text.primary",
+                      fontWeight: 700,
+                      borderRight: 1,
+                      borderColor: "divider",
+                      borderBottom: 2,
+                    }}
+                  >
+                    February
+                  </TableCell>
+                  <TableCell
+                    align="right"
+                    sx={{
+                      backgroundColor: theme.palette.purple[100],
+                      color: "text.primary",
+                      fontWeight: 700,
+                      borderRight: 1,
+                      borderColor: "divider",
+                      borderBottom: 2,
+                    }}
+                  >
+                    March
+                  </TableCell>
+                  <TableCell
+                    align="right"
+                    sx={{
+                      backgroundColor: theme.palette.purple[100],
+                      color: "text.primary",
+                      fontWeight: 800,
+                      borderBottom: 2,
+                      borderColor: "divider",
+                    }}
+                  >
+                    YTD Total
+                  </TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {paginatedRows.map((row) => (
-                  <TreeTableRow key={row.id} node={row} isExpanded={expandedIds.has(row.id)} isLoading={loadingIds.has(row.id)} onToggle={handleToggle} maxVisibleLevel={maxVisibleLevel} />
+                  <TreeTableRow
+                    key={row.id}
+                    node={row}
+                    isExpanded={expandedIds.has(row.id)}
+                    isLoading={loadingIds.has(row.id)}
+                    onToggle={handleToggle}
+                    maxVisibleLevel={maxVisibleLevel}
+                  />
                 ))}
               </TableBody>
             </Table>
           )}
         </TableContainer>
 
-        <Box sx={{ bgcolor: "background.glass", borderTop: 1, borderColor: "divider", px: 3, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <Box
+          sx={{
+            bgcolor: "background.glass",
+            borderTop: 1,
+            borderColor: "divider",
+            px: 3,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: selectedReportFile ? "success.main" : "action.disabled" }} />
-            <Typography variant="caption" color="text.secondary">{selectedReportFile ? "Connected" : "No Connection"}</Typography>
+            <Box
+              sx={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                bgcolor: selectedReportFile
+                  ? "success.main"
+                  : "action.disabled",
+              }}
+            />
+            <Typography variant="caption" color="text.secondary">
+              {selectedReportFile ? "Connected" : "No Connection"}
+            </Typography>
           </Box>
-          <TablePagination component="div" count={visibleRows.length} page={page} onPageChange={handleChangePage} rowsPerPage={rowsPerPage} onRowsPerPageChange={handleChangeRowsPerPage} rowsPerPageOptions={[10, 25, 50, 100]} sx={{ ".MuiTablePagination-toolbar": { minHeight: 50, padding: 0 }, ".MuiTablePagination-selectLabel, .MuiTablePagination-displayedRows": { margin: 0, color: "text.secondary" } }} />
+          <TablePagination
+            component="div"
+            count={visibleRows.length}
+            page={page}
+            onPageChange={handleChangePage}
+            rowsPerPage={rowsPerPage}
+            onRowsPerPageChange={handleChangeRowsPerPage}
+            rowsPerPageOptions={[10, 25, 50, 100]}
+            sx={{
+              ".MuiTablePagination-toolbar": { minHeight: 50, padding: 0 },
+              ".MuiTablePagination-selectLabel, .MuiTablePagination-displayedRows":
+                { margin: 0, color: "text.secondary" },
+            }}
+          />
         </Box>
       </Paper>
     </Box>
   );
 }
+
 
 
 
@@ -514,6 +837,7 @@ import {
 import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import DatasetIcon from "@mui/icons-material/Dataset";
+import { useTheme } from "@mui/material/styles";
 import useApi from "../../hooks/useApi";
 import useCustomSnackbar from "../../utils/useCustomSnackbar";
 
@@ -664,6 +988,8 @@ export default function AdminReportAnalysisScreen() {
 
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
+
+  const theme = useTheme();
 
   const activeHierarchyConfig = ADMIN_HIERARCHY_VIEWS[activeHierarchyKey];
 
@@ -824,7 +1150,7 @@ export default function AdminReportAnalysisScreen() {
                 label="Database Report"
                 onChange={(e) => setSelectedReportFile(e.target.value)}
                 displayEmpty notched
-                MenuProps={{ anchorOrigin: { vertical: "bottom", horizontal: "left" }, transformOrigin: { vertical: "top", horizontal: "left" }, PaperProps: { sx: { bgcolor: "background.paper", boxShadow: 3, mt: 0.5 } } }}
+                MenuProps={{ anchorOrigin: { vertical: "bottom", horizontal: "left" }, transformOrigin: { vertical: "top", horizontal: "left" }, PaperProps: { sx: { bgcolor: "background.glass", boxShadow: 3, mt: 0.5 } } }}
               >
                 <MenuItem value="" disabled><em>Please select the report</em></MenuItem>
                 {availableReports.map((report) => (
@@ -876,22 +1202,22 @@ export default function AdminReportAnalysisScreen() {
 
           {isInitializing ? (
             <Box sx={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-              <CircularProgress size={40} color="secondary" sx={{ mb: 2 }} />
-              <Typography variant="body1" color="text.secondary">Executing Admin Query on Engine...</Typography>
+              <CircularProgress size={40} color="primary" sx={{ mb: 2 }} />
+              <Typography variant="body1" color="text.secondary">Executing Query...</Typography>
             </Box>
           ) : (
             <Table stickyHeader size="small" sx={{ minWidth: 1000 }}>
               <TableHead>
                 <TableRow>
                   {visibleHierarchyLevels.map((levelName) => (
-                    <TableCell key={levelName} sx={{ bgcolor: "background.paper", color: "text.primary", fontWeight: 700, borderRight: 1, borderColor: "divider", borderBottom: 2, width: 220 }}>
+                    <TableCell key={levelName} sx={{ backgroundColor: theme.palette.purple[50], color: "text.primary", fontWeight: 700, borderRight: 1, borderColor: "divider", borderBottom: 2, width: 220 }}>
                       {levelName.replace("_", " ").toUpperCase()}
                     </TableCell>
                   ))}
-                  <TableCell align="right" sx={{ bgcolor: "background.paper", color: "text.primary", fontWeight: 700, borderRight: 1, borderColor: "divider", borderBottom: 2 }}>January</TableCell>
-                  <TableCell align="right" sx={{ bgcolor: "background.paper", color: "text.primary", fontWeight: 700, borderRight: 1, borderColor: "divider", borderBottom: 2 }}>February</TableCell>
-                  <TableCell align="right" sx={{ bgcolor: "background.paper", color: "text.primary", fontWeight: 700, borderRight: 1, borderColor: "divider", borderBottom: 2 }}>March</TableCell>
-                  <TableCell align="right" sx={{ bgcolor: "action.hover", color: "text.primary", fontWeight: 800, borderBottom: 2, borderColor: "divider" }}>YTD Total</TableCell>
+                  <TableCell align="right" sx={{ backgroundColor: theme.palette.purple[100], color: "text.primary", fontWeight: 700, borderRight: 1, borderColor: "divider", borderBottom: 2 }}>January</TableCell>
+                  <TableCell align="right" sx={{ backgroundColor: theme.palette.purple[100], color: "text.primary", fontWeight: 700, borderRight: 1, borderColor: "divider", borderBottom: 2 }}>February</TableCell>
+                  <TableCell align="right" sx={{ backgroundColor: theme.palette.purple[100], color: "text.primary", fontWeight: 700, borderRight: 1, borderColor: "divider", borderBottom: 2 }}>March</TableCell>
+                  <TableCell align="right" sx={{ backgroundColor: theme.palette.purple[100], color: "text.primary", fontWeight: 800, borderBottom: 2, borderColor: "divider" }}>YTD Total</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
