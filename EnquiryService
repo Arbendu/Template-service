@@ -89,52 +89,57 @@ public class DifferenceDTO {
 
 
 
-// Gl_Balance_difference(model)
+// Difference(model)
 
 package com.fincore.enquiry_service.model;
 
 import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Getter;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import lombok.Data;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
-import lombok.ToString;
 
-import java.util.Date;
-
-@Getter
-@Setter
 @Entity
-@Table(name = "GL_BALANCE_DIFFERENCE")
-@ToString
-public class Gl_Balance_difference {
+@Data
+@NoArgsConstructor
+public class Difference {
 
-    // @GeneratedValue(strategy = GenerationType.SEQUENCE, generator =
-    // "gl_balance_seq_gen")
-
-    // @SequenceGenerator(name = "gl_balance_seq_gen", sequenceName =
-    // "GL_BALANCE_SEQ", allocationSize = 1)
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "ID")
-    private Integer id;
-    @Column(name = "BALANCE_DATE")
-    private Date date;
-    @Column(name = "BRANCH_CODE")
-    private String branch;
-    @Column(name = "CURRENCY")
-    private String currency;
-    @Column(name = "CGL")
-    private String cgl;
-    @Column(name = "BALANCE")
-    private Double balance;
-    @Column(name = "INR_BALANCE")
-    private Double inrBalance;
-    @Column(name = "TYPE")
-    private String type;
-    @Column(name = "FIRST_ERROR_DATE")
-    private Date firstErrorDate;
+    private Long id;
 
+    @Column(name = "RECON_RUN_DATE")
+    private LocalDate reconRunDate;
+
+    @Column(name = "BRANCH_CODE", length = 5)
+    private String branchCode;
+
+    @Column(name = "CURRENCY", length = 3)
+    private String currency;
+
+    @Column(name = "CGL", length = 10)
+    private String cgl;
+
+    @Column(name = "CBS_BALANCE", precision = 25, scale = 4)
+    private BigDecimal cbsBalance;
+
+    @Column(name = "GL_BALANCE", precision = 25, scale = 4)
+    private BigDecimal glBalance;
+
+    @Column(name = "DIFFERENCE_AMOUNT", precision = 25, scale = 4)
+    private BigDecimal differenceAmount;
+
+    @Column(name = "DIFF_BW_YESTERDAY", precision = 25, scale = 4)
+    private BigDecimal diffBwYesterday;
+
+    @Column(name = "TYPE", length = 40)
+    private String type;
+
+    @Column(name = "HEAD", length = 30)
+    private String head;
+
+    @Column(name = "FIRST_ERROR_DATE")
+    private LocalDate FIRST_ERROR_DATE;
 }
 
 
