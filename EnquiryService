@@ -1,0 +1,288 @@
+// DifferenceController
+
+package com.fincore.enquiry_service.controller;
+
+import com.fincore.enquiry_service.dto.ApiResponse;
+import com.fincore.enquiry_service.dto.DifferenceDTO;
+import com.fincore.enquiry_service.dto.DifferenceSearchDto;
+import com.fincore.enquiry_service.service.DifferenceService;
+import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/differences")
+public class DifferenceController {
+
+    @Autowired
+    private DifferenceService service;
+
+    // GET All with ApiResponse
+    @GetMapping
+    public ResponseEntity<ApiResponse<Page<DifferenceDTO>>> getDifferences(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "100") int size) {
+        Page<DifferenceDTO> result = service.getAllDifferences(page, size);
+        return ResponseEntity.ok(ApiResponse.success(result, "Differences retrieved successfully"));
+    }
+
+    // POST Search with ApiResponse
+    @PostMapping("/search")
+    public ResponseEntity<ApiResponse<Page<DifferenceDTO>>> searchDifferences(
+            @Valid @RequestBody DifferenceSearchDto criteria,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "100") int size) {
+
+        Page<DifferenceDTO> result = service.searchDifferences(criteria, page, size);
+
+        if (result.isEmpty()) {
+            return ResponseEntity.ok(ApiResponse.error("No differences found for the given criteria"));
+        }
+
+        return ResponseEntity.ok(ApiResponse.success(result, "Differences retrieved successfully"));
+    }
+}
+
+
+
+
+
+
+
+
+
+
+// DifferenceDTO
+
+package com.fincore.enquiry_service.dto;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class DifferenceDTO {
+    private LocalDate reconRunDate;
+    private String branchCode;
+    private String currency;
+    private String cgl;
+    private BigDecimal cbsBalance;
+    private BigDecimal glBalance;
+    private BigDecimal differenceAmount;
+    private BigDecimal diffBwYesterday;
+    private String type;
+    private String head;
+    private LocalDate FIRST_ERROR_DATE;
+}
+
+
+
+
+
+
+
+
+
+
+// Gl_Balance_difference(model)
+
+package com.fincore.enquiry_service.model;
+
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+import lombok.ToString;
+
+import java.util.Date;
+
+@Getter
+@Setter
+@Entity
+@Table(name = "GL_BALANCE_DIFFERENCE")
+@ToString
+public class Gl_Balance_difference {
+
+    // @GeneratedValue(strategy = GenerationType.SEQUENCE, generator =
+    // "gl_balance_seq_gen")
+
+    // @SequenceGenerator(name = "gl_balance_seq_gen", sequenceName =
+    // "GL_BALANCE_SEQ", allocationSize = 1)
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "ID")
+    private Integer id;
+    @Column(name = "BALANCE_DATE")
+    private Date date;
+    @Column(name = "BRANCH_CODE")
+    private String branch;
+    @Column(name = "CURRENCY")
+    private String currency;
+    @Column(name = "CGL")
+    private String cgl;
+    @Column(name = "BALANCE")
+    private Double balance;
+    @Column(name = "INR_BALANCE")
+    private Double inrBalance;
+    @Column(name = "TYPE")
+    private String type;
+    @Column(name = "FIRST_ERROR_DATE")
+    private Date firstErrorDate;
+
+}
+
+
+
+
+
+
+
+
+
+// DifferenceService
+
+package com.fincore.enquiry_service.service;
+
+import com.fincore.enquiry_service.dto.DifferenceDTO;
+import com.fincore.enquiry_service.dto.DifferenceSearchDto;
+import com.fincore.enquiry_service.repository.DifferenceRepository;
+import io.micrometer.common.util.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+public class DifferenceService implements IDifferenceService {
+
+    @Autowired
+    private DifferenceRepository repository;
+
+    @Transactional(readOnly = true)
+    public Page<DifferenceDTO> getAllDifferences(int page, int size) {
+        PageRequest pageRequest = PageRequest.of(page, size, Sort.by("id"));
+        return repository.findAllAsDto(pageRequest);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<DifferenceDTO> searchDifferences(DifferenceSearchDto criteria, int page, int size) {
+        PageRequest pageRequest = PageRequest.of(page, size, Sort.by("id"));
+
+        // sanitize inputs: convert empty strings to null so SQL ignores them
+        String branch = StringUtils.isBlank(criteria.getBranchCode()) ? null : criteria.getBranchCode();
+        String curr = StringUtils.isBlank(criteria.getCurrency()) ? null : criteria.getCurrency();
+        String cgl = StringUtils.isBlank(criteria.getCgl()) ? null : criteria.getCgl();
+
+        return repository.searchDifferencesDynamic(
+                criteria.getFromDate(),
+                criteria.getEffectiveToDate(), // Handles the "Single Date vs Range" logic
+                branch,
+                curr,
+                cgl,
+                pageRequest
+        );
+    }
+}
+
+
+
+
+
+
+
+
+
+// DifferenceRepository
+
+package com.fincore.enquiry_service.repository;
+
+import com.fincore.enquiry_service.dto.DifferenceDTO;
+import com.fincore.enquiry_service.model.Difference;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+import java.time.LocalDate;
+
+@Repository
+public interface DifferenceRepository extends JpaRepository<Difference, Long> {
+
+    // 1. Keep the original 'Find All' for basic listing
+    @Query("""
+        SELECT new com.fincore.enquiry_service.dto.DifferenceDTO(
+            d.reconRunDate, d.branchCode, d.currency, d.cgl,
+            d.cbsBalance, d.glBalance, d.differenceAmount,
+            d.diffBwYesterday, d.type, d.head, d.FIRST_ERROR_DATE
+        )
+        FROM Difference d
+    """)
+    Page<DifferenceDTO> findAllAsDto(Pageable pageable);
+
+    /**
+     * 2. MASTER DYNAMIC FILTER
+     * Handles: Date Range, Optional Branch, Optional Currency, Optional CGL
+     */
+    @Query("""
+        SELECT new  com.fincore.enquiry_service.dto.DifferenceDTO(
+            d.reconRunDate, d.branchCode, d.currency, d.cgl,
+            d.cbsBalance, d.glBalance, d.differenceAmount,
+            d.diffBwYesterday, d.type, d.head, d.FIRST_ERROR_DATE
+        )
+        FROM Difference d
+        WHERE (d.reconRunDate BETWEEN :fromDate AND :toDate)
+        AND (:branchCode IS NULL OR d.branchCode = :branchCode)
+        AND (:currency IS NULL OR d.currency = :currency)
+        AND (:cgl IS NULL OR d.cgl = :cgl)
+    """)
+    Page<DifferenceDTO> searchDifferencesDynamic(
+            @Param("fromDate") LocalDate fromDate,
+            @Param("toDate") LocalDate toDate,
+            @Param("branchCode") String branchCode,
+            @Param("currency") String currency,
+            @Param("cgl") String cgl,
+            Pageable pageable
+    );
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+//  DB: Difference
+
+73501153 31-03-26 70188 INR 1204505001 -5729953 -5730453 500 500 New Entry CASH 31-03-26
+333026482 01-04-26 70188 INR 1204505001 -5729953 -5730453 500 0 Zero Difference CASH 31-03-26
+333026483 02-04-26 70188 INR 1204505001 -5728953 -5730453 1500 1000 Difference Change CASH 31-03-26
+333026484 03-04-26 70188 INR 1204505001 -5729653 -5730453 800 -700 Difference Change CASH 31-03-26
+333026485 04-04-26 70188 INR 1204505001 -5730453 -5730453 0 -800 Close CASH 31-03-26
+73501153 31-03-26 70188 INR 1204505001 -5729953 -5730453 500 500 New Entry CASH 31-03-26
+73501171 31-03-26 20950 INR 1204505001 -1433752 -1433652 -100 -100 New Entry CASH 31-03-26
+73501181 31-03-26 07036 INR 1204505001 -159067 -159097 30 0 Zero Difference CASH 30-03-26
+73501192 31-03-26 00904 INR 1204505001 -400239 -1833312 1433073 0 Zero Difference CASH 30-03-26
+73501193 31-03-26 01249 INR 1204505001 -98842 -96948 -1894 0 Zero Difference CASH 30-03-26
+73501199 31-03-26 40683 INR 1204505001 -3295893 -27295893 24000000 24000000 New Entry CASH 31-03-26
+73501201 31-03-26 20122 INR 1204505001 -497212 -497203 -9 -243901 Difference Change CASH 30-03-26
+73501202 31-03-26 31543 INR 1204505001 -1443783 -2091783 648000 0 Zero Difference CASH 30-03-26
+73501209 31-03-26 30106 INR 1204505001 -18499453 -18899453 400000 400000 New Entry CASH 31-03-26
+73501218 31-03-26 40062 INR 1204505001 -428970 -429290 320 320 New Entry CASH 31-03-26
+73501226 31-03-26 00197 INR 1204505001 -180018 -185119 5101 5101 New Entry CASH 31-03-26
+73501236 31-03-26 00721 INR 1204505001 -186380 -200383 14003 0 Zero Difference CASH 30-03-26
+73501253 31-03-26 00002 INR 1204505001 -434483 -444463 9980 9930 Difference Change CASH 23-03-26
