@@ -291,3 +291,43 @@ public interface DifferenceRepository extends JpaRepository<Difference, Long> {
 73501226 31-03-26 00197 INR 1204505001 -180018 -185119 5101 5101 New Entry CASH 31-03-26
 73501236 31-03-26 00721 INR 1204505001 -186380 -200383 14003 0 Zero Difference CASH 30-03-26
 73501253 31-03-26 00002 INR 1204505001 -434483 -444463 9980 9930 Difference Change CASH 23-03-26
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//************************************************************************ Updated Code for GLCC history ***************************************************************************//
+
+// DifferenceHistoryDTO
+
+
+
+
+
+
+
+// Update Repository query
+
+
+
+
+
+
+// Add the controller
+
+
+
+
+
+
+// Update service layer
+
