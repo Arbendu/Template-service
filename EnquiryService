@@ -310,12 +310,53 @@ public interface DifferenceRepository extends JpaRepository<Difference, Long> {
 // DifferenceHistoryDTO
 
 
+package com.fincore.enquiry_service.dto;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class DifferenceHistoryDTO {
+    private LocalDate reconRunDate;
+    private LocalDate firstErrorDate; // Shows when the entry started
+    private String branchCode;
+    private String currency;
+    private String cgl;
+    private BigDecimal differenceAmount;
+    private BigDecimal diffBwYesterday;
+    private String status; // Will map from the DB's 'TYPE' column
+}
 
 
 
 
 // Update Repository query
+
+    /**
+     * Fetch the historical lifecycle of a specific GLCC difference with status and timeline.
+     */
+    @Query("""
+        SELECT new com.fincore.enquiry_service.dto.DifferenceHistoryDTO(
+            d.reconRunDate, d.FIRST_ERROR_DATE, d.branchCode, d.currency, d.cgl, 
+            d.differenceAmount, d.diffBwYesterday, d.type
+        )
+        FROM Difference d
+        WHERE d.branchCode = :branchCode
+        AND d.cgl = :cgl
+        AND d.currency = :currency
+        ORDER BY d.reconRunDate DESC
+    """)
+    Page<DifferenceHistoryDTO> findHistoryByBranchAndCglAndCurrency(
+            @Param("branchCode") String branchCode,
+            @Param("cgl") String cgl,
+            @Param("currency") String currency,
+            Pageable pageable
+    );
 
 
 
@@ -324,10 +365,46 @@ public interface DifferenceRepository extends JpaRepository<Difference, Long> {
 
 // Add the controller
 
+// GET History for a specific GLCC lifecycle
+    @GetMapping("/history")
+    public ResponseEntity<ApiResponse<Page<DifferenceHistoryDTO>>> getGlccHistory(
+            @RequestParam String branchCode,
+            @RequestParam String cgl,
+            @RequestParam(defaultValue = "INR") String currency,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "100") int size) {
 
+        Page<DifferenceHistoryDTO> result = service.getGlccHistory(branchCode, cgl, currency, page, size);
+        
+        if (result.isEmpty()) {
+            return ResponseEntity.ok(ApiResponse.error("No historical records found for the provided Branch and CGL"));
+        }
+
+        return ResponseEntity.ok(ApiResponse.success(result, "GLCC History retrieved successfully"));
+    }
+}
 
 
 
 
 // Update service layer
 
+@Transactional(readOnly = true)
+    public Page<DifferenceHistoryDTO> getGlccHistory(String branchCode, String cgl, String currency, int page, int size) {
+        // We do not pass Sort here because it is explicitly handled by 'ORDER BY d.reconRunDate DESC' in the JPQL query
+        PageRequest pageRequest = PageRequest.of(page, size); 
+        
+        // Sanitize inputs to prevent blank strings from failing the exact-match query
+        String safeBranch = StringUtils.isBlank(branchCode) ? null : branchCode;
+        String safeCgl = StringUtils.isBlank(cgl) ? null : cgl;
+        String safeCurrency = StringUtils.isBlank(currency) ? "INR" : currency;
+
+        return repository.findHistoryByBranchAndCglAndCurrency(safeBranch, safeCgl, safeCurrency, pageRequest);
+    }
+
+
+
+
+
+
+Page<DifferenceHistoryDTO> getGlccHistory(String branchCode, String cgl, String currency, int page, int size);
