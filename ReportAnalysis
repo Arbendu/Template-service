@@ -1,6 +1,6 @@
 // ***************************************************************** ReportAnalysisScreen.jsx ****************************************************************************** //
 
-import { useState, useMemo, useCallback, useEffect, memo } from "react";
+import { useState, useMemo, useCallback, useEffect, memo, forwardRef } from "react";
 import { useSelector } from "react-redux";
 import {
   Box,
@@ -24,8 +24,15 @@ import AnalyticsIcon from "@mui/icons-material/Analytics";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import DatasetIcon from "@mui/icons-material/Dataset";
 import { useTheme } from "@mui/material/styles";
+import { motion, AnimatePresence } from "framer-motion";
+
+// Assume these are available in your project structure
 import useApi from "../../hooks/useApi";
 import useCustomSnackbar from "../../utils/useCustomSnackbar";
+
+// --- MOTION WRAPPERS ---
+const MotionTableRow = motion(TableRow);
+const MotionBox = motion(Box);
 
 // --- CONFIGURATION & CONSTANTS ---
 const moduleType = "WHOLE_BANK";
@@ -51,14 +58,16 @@ const HIERARCHY_VIEWS = {
   },
 };
 
-// --- ACTUAL API LOGIC ---
+// FIX 1: Stable fallback reference to prevent infinite render loops!
+const DEFAULT_HIERARCHY_CONFIG = { hierarchy: [] };
 
+// --- ACTUAL API LOGIC ---
 const fetchAnalyticsData = async (callApi, showSnackBar, payload) => {
   try {
     const responseData = await callApi(
       "/AS/analytics-reports/drill-down",
       payload,
-      "POST",
+      "POST"
     );
     return responseData?.data || [];
   } catch (error) {
@@ -76,14 +85,12 @@ const fetchInitialData = async (callApi, showSnackBar, hierarchy, fileName) => {
     hierarchy: hierarchy,
     filters: [],
   };
-
   const apiData = await fetchAnalyticsData(callApi, showSnackBar, payload);
 
   return (apiData || []).map((row) => ({
     ...row,
     level: 0,
     nodeFilters: [],
-    // FIX 1: Generate a guaranteed unique root ID
     id: `root-${row.name}`,
   }));
 };
@@ -93,7 +100,7 @@ const fetchChildrenData = async (
   showSnackBar,
   parentNode,
   hierarchy,
-  fileName,
+  fileName
 ) => {
   const childLevel = parentNode.level + 1;
   const nextDimension = hierarchy[childLevel];
@@ -106,7 +113,6 @@ const fetchChildrenData = async (
       value: parentNode.name,
     },
   ];
-
   const payload = {
     fileName: fileName,
     dimensions: [nextDimension],
@@ -114,27 +120,32 @@ const fetchChildrenData = async (
     hierarchy: hierarchy,
     filters: currentFilters,
   };
-
   const apiData = await fetchAnalyticsData(callApi, showSnackBar, payload);
 
   return (apiData || []).map((row) => ({
     ...row,
     level: childLevel,
     nodeFilters: currentFilters,
-    // FIX 1: Generate a guaranteed unique child ID based on its parent's exact path
     id: `${parentNode.id}->lvl${childLevel}-${row.name}`,
   }));
 };
 
 // --- COMPONENTS ---
 
-// 1. The MUI Row Component
+// FIX 2: Wrapped in forwardRef so Framer Motion's AnimatePresence doesn't crash on unmount
 const TreeTableRow = memo(
-  ({ node, isExpanded, isLoading, onToggle, maxVisibleLevel }) => {
+  forwardRef(({ node, isExpanded, isLoading, onToggle, maxVisibleLevel, index }, ref) => {
     const total = (node.jan || 0) + (node.feb || 0) + (node.mar || 0);
 
     return (
-      <TableRow hover>
+      <MotionTableRow
+        ref={ref}
+        hover
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -20 }}
+        transition={{ duration: 0.3, delay: index * 0.05, ease: "easeOut" }}
+      >
         {Array.from({ length: maxVisibleLevel + 1 }).map((_, colIndex) => {
           if (colIndex === node.level) {
             return (
@@ -155,31 +166,37 @@ const TreeTableRow = memo(
                   }}
                 >
                   {node.hasChildren ? (
-                    <IconButton
-                      size="small"
-                      color="primary"
-                      onClick={() => onToggle(node)}
-                      disabled={isLoading}
-                      sx={{
-                        mr: 1.5,
-                        border: 1,
-                        borderColor: "divider",
-                        borderRadius: "50%",
-                        height: 22,
-                        width: 22,
-                        p: 0.3,
-                        bgcolor: "action.hover",
-                        "&:hover": { bgcolor: "action.selected" },
-                      }}
+                    <MotionBox
+                      whileHover={{ scale: 1.2 }}
+                      whileTap={{ scale: 0.8 }}
+                      transition={{ type: "spring", stiffness: 400, damping: 17 }}
                     >
-                      {isLoading ? (
-                        <CircularProgress size={14} color="inherit" />
-                      ) : isExpanded ? (
-                        "-"
-                      ) : (
-                        "+"
-                      )}
-                    </IconButton>
+                      <IconButton
+                        size="small"
+                        color="primary"
+                        onClick={() => onToggle(node)}
+                        disabled={isLoading}
+                        sx={{
+                          mr: 1.5,
+                          border: 1,
+                          borderColor: "divider",
+                          borderRadius: "50%",
+                          height: 22,
+                          width: 22,
+                          p: 0.3,
+                          bgcolor: "action.hover",
+                          "&.Mui-focusVisible": { bgcolor: "action.selected" },
+                        }}
+                      >
+                        {isLoading ? (
+                          <CircularProgress size={14} color="inherit" />
+                        ) : isExpanded ? (
+                          "-"
+                        ) : (
+                          "+"
+                        )}
+                      </IconButton>
+                    </MotionBox>
                   ) : (
                     <Box sx={{ width: 26, mr: 1.5 }} />
                   )}
@@ -207,49 +224,21 @@ const TreeTableRow = memo(
           );
         })}
 
-        <TableCell
-          align="right"
-          sx={{
-            borderRight: 1,
-            borderColor: "divider",
-            color: "text.secondary",
-          }}
-        >
+        <TableCell align="right" sx={{ borderRight: 1, borderColor: "divider", color: "text.secondary" }}>
           {formatCurrency(node.jan)}
         </TableCell>
-        <TableCell
-          align="right"
-          sx={{
-            borderRight: 1,
-            borderColor: "divider",
-            color: "text.secondary",
-          }}
-        >
+        <TableCell align="right" sx={{ borderRight: 1, borderColor: "divider", color: "text.secondary" }}>
           {formatCurrency(node.feb)}
         </TableCell>
-        <TableCell
-          align="right"
-          sx={{
-            borderRight: 1,
-            borderColor: "divider",
-            color: "text.secondary",
-          }}
-        >
+        <TableCell align="right" sx={{ borderRight: 1, borderColor: "divider", color: "text.secondary" }}>
           {formatCurrency(node.mar)}
         </TableCell>
-        <TableCell
-          align="right"
-          sx={{
-            fontWeight: 600,
-            bgcolor: "action.hover",
-            color: "text.primary",
-          }}
-        >
+        <TableCell align="right" sx={{ fontWeight: 600, bgcolor: "action.hover", color: "text.primary" }}>
           {formatCurrency(total)}
         </TableCell>
-      </TableRow>
+      </MotionTableRow>
     );
-  },
+  })
 );
 TreeTableRow.displayName = "TreeTableRow";
 
@@ -261,26 +250,26 @@ export default function ReportAnalysisScreen() {
 
   const [availableReports, setAvailableReports] = useState([]);
   const [selectedReportFile, setSelectedReportFile] = useState("");
-  const [activeHierarchyKey, setActiveHierarchyKey] = useState(
-    HIERARCHY_VIEWS.CIRCLE_WISE.id,
-  );
+  const [activeHierarchyKey, setActiveHierarchyKey] = useState(""); 
 
   const [data, setData] = useState([]);
   const [expandedIds, setExpandedIds] = useState(new Set());
   const [loadingIds, setLoadingIds] = useState(new Set());
   const [isInitializing, setIsInitializing] = useState(false);
-
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
 
   const theme = useTheme();
 
-  const activeHierarchyConfig = HIERARCHY_VIEWS[activeHierarchyKey];
+  // Safely fallback to our stable DEFAULT_HIERARCHY_CONFIG so the router doesn't freeze
+  const activeHierarchyConfig = activeHierarchyKey 
+    ? HIERARCHY_VIEWS[activeHierarchyKey] 
+    : DEFAULT_HIERARCHY_CONFIG;
 
   const activeReportName = useMemo(() => {
     if (!selectedReportFile) return "Financial Analytics";
     const reportObj = availableReports.find(
-      (r) => r.fileName === selectedReportFile,
+      (r) => r.fileName === selectedReportFile
     );
     return reportObj ? reportObj.reportName : "Financial Analytics";
   }, [selectedReportFile, availableReports]);
@@ -305,8 +294,9 @@ export default function ReportAnalysisScreen() {
 
   useEffect(() => {
     const loadRoot = async () => {
-      if (!selectedReportFile) {
-        setData([]);
+      if (!selectedReportFile || !activeHierarchyKey) {
+        // Prevents triggering unnecessary re-renders if it's already empty
+        setData((prev) => (prev.length === 0 ? prev : []));
         return;
       }
       setIsInitializing(true);
@@ -318,7 +308,7 @@ export default function ReportAnalysisScreen() {
           callApi,
           showSnackBar,
           activeHierarchyConfig.hierarchy,
-          selectedReportFile,
+          selectedReportFile
         );
         setData(rootData);
       } catch (error) {
@@ -331,7 +321,7 @@ export default function ReportAnalysisScreen() {
   }, [
     selectedReportFile,
     activeHierarchyKey,
-    activeHierarchyConfig.hierarchy,
+    activeHierarchyConfig,
     callApi,
     showSnackBar,
   ]);
@@ -357,17 +347,15 @@ export default function ReportAnalysisScreen() {
           const next = new Set(prev);
           next.delete(node.id);
 
-          // FIX 2: Recursively find all children/grandchildren and remove them from expandedIds
           const removeDescendants = (currentNode) => {
             if (currentNode.children) {
               currentNode.children.forEach((child) => {
                 next.delete(child.id);
-                removeDescendants(child); // Go deeper
+                removeDescendants(child);
               });
             }
           };
           removeDescendants(node);
-
           return next;
         });
       } else {
@@ -379,10 +367,10 @@ export default function ReportAnalysisScreen() {
               showSnackBar,
               node,
               activeHierarchyConfig.hierarchy,
-              selectedReportFile,
+              selectedReportFile
             );
             setData((prevData) =>
-              appendChildrenToTree(prevData, node.id, children),
+              appendChildrenToTree(prevData, node.id, children)
             );
           } catch (error) {
             console.error("Failed to fetch children", error);
@@ -404,7 +392,7 @@ export default function ReportAnalysisScreen() {
       selectedReportFile,
       callApi,
       showSnackBar,
-    ],
+    ]
   );
 
   const visibleRows = useMemo(() => {
@@ -426,7 +414,7 @@ export default function ReportAnalysisScreen() {
 
   const visibleHierarchyLevels = activeHierarchyConfig.hierarchy.slice(
     0,
-    maxVisibleLevel + 1,
+    maxVisibleLevel + 1
   );
 
   const paginatedRows = useMemo(() => {
@@ -440,202 +428,260 @@ export default function ReportAnalysisScreen() {
     setPage(0);
   };
 
+  const isSetupComplete = selectedReportFile && activeHierarchyKey;
+
+  const pathContainerVariants = {
+    hidden: { opacity: 0 },
+    show: {
+      opacity: 1,
+      transition: { staggerChildren: 0.1 },
+    },
+  };
+
+  const pathChipVariants = {
+    hidden: { opacity: 0, scale: 0.5, y: 10 },
+    show: { opacity: 1, scale: 1, y: 0, transition: { type: "spring" } },
+  };
+
   return (
-    <Box>
+    <Box sx={{ p: 2, height: "calc(100vh - 64px)", display: "flex", flexDirection: "column", gap: 2 }}>
+      
+      {/* ================= UPPER BOX ================= */}
       <Paper
         elevation={0}
         sx={{
-          mx: "auto",
-          height: "calc(100vh - 64px)",
+          p: 3,
+          borderRadius: 2,
+          boxShadow: "0 4px 20px rgba(0,0,0,0.05)",
+          border: 1,
+          borderColor: "divider",
+          display: "flex",
+          flexDirection: "column",
+          gap: 3,
+        }}
+      >
+        <Box display="flex" alignItems="center" gap={2}>
+          <MotionBox
+            initial={{ scale: 0, rotate: -180 }}
+            animate={{ scale: 1, rotate: 0 }}
+            transition={{ type: "spring", stiffness: 260, damping: 20 }}
+            sx={{
+              backgroundColor: "primary.main",
+              borderRadius: "12px",
+              width: 56,
+              height: 56,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+            }}
+          >
+            <AnalyticsIcon sx={{ color: "primary.contrastText", fontSize: 32 }} />
+          </MotionBox>
+          
+          <Box sx={{ overflow: "hidden" }}>
+            <AnimatePresence mode="wait">
+              <MotionBox
+                key={activeReportName}
+                initial={{ opacity: 0, x: -30 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 30 }}
+                transition={{ duration: 0.3 }}
+              >
+                <Typography variant="h5" sx={{ fontWeight: 700, color: "text.primary" }}>
+                  {activeReportName}
+                </Typography>
+              </MotionBox>
+            </AnimatePresence>
+            <Typography variant="body2" sx={{ color: "text.secondary", opacity: 0.8 }}>
+              Dynamic Drill-Down Matrix
+            </Typography>
+          </Box>
+        </Box>
+
+        <Box display="flex" alignItems="center" gap={3}>
+          <MotionBox 
+            initial={{ x: -50, opacity: 0 }} 
+            animate={{ x: 0, opacity: 1 }} 
+            transition={{ type: "spring", delay: 0.1 }}
+          >
+            {/* FIX 3: Both Dropdowns are now visually identically structured with shrink and notched */}
+            <FormControl
+              size="small"
+              sx={{ 
+                minWidth: 300, 
+                bgcolor: "background.paper",
+                borderRadius: 1,
+                "& .MuiOutlinedInput-root.Mui-focused fieldset": {
+                  boxShadow: `0 0 10px ${theme.palette.primary.light}`,
+                  transition: "box-shadow 0.3s ease-in-out"
+                }
+              }}
+            >
+              <InputLabel id="report-source-label" shrink>
+                Database Report
+              </InputLabel>
+              <Select
+                labelId="report-source-label"
+                value={selectedReportFile}
+                label="Database Report"
+                onChange={(e) => setSelectedReportFile(e.target.value)}
+                displayEmpty
+                notched
+                MenuProps={{
+                  TransitionProps: { timeout: 400 },
+                  PaperProps: {
+                    component: motion.div,
+                    initial: { opacity: 0, y: -20 },
+                    animate: { opacity: 1, y: 0 },
+                    sx: { mt: 1, borderRadius: 2, boxShadow: 3 },
+                  },
+                }}
+              >
+                <MenuItem value="" disabled>
+                  <em>Please select a Report</em>
+                </MenuItem>
+                {availableReports.map((report, i) => (
+                  <MenuItem key={report.fileName} value={report.fileName}>
+                    <MotionBox
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: i * 0.05 }}
+                    >
+                      {report.reportName}
+                    </MotionBox>
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </MotionBox>
+
+          <MotionBox 
+            initial={{ x: -50, opacity: 0 }} 
+            animate={{ x: 0, opacity: 1 }} 
+            transition={{ type: "spring", delay: 0.2 }}
+          >
+            <FormControl
+              size="small"
+              sx={{ 
+                minWidth: 260,
+                bgcolor: "background.paper",
+                borderRadius: 1,
+                "& .MuiOutlinedInput-root.Mui-focused fieldset": {
+                  boxShadow: `0 0 10px ${theme.palette.primary.light}`,
+                  transition: "box-shadow 0.3s ease-in-out"
+                }
+              }}
+            >
+              <InputLabel id="hierarchy-view-label" shrink>
+                Hierarchy View
+              </InputLabel>
+              <Select
+                labelId="hierarchy-view-label"
+                value={activeHierarchyKey}
+                label="Hierarchy View"
+                onChange={(e) => setActiveHierarchyKey(e.target.value)}
+                displayEmpty
+                notched
+                MenuProps={{
+                  PaperProps: {
+                    component: motion.div,
+                    initial: { opacity: 0, y: -20 },
+                    animate: { opacity: 1, y: 0 },
+                    sx: { mt: 1, borderRadius: 2, boxShadow: 3 },
+                  },
+                }}
+              >
+                <MenuItem value="" disabled>
+                  <em>Please select a Hierarchy View</em>
+                </MenuItem>
+                {Object.values(HIERARCHY_VIEWS).map((view, i) => (
+                  <MenuItem key={view.id} value={view.id}>
+                    <MotionBox
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: i * 0.05 }}
+                    >
+                      {view.label}
+                    </MotionBox>
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </MotionBox>
+        </Box>
+      </Paper>
+
+      {/* ================= LOWER BOX ================= */}
+      <Paper
+        elevation={0}
+        sx={{
+          flexGrow: 1,
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
-          borderRadius: 1,
-          boxShadow: "baseShadow",
+          borderRadius: 2,
+          boxShadow: "0 4px 20px rgba(0,0,0,0.05)",
           border: 1,
           borderColor: "divider",
         }}
       >
-        {/* Top Header */}
-        <Box
-          sx={{
-            bgcolor: "primary.main",
-            px: 3,
-            py: 2,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          <Box display="flex" alignItems="center" gap={2}>
-            <Box
-              sx={{
-                backgroundColor: "primary.light",
-                borderRadius: "50%",
-                width: 50,
-                height: 50,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <AnalyticsIcon
-                sx={{ color: "primary.contrastText", fontSize: 30 }}
-              />
-            </Box>
-            <Box>
-              <Typography
-                variant="h6"
-                sx={{ color: "primary.contrastText", fontWeight: 600 }}
+        <Box sx={{ borderBottom: 1, borderColor: "divider", px: 3, py: 1.5, minHeight: 52, display: 'flex', alignItems: 'center' }}>
+          <AnimatePresence>
+            {isSetupComplete && (
+              <MotionBox
+                variants={pathContainerVariants}
+                initial="hidden"
+                animate="show"
+                exit="hidden"
+                display="flex"
+                alignItems="center"
+                gap={1}
               >
-                {activeReportName}
-              </Typography>
-              <Typography
-                variant="caption"
-                sx={{ color: "primary.contrastText", opacity: 0.8 }}
-              >
-                Dynamic Drill-Down Matrix
-              </Typography>
-            </Box>
-          </Box>
+                <Typography variant="body2" color="text.secondary" sx={{ mr: 1, fontWeight: 500 }}>
+                  Path:
+                </Typography>
+                {activeHierarchyConfig.hierarchy.map((item, index) => (
+                  <Box key={index} display="flex" alignItems="center">
+                    <MotionBox
+                      variants={pathChipVariants}
+                      sx={{
+                        px: 1.5,
+                        py: 0.5,
+                        bgcolor: index <= maxVisibleLevel ? "primary.main" : "background.paper",
+                        color: index <= maxVisibleLevel ? "primary.contrastText" : "text.primary",
+                        borderRadius: 1,
+                        border: 1,
+                        borderColor: index <= maxVisibleLevel ? "primary.main" : "divider",
+                        fontSize: "0.75rem",
+                        fontWeight: 600,
+                        textTransform: "capitalize",
+                      }}
+                    >
+                      {item.replace("_", " ")}
+                    </MotionBox>
+                    {index < activeHierarchyConfig.hierarchy.length - 1 && (
+                      <MotionBox
+                        initial={{ opacity: 0, scale: 0 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ delay: index * 0.1 + 0.2 }}
+                      >
+                        <ChevronRightIcon sx={{ mx: 0.5, color: "text.disabled", fontSize: 18 }} />
+                      </MotionBox>
+                    )}
+                  </Box>
+                ))}
+              </MotionBox>
+            )}
+          </AnimatePresence>
         </Box>
 
-        {/* Toolbar Area */}
-        <Box
-          sx={{
-            bgcolor: "background.glass",
-            borderBottom: 1,
-            borderColor: "divider",
-            px: 3,
-            py: 2,
-            display: "flex",
-            alignItems: "center",
-            gap: 3,
-          }}
-        >
-          <FormControl
-            size="small"
-            sx={{ minWidth: 300, bgcolor: "background.paper", borderRadius: 1 }}
-          >
-            <InputLabel id="report-source-label" shrink>
-              Database Report
-            </InputLabel>
-            <Select
-              labelId="report-source-label"
-              value={selectedReportFile}
-              label="Database Report"
-              onChange={(e) => setSelectedReportFile(e.target.value)}
-              displayEmpty
-              notched
-              MenuProps={{
-                anchorOrigin: { vertical: "bottom", horizontal: "left" },
-                transformOrigin: { vertical: "top", horizontal: "left" },
-                PaperProps: {
-                  sx: { bgcolor: "background.paper", boxShadow: 3 },
-                },
-              }}
-            >
-              <MenuItem value="" disabled>
-                <em>Please select the report</em>
-              </MenuItem>
-              {availableReports.map((report) => (
-                <MenuItem key={report.fileName} value={report.fileName}>
-                  {report.reportName}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-
-          <FormControl
-            size="small"
-            sx={{ minWidth: 220, bgcolor: "background.paper", borderRadius: 1 }}
-          >
-            <InputLabel id="hierarchy-view-label">Hierarchy View</InputLabel>
-            <Select
-              labelId="hierarchy-view-label"
-              value={activeHierarchyKey}
-              label="Hierarchy View"
-              onChange={(e) => setActiveHierarchyKey(e.target.value)}
-              MenuProps={{
-                anchorOrigin: { vertical: "bottom", horizontal: "left" },
-                transformOrigin: { vertical: "top", horizontal: "left" },
-                PaperProps: {
-                  sx: { bgcolor: "background.paper", boxShadow: 3, mt: 0.5 },
-                },
-              }}
-            >
-              {Object.values(HIERARCHY_VIEWS).map((view) => (
-                <MenuItem key={view.id} value={view.id}>
-                  {view.label}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-
-          <Box
-            sx={{ borderLeft: 1, borderColor: "divider", height: 30, mx: 1 }}
-          />
-
-          {/* Breadcrumbs */}
-          <Box display="flex" alignItems="center" gap={1}>
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              sx={{ mr: 1, fontWeight: 500 }}
-            >
-              Path:
-            </Typography>
-            {activeHierarchyConfig.hierarchy.map((item, index) => (
-              <Box key={index} display="flex" alignItems="center">
-                <Box
-                  sx={{
-                    px: 1.5,
-                    py: 0.5,
-                    bgcolor:
-                      index <= maxVisibleLevel
-                        ? "primary.main"
-                        : "background.paper",
-                    color:
-                      index <= maxVisibleLevel
-                        ? "primary.contrastText"
-                        : "text.primary",
-                    borderRadius: 1,
-                    border: 1,
-                    borderColor:
-                      index <= maxVisibleLevel ? "primary.main" : "divider",
-                    fontSize: "0.75rem",
-                    fontWeight: 600,
-                    textTransform: "capitalize",
-                  }}
-                >
-                  {item.replace("_", " ")}
-                </Box>
-                {index < activeHierarchyConfig.hierarchy.length - 1 && (
-                  <ChevronRightIcon
-                    sx={{ mx: 0.5, color: "text.disabled", fontSize: 18 }}
-                  />
-                )}
-              </Box>
-            ))}
-          </Box>
-        </Box>
-
-        {/* Data Grid */}
-        <TableContainer
-          sx={{
-            flexGrow: 1,
-            bgcolor: "background.default",
-            position: "relative",
-          }}
-        >
-          {!selectedReportFile && (
+        <TableContainer sx={{ flexGrow: 1, bgcolor: "background.default", position: "relative" }}>
+          {!isSetupComplete && (
             <Box
               sx={{
                 position: "absolute",
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
+                top: 0, left: 0, right: 0, bottom: 0,
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
@@ -643,127 +689,101 @@ export default function ReportAnalysisScreen() {
                 zIndex: 10,
               }}
             >
-              <DatasetIcon
-                sx={{ fontSize: 60, color: "action.disabled", mb: 1 }}
-              />
+              <MotionBox
+                animate={{ y: [0, -15, 0] }}
+                transition={{ repeat: Infinity, duration: 2.5, ease: "easeInOut" }}
+              >
+                <DatasetIcon sx={{ fontSize: 72, color: "action.disabled", mb: 2 }} />
+              </MotionBox>
               <Typography variant="h6" color="text.secondary">
                 No Data to Display
               </Typography>
               <Typography variant="body2" color="text.disabled">
-                Please select a database report from the dropdown above to begin
-                analysis.
+                Please select both a database report and a hierarchy view above.
               </Typography>
             </Box>
           )}
 
           {isInitializing ? (
-            <Box
-              sx={{
-                height: "100%",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
+            <Box sx={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
               <CircularProgress size={40} color="primary" sx={{ mb: 2 }} />
               <Typography variant="body1" color="text.secondary">
                 Executing Query ...
               </Typography>
             </Box>
-          ) : (
+          ) : isSetupComplete ? (
             <Table stickyHeader size="small" sx={{ minWidth: 1000 }}>
               <TableHead>
                 <TableRow>
-                  {visibleHierarchyLevels.map((levelName) => (
+                  {visibleHierarchyLevels.map((levelName, index) => (
                     <TableCell
                       key={levelName}
                       sx={{
-                        backgroundColor: theme.palette.purple[50],
+                        backgroundColor: theme.palette.purple ? theme.palette.purple[100] : "#f5f5f5",
                         color: "text.primary",
                         fontWeight: 700,
                         borderRight: 1,
                         borderColor: "divider",
                         borderBottom: 2,
                         width: 220,
-                        WebkitBackdropFilter: "blur(8px)",
                       }}
                     >
-                      {levelName.replace("_", " ").toUpperCase()}
+                      <MotionBox
+                        initial={{ y: -20, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        transition={{ delay: index * 0.1 }}
+                      >
+                        {levelName.replace("_", " ").toUpperCase()}
+                      </MotionBox>
                     </TableCell>
                   ))}
-                  <TableCell
-                    align="right"
-                    sx={{
-                      backgroundColor: theme.palette.purple[100],
-                      color: "text.primary",
-                      fontWeight: 700,
-                      borderRight: 1,
-                      borderColor: "divider",
-                      borderBottom: 2,
-                    }}
-                  >
-                    January
-                  </TableCell>
-                  <TableCell
-                    align="right"
-                    sx={{
-                      backgroundColor: theme.palette.purple[100],
-                      color: "text.primary",
-                      fontWeight: 700,
-                      borderRight: 1,
-                      borderColor: "divider",
-                      borderBottom: 2,
-                    }}
-                  >
-                    February
-                  </TableCell>
-                  <TableCell
-                    align="right"
-                    sx={{
-                      backgroundColor: theme.palette.purple[100],
-                      color: "text.primary",
-                      fontWeight: 700,
-                      borderRight: 1,
-                      borderColor: "divider",
-                      borderBottom: 2,
-                    }}
-                  >
-                    March
-                  </TableCell>
-                  <TableCell
-                    align="right"
-                    sx={{
-                      backgroundColor: theme.palette.purple[100],
-                      color: "text.primary",
-                      fontWeight: 800,
-                      borderBottom: 2,
-                      borderColor: "divider",
-                    }}
-                  >
-                    YTD Total
-                  </TableCell>
+                  {["January", "February", "March", "YTD Total"].map((month, idx) => (
+                    <TableCell
+                      key={month}
+                      align="right"
+                      sx={{
+                        backgroundColor: theme.palette.purple ? theme.palette.purple[200] : "#eeeeee",
+                        color: "text.primary",
+                        fontWeight: month === "YTD Total" ? 800 : 700,
+                        borderRight: month !== "YTD Total" ? 1 : 0,
+                        borderColor: "divider",
+                        borderBottom: 2,
+                      }}
+                    >
+                      <MotionBox
+                        initial={{ y: -20, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        transition={{ delay: (visibleHierarchyLevels.length + idx) * 0.1 }}
+                      >
+                        {month}
+                      </MotionBox>
+                    </TableCell>
+                  ))}
                 </TableRow>
               </TableHead>
-              <TableBody>
-                {paginatedRows.map((row) => (
-                  <TreeTableRow
-                    key={row.id}
-                    node={row}
-                    isExpanded={expandedIds.has(row.id)}
-                    isLoading={loadingIds.has(row.id)}
-                    onToggle={handleToggle}
-                    maxVisibleLevel={maxVisibleLevel}
-                  />
-                ))}
+              {/* FIX 4: Removed component={motion.tbody} which causes validateDOMNesting/ref conflicts in MUI */}
+              <TableBody key={page}>
+                <AnimatePresence>
+                  {paginatedRows.map((row, index) => (
+                    <TreeTableRow
+                      key={row.id}
+                      node={row}
+                      index={index}
+                      isExpanded={expandedIds.has(row.id)}
+                      isLoading={loadingIds.has(row.id)}
+                      onToggle={handleToggle}
+                      maxVisibleLevel={maxVisibleLevel}
+                    />
+                  ))}
+                </AnimatePresence>
               </TableBody>
             </Table>
-          )}
+          ) : null}
         </TableContainer>
 
         <Box
           sx={{
-            bgcolor: "background.glass",
+            bgcolor: "background.paper",
             borderTop: 1,
             borderColor: "divider",
             px: 3,
@@ -773,18 +793,22 @@ export default function ReportAnalysisScreen() {
           }}
         >
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            <Box
+            <MotionBox
+              animate={
+                isSetupComplete
+                  ? { scale: [1, 1.3, 1], opacity: [0.6, 1, 0.6] }
+                  : { scale: 1, opacity: 1 }
+              }
+              transition={{ repeat: Infinity, duration: 1.5 }}
               sx={{
-                width: 8,
-                height: 8,
+                width: 10,
+                height: 10,
                 borderRadius: "50%",
-                bgcolor: selectedReportFile
-                  ? "success.main"
-                  : "action.disabled",
+                bgcolor: isSetupComplete ? "success.main" : "action.disabled",
               }}
             />
-            <Typography variant="caption" color="text.secondary">
-              {selectedReportFile ? "Connected" : "No Connection"}
+            <Typography variant="caption" color="text.secondary" fontWeight={500}>
+              {isSetupComplete ? "Connected & Synced" : "No Connection"}
             </Typography>
           </Box>
           <TablePagination
@@ -797,8 +821,7 @@ export default function ReportAnalysisScreen() {
             rowsPerPageOptions={[10, 25, 50, 100]}
             sx={{
               ".MuiTablePagination-toolbar": { minHeight: 50, padding: 0 },
-              ".MuiTablePagination-selectLabel, .MuiTablePagination-displayedRows":
-                { margin: 0, color: "text.secondary" },
+              ".MuiTablePagination-selectLabel, .MuiTablePagination-displayedRows": { margin: 0, color: "text.secondary" },
             }}
           />
         </Box>
@@ -806,6 +829,8 @@ export default function ReportAnalysisScreen() {
     </Box>
   );
 }
+
+
 
 
 
