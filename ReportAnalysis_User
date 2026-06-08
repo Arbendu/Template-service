@@ -1,6 +1,3 @@
-
-// **************************************************************************** AdminReportAnalysisScreen ****************************************************************************** //
-
 import { useState, useMemo, useCallback, useEffect, memo, forwardRef } from "react";
 import { useSelector } from "react-redux";
 import {
@@ -21,10 +18,10 @@ import {
   InputLabel,
   TablePagination,
 } from "@mui/material";
-import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
+import AnalyticsIcon from "@mui/icons-material/Analytics";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import DatasetIcon from "@mui/icons-material/Dataset";
-import { useTheme } from "@mui/material/styles";
+import { duration, useTheme } from "@mui/material/styles";
 import { motion, AnimatePresence } from "framer-motion";
 
 // Assume these are available in your project structure
@@ -45,16 +42,22 @@ const formatCurrency = (value) => {
   }).format(value || 0);
 };
 
-// Admin Specific Hierarchy
-const ADMIN_HIERARCHY_VIEWS = {
-  MASTER_HIERARCHY: {
-    id: "MASTER_HIERARCHY",
-    label: "Global Master Hierarchy",
-    hierarchy: ["comp_code", "CGL_Number", "Circle_name", "Product", "Branch_name"],
+// Hierarchy Configurations (View Types)
+const HIERARCHY_VIEWS = {
+  CIRCLE_WISE: {
+    id: "CIRCLE_WISE",
+    label: "Circle Wise View",
+    hierarchy: ["Circle_name", "Branch_name", "comp_code", "CGL_Number"],
+  },
+  BRANCH_WISE: {
+    id: "BRANCH_WISE",
+    label: "Branch Wise View",
+    hierarchy: ["Branch_name", "comp_code", "CGL_Number", "Product"],
   },
 };
 
-const DEFAULT_ADMIN_HIERARCHY_CONFIG = { hierarchy: [] };
+// FIX 1: Stable fallback reference to prevent infinite render loops!
+const DEFAULT_HIERARCHY_CONFIG = { hierarchy: [] };
 
 // --- ACTUAL API LOGIC ---
 const fetchAnalyticsData = async (callApi, showSnackBar, payload) => {
@@ -67,7 +70,7 @@ const fetchAnalyticsData = async (callApi, showSnackBar, payload) => {
     return responseData?.data || [];
   } catch (error) {
     console.error("Error fetching analytics data:", error);
-    showSnackBar("Failed to fetch admin analytics data", "error");
+    showSnackBar("Failed to fetch analytics data", "error");
   }
 };
 
@@ -127,7 +130,7 @@ const fetchChildrenData = async (
 
 // --- COMPONENTS ---
 
-// 1. The MUI Row Component (Now with Cell Hover & Scroll Reveal)
+// FIX 2: Wrapped in forwardRef so Framer Motion's AnimatePresence doesn't crash on unmount
 const TreeTableRow = memo(
   forwardRef(({ node, isExpanded, isLoading, onToggle, maxVisibleLevel, index }, ref) => {
     const total = (node.jan || 0) + (node.feb || 0) + (node.mar || 0);
@@ -136,14 +139,11 @@ const TreeTableRow = memo(
       <MotionTableRow
         ref={ref}
         hover
-        // SCROLL ANIMATION: initial state is hidden. whileInView triggers when scrolling into view.
-        initial={{ opacity: 0, y: 30 }}
-        whileInView={{ opacity: 1, y: 0 }}
-        viewport={{ once: true, margin: "-10px" }} // Triggers slightly before it fully enters viewport
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -20 }}
-        transition={{ duration: 0.4, delay: Math.min(index * 0.03, 0.2), ease: "easeOut" }}
+        transition={{ duration: 0.3, delay: index * 0.05, ease: "easeOut" }}
       >
-        {/* Hierarchy Name Columns */}
         {Array.from({ length: maxVisibleLevel + 1 }).map((_, colIndex) => {
           if (colIndex === node.level) {
             return (
@@ -154,26 +154,13 @@ const TreeTableRow = memo(
                   borderColor: "divider",
                   minWidth: 220,
                   bgcolor: "background.paper",
-                  p: 0, // Reset padding so MotionBox fills the cell entirely
                 }}
               >
-                <MotionBox
-                  // HOVER ANIMATION: Pops out the cell
-                  whileHover={{
-                    scale: 1.04,
-                    zIndex: 10,
-                    boxShadow: "0px 6px 15px rgba(0,0,0,0.12)",
-                    backgroundColor: "background.paper",
-                    borderRadius: "6px",
-                  }}
-                  transition={{ type: "spring", stiffness: 300, damping: 20 }}
+                <Box
                   sx={{
                     display: "flex",
                     alignItems: "center",
-                    pl: node.level * 3 + 2,
-                    pr: 2,
-                    py: 1,
-                    position: "relative",
+                    pl: node.level * 3,
                   }}
                 >
                   {node.hasChildren ? (
@@ -218,7 +205,7 @@ const TreeTableRow = memo(
                   >
                     {node.name}
                   </Typography>
-                </MotionBox>
+                </Box>
               </TableCell>
             );
           }
@@ -235,40 +222,17 @@ const TreeTableRow = memo(
           );
         })}
 
-        {/* Data Columns (Jan, Feb, Mar) */}
-        {['jan', 'feb', 'mar'].map((month) => (
-          <TableCell key={month} align="right" sx={{ borderRight: 1, borderColor: "divider", p: 0 }}>
-            <MotionBox
-              whileHover={{
-                scale: 1.15,
-                zIndex: 20,
-                boxShadow: "0px 8px 25px rgba(0,0,0,0.15)",
-                backgroundColor: "background.paper",
-                borderRadius: "6px",
-              }}
-              transition={{ type: "spring", stiffness: 300, damping: 15 }}
-              sx={{ p: "6px 16px", color: "text.secondary", position: "relative" }}
-            >
-              {formatCurrency(node[month])}
-            </MotionBox>
-          </TableCell>
-        ))}
-
-        {/* YTD Total Column */}
-        <TableCell align="right" sx={{ bgcolor: "action.hover", p: 0 }}>
-          <MotionBox
-            whileHover={{
-              scale: 1.15,
-              zIndex: 20,
-              boxShadow: "0px 8px 25px rgba(0,0,0,0.15)",
-              backgroundColor: "background.paper",
-              borderRadius: "6px",
-            }}
-            transition={{ type: "spring", stiffness: 300, damping: 15 }}
-            sx={{ p: "6px 16px", color: "text.primary", fontWeight: 600, position: "relative" }}
-          >
-            {formatCurrency(total)}
-          </MotionBox>
+        <TableCell align="right" sx={{ borderRight: 1, borderColor: "divider", color: "text.secondary" }}>
+          {formatCurrency(node.jan)}
+        </TableCell>
+        <TableCell align="right" sx={{ borderRight: 1, borderColor: "divider", color: "text.secondary" }}>
+          {formatCurrency(node.feb)}
+        </TableCell>
+        <TableCell align="right" sx={{ borderRight: 1, borderColor: "divider", color: "text.secondary" }}>
+          {formatCurrency(node.mar)}
+        </TableCell>
+        <TableCell align="right" sx={{ fontWeight: 600, bgcolor: "action.hover", color: "text.primary" }}>
+          {formatCurrency(total)}
         </TableCell>
       </MotionTableRow>
     );
@@ -277,7 +241,7 @@ const TreeTableRow = memo(
 TreeTableRow.displayName = "TreeTableRow";
 
 // 2. The Main Screen Component
-export default function AdminReportAnalysisScreen() {
+export default function ReportAnalysisScreen() {
   const { callApi } = useApi();
   const user = useSelector((state) => state.auth.user);
   const showSnackBar = useCustomSnackbar();
@@ -295,16 +259,17 @@ export default function AdminReportAnalysisScreen() {
 
   const theme = useTheme();
 
+  // Safely fallback to our stable DEFAULT_HIERARCHY_CONFIG so the router doesn't freeze
   const activeHierarchyConfig = activeHierarchyKey 
-    ? ADMIN_HIERARCHY_VIEWS[activeHierarchyKey] 
-    : DEFAULT_ADMIN_HIERARCHY_CONFIG;
+    ? HIERARCHY_VIEWS[activeHierarchyKey] 
+    : DEFAULT_HIERARCHY_CONFIG;
 
   const activeReportName = useMemo(() => {
-    if (!selectedReportFile) return "Financial Administrative Workspace";
+    if (!selectedReportFile) return "Financial Analytics";
     const reportObj = availableReports.find(
       (r) => r.fileName === selectedReportFile
     );
-    return reportObj ? reportObj.reportName : "Global Administrative Workspace";
+    return reportObj ? reportObj.reportName : "Financial Analytics";
   }, [selectedReportFile, availableReports]);
 
   useEffect(() => {
@@ -328,6 +293,7 @@ export default function AdminReportAnalysisScreen() {
   useEffect(() => {
     const loadRoot = async () => {
       if (!selectedReportFile || !activeHierarchyKey) {
+        // Prevents triggering unnecessary re-renders if it's already empty
         setData((prev) => (prev.length === 0 ? prev : []));
         return;
       }
@@ -466,22 +432,22 @@ export default function AdminReportAnalysisScreen() {
     hidden: { opacity: 0 },
     show: {
       opacity: 1,
-      transition: { staggerChildren: 0.1 }, 
+      transition: { staggerChildren: 0.1 },
     },
     exit: { opacity: 0, transition: { duration: 0.2 } }
   };
 
   const pathChipVariants = {
-    hidden: { opacity: 0, x: -40 },
+    hidden: { opacity: 0, x: -80 },
     show: { 
-      opacity: 1, 
+      opacity: 1,
       x: 0, 
       transition: { type: "spring", stiffness: 250, damping: 20 } 
     },
   };
 
   return (
-    <Box sx={{ p: 2, height: "calc(100vh - 64px)", display: "flex", flexDirection: "column", gap: 2 }}>
+    <Box sx={{ height: "calc(100vh - 64px)", display: "flex", flexDirection: "column", gap: 2 }}>
       
       {/* ================= UPPER BOX ================= */}
       <Paper
@@ -513,7 +479,7 @@ export default function AdminReportAnalysisScreen() {
               boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
             }}
           >
-            <AdminPanelSettingsIcon sx={{ color: "primary.contrastText", fontSize: 32 }} />
+            <AnalyticsIcon sx={{ color: "primary.contrastText", fontSize: 32 }} />
           </MotionBox>
           
           <Box sx={{ overflow: "hidden" }}>
@@ -531,7 +497,7 @@ export default function AdminReportAnalysisScreen() {
               </MotionBox>
             </AnimatePresence>
             <Typography variant="body2" sx={{ color: "text.secondary", opacity: 0.8 }}>
-              System Administrator Drill-Down Matrix
+              Dynamic Drill-Down Matrix
             </Typography>
           </Box>
         </Box>
@@ -542,6 +508,7 @@ export default function AdminReportAnalysisScreen() {
             animate={{ x: 0, opacity: 1 }} 
             transition={{ type: "spring", delay: 0.1 }}
           >
+            {/* FIX 3: Both Dropdowns are now visually identically structured with shrink and notched */}
             <FormControl
               size="small"
               sx={{ 
@@ -554,11 +521,11 @@ export default function AdminReportAnalysisScreen() {
                 }
               }}
             >
-              <InputLabel id="admin-report-source-label" shrink>
+              <InputLabel id="report-source-label" shrink>
                 Database Report
               </InputLabel>
               <Select
-                labelId="admin-report-source-label"
+                labelId="report-source-label"
                 value={selectedReportFile}
                 label="Database Report"
                 onChange={(e) => setSelectedReportFile(e.target.value)}
@@ -575,7 +542,7 @@ export default function AdminReportAnalysisScreen() {
                 }}
               >
                 <MenuItem value="" disabled>
-                  <em>Please select the report</em>
+                  <em>Please select a Report</em>
                 </MenuItem>
                 {availableReports.map((report, i) => (
                   <MenuItem key={report.fileName} value={report.fileName}>
@@ -609,11 +576,11 @@ export default function AdminReportAnalysisScreen() {
                 }
               }}
             >
-              <InputLabel id="admin-hierarchy-view-label" shrink>
+              <InputLabel id="hierarchy-view-label" shrink>
                 Hierarchy View
               </InputLabel>
               <Select
-                labelId="admin-hierarchy-view-label"
+                labelId="hierarchy-view-label"
                 value={activeHierarchyKey}
                 label="Hierarchy View"
                 onChange={(e) => setActiveHierarchyKey(e.target.value)}
@@ -631,7 +598,7 @@ export default function AdminReportAnalysisScreen() {
                 <MenuItem value="" disabled>
                   <em>Please select a Hierarchy View</em>
                 </MenuItem>
-                {Object.values(ADMIN_HIERARCHY_VIEWS).map((view, i) => (
+                {Object.values(HIERARCHY_VIEWS).map((view, i) => (
                   <MenuItem key={view.id} value={view.id}>
                     <MotionBox
                       initial={{ opacity: 0, x: -20 }}
@@ -735,7 +702,7 @@ export default function AdminReportAnalysisScreen() {
                 No Data to Display
               </Typography>
               <Typography variant="body2" color="text.disabled">
-                Please select both a database report and a hierarchy view above to begin administrative analysis.
+                Please select both a database report and a hierarchy view above.
               </Typography>
             </Box>
           )}
@@ -744,7 +711,7 @@ export default function AdminReportAnalysisScreen() {
             <Box sx={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
               <CircularProgress size={40} color="primary" sx={{ mb: 2 }} />
               <Typography variant="body1" color="text.secondary">
-                Executing Query...
+                Executing Query ...
               </Typography>
             </Box>
           ) : isSetupComplete ? (
@@ -755,7 +722,7 @@ export default function AdminReportAnalysisScreen() {
                     <TableCell
                       key={levelName}
                       sx={{
-                        backgroundColor: theme.palette.grey ? theme.palette.grey[100] : "#f5f5f5",
+                        backgroundColor: theme.palette.purple ? theme.palette.purple[100] : "#f5f5f5",
                         color: "text.primary",
                         fontWeight: 700,
                         borderRight: 1,
@@ -778,7 +745,7 @@ export default function AdminReportAnalysisScreen() {
                       key={month}
                       align="right"
                       sx={{
-                        backgroundColor: theme.palette.grey ? theme.palette.grey[200] : "#eeeeee",
+                        backgroundColor: theme.palette.purple ? theme.palette.purple[200] : "#eeeeee",
                         color: "text.primary",
                         fontWeight: month === "YTD Total" ? 800 : 700,
                         borderRight: month !== "YTD Total" ? 1 : 0,
@@ -797,6 +764,7 @@ export default function AdminReportAnalysisScreen() {
                   ))}
                 </TableRow>
               </TableHead>
+              {/* FIX 4: Removed component={motion.tbody} which causes validateDOMNesting/ref conflicts in MUI */}
               <TableBody key={page}>
                 <AnimatePresence>
                   {paginatedRows.map((row, index) => (
