@@ -838,6 +838,7 @@ export default function ReportAnalysisScreen() {
 
 
 
+
 // **************************************************************************** AdminReportAnalysisScreen ****************************************************************************** //
 
 import { useState, useMemo, useCallback, useEffect, memo, forwardRef } from "react";
@@ -893,7 +894,6 @@ const ADMIN_HIERARCHY_VIEWS = {
   },
 };
 
-// FIX: Stable fallback reference to prevent infinite render loops!
 const DEFAULT_ADMIN_HIERARCHY_CONFIG = { hierarchy: [] };
 
 // --- ACTUAL API LOGIC ---
@@ -967,7 +967,7 @@ const fetchChildrenData = async (
 
 // --- COMPONENTS ---
 
-// Wrapped in forwardRef for Framer Motion's AnimatePresence
+// 1. The MUI Row Component (Now with Cell Hover & Scroll Reveal)
 const TreeTableRow = memo(
   forwardRef(({ node, isExpanded, isLoading, onToggle, maxVisibleLevel, index }, ref) => {
     const total = (node.jan || 0) + (node.feb || 0) + (node.mar || 0);
@@ -976,11 +976,14 @@ const TreeTableRow = memo(
       <MotionTableRow
         ref={ref}
         hover
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
+        // SCROLL ANIMATION: initial state is hidden. whileInView triggers when scrolling into view.
+        initial={{ opacity: 0, y: 30 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, margin: "-10px" }} // Triggers slightly before it fully enters viewport
         exit={{ opacity: 0, y: -20 }}
-        transition={{ duration: 0.3, delay: index * 0.05, ease: "easeOut" }}
+        transition={{ duration: 0.4, delay: Math.min(index * 0.03, 0.2), ease: "easeOut" }}
       >
+        {/* Hierarchy Name Columns */}
         {Array.from({ length: maxVisibleLevel + 1 }).map((_, colIndex) => {
           if (colIndex === node.level) {
             return (
@@ -991,13 +994,26 @@ const TreeTableRow = memo(
                   borderColor: "divider",
                   minWidth: 220,
                   bgcolor: "background.paper",
+                  p: 0, // Reset padding so MotionBox fills the cell entirely
                 }}
               >
-                <Box
+                <MotionBox
+                  // HOVER ANIMATION: Pops out the cell
+                  whileHover={{
+                    scale: 1.04,
+                    zIndex: 10,
+                    boxShadow: "0px 6px 15px rgba(0,0,0,0.12)",
+                    backgroundColor: "background.paper",
+                    borderRadius: "6px",
+                  }}
+                  transition={{ type: "spring", stiffness: 300, damping: 20 }}
                   sx={{
                     display: "flex",
                     alignItems: "center",
-                    pl: node.level * 3,
+                    pl: node.level * 3 + 2,
+                    pr: 2,
+                    py: 1,
+                    position: "relative",
                   }}
                 >
                   {node.hasChildren ? (
@@ -1042,7 +1058,7 @@ const TreeTableRow = memo(
                   >
                     {node.name}
                   </Typography>
-                </Box>
+                </MotionBox>
               </TableCell>
             );
           }
@@ -1059,17 +1075,40 @@ const TreeTableRow = memo(
           );
         })}
 
-        <TableCell align="right" sx={{ borderRight: 1, borderColor: "divider", color: "text.secondary" }}>
-          {formatCurrency(node.jan)}
-        </TableCell>
-        <TableCell align="right" sx={{ borderRight: 1, borderColor: "divider", color: "text.secondary" }}>
-          {formatCurrency(node.feb)}
-        </TableCell>
-        <TableCell align="right" sx={{ borderRight: 1, borderColor: "divider", color: "text.secondary" }}>
-          {formatCurrency(node.mar)}
-        </TableCell>
-        <TableCell align="right" sx={{ fontWeight: 600, bgcolor: "action.hover", color: "text.primary" }}>
-          {formatCurrency(total)}
+        {/* Data Columns (Jan, Feb, Mar) */}
+        {['jan', 'feb', 'mar'].map((month) => (
+          <TableCell key={month} align="right" sx={{ borderRight: 1, borderColor: "divider", p: 0 }}>
+            <MotionBox
+              whileHover={{
+                scale: 1.15,
+                zIndex: 20,
+                boxShadow: "0px 8px 25px rgba(0,0,0,0.15)",
+                backgroundColor: "background.paper",
+                borderRadius: "6px",
+              }}
+              transition={{ type: "spring", stiffness: 300, damping: 15 }}
+              sx={{ p: "6px 16px", color: "text.secondary", position: "relative" }}
+            >
+              {formatCurrency(node[month])}
+            </MotionBox>
+          </TableCell>
+        ))}
+
+        {/* YTD Total Column */}
+        <TableCell align="right" sx={{ bgcolor: "action.hover", p: 0 }}>
+          <MotionBox
+            whileHover={{
+              scale: 1.15,
+              zIndex: 20,
+              boxShadow: "0px 8px 25px rgba(0,0,0,0.15)",
+              backgroundColor: "background.paper",
+              borderRadius: "6px",
+            }}
+            transition={{ type: "spring", stiffness: 300, damping: 15 }}
+            sx={{ p: "6px 16px", color: "text.primary", fontWeight: 600, position: "relative" }}
+          >
+            {formatCurrency(total)}
+          </MotionBox>
         </TableCell>
       </MotionTableRow>
     );
@@ -1096,7 +1135,6 @@ export default function AdminReportAnalysisScreen() {
 
   const theme = useTheme();
 
-  // Safely fallback to our stable config
   const activeHierarchyConfig = activeHierarchyKey 
     ? ADMIN_HIERARCHY_VIEWS[activeHierarchyKey] 
     : DEFAULT_ADMIN_HIERARCHY_CONFIG;
@@ -1264,7 +1302,6 @@ export default function AdminReportAnalysisScreen() {
 
   const isSetupComplete = selectedReportFile && activeHierarchyKey;
 
-  // Updated Breadcrumb Animation (Sliding in from left)
   const pathContainerVariants = {
     hidden: { opacity: 0 },
     show: {
@@ -1284,7 +1321,7 @@ export default function AdminReportAnalysisScreen() {
   };
 
   return (
-    <Box sx={{ height: "calc(100vh - 64px)", display: "flex", flexDirection: "column", gap: 2 }}>
+    <Box sx={{ p: 2, height: "calc(100vh - 64px)", display: "flex", flexDirection: "column", gap: 2 }}>
       
       {/* ================= UPPER BOX ================= */}
       <Paper
@@ -1316,7 +1353,6 @@ export default function AdminReportAnalysisScreen() {
               boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
             }}
           >
-            {/* Admin Specific Icon */}
             <AdminPanelSettingsIcon sx={{ color: "primary.contrastText", fontSize: 32 }} />
           </MotionBox>
           
