@@ -971,3 +971,838 @@ export default function ReportAnalysisScreen() {
     </Box>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// **************************************************************************** ReportAnalysisScreen ****************************************************************************** //
+
+import {
+  useState,
+  useMemo,
+  useCallback,
+  useEffect,
+  memo,
+  forwardRef,
+} from "react";
+import { useSelector } from "react-redux";
+import {
+  Box,
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Typography,
+  IconButton,
+  CircularProgress,
+  MenuItem,
+  Select,
+  FormControl,
+  InputLabel,
+  TablePagination,
+} from "@mui/material";
+import AnalyticsIcon from "@mui/icons-material/Analytics";
+import DatasetIcon from "@mui/icons-material/Dataset";
+import { useTheme } from "@mui/material/styles";
+import { motion, AnimatePresence } from "framer-motion";
+
+// Assume these are available in your project structure
+import useApi from "../../hooks/useApi";
+import useCustomSnackbar from "../../utils/useCustomSnackbar";
+
+// --- MOTION WRAPPERS ---
+const MotionTableRow = motion(TableRow);
+const MotionBox = motion(Box);
+
+// --- CONFIGURATION & CONSTANTS ---
+const formatCurrency = (value) => {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "INR",
+  }).format(value || 0);
+};
+
+// Stable fallback reference to prevent infinite render loops
+const DEFAULT_CONFIG = { hierarchy: [], availableMetrics: [] };
+
+// --- ACTUAL API LOGIC ---
+const fetchAnalyticsData = async (callApi, showSnackBar, payload) => {
+  try {
+    const responseData = await callApi(
+      "/api/analytics/drill-down",
+      payload,
+      "POST"
+    );
+    return responseData?.data || [];
+  } catch (error) {
+    console.error("Error fetching analytics data:", error);
+    showSnackBar("Failed to fetch analytics data", "error");
+  }
+};
+
+const fetchInitialData = async (callApi, showSnackBar, viewCode, hierarchy, metrics) => {
+  const rootDimension = hierarchy[0];
+  const payload = {
+    viewCode: viewCode,
+    dimensions: [rootDimension],
+    metrics: metrics.map(m => m.logicalName),
+    filters: [],
+  };
+  const apiData = await fetchAnalyticsData(callApi, showSnackBar, payload);
+
+  return (apiData || []).map((row) => ({
+    ...row,
+    level: 0,
+    nodeFilters: [],
+  }));
+};
+
+const fetchChildrenData = async (
+  callApi,
+  showSnackBar,
+  parentNode,
+  viewCode,
+  hierarchy,
+  metrics
+) => {
+  const childLevel = parentNode.level + 1;
+  const nextDimension = hierarchy[childLevel];
+
+  const currentFilters = [
+    ...(parentNode.nodeFilters || []),
+    {
+      logicalField: hierarchy[parentNode.level],
+      operator: "EQUALS",
+      value: parentNode.name,
+    },
+  ];
+  const payload = {
+    viewCode: viewCode,
+    dimensions: [nextDimension],
+    metrics: metrics.map(m => m.logicalName),
+    filters: currentFilters,
+  };
+  const apiData = await fetchAnalyticsData(callApi, showSnackBar, payload);
+
+  return (apiData || []).map((row) => ({
+    ...row,
+    level: childLevel,
+    nodeFilters: currentFilters,
+  }));
+};
+
+// --- COMPONENTS ---
+
+// 1. User Row Component
+const TreeTableRow = memo(
+  forwardRef(
+    (
+      { node, isExpanded, isLoading, onToggle, maxVisibleLevel, index, activeMetrics },
+      ref,
+    ) => {
+      return (
+        <MotionTableRow
+          ref={ref}
+          hover
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -10 }}
+          transition={{
+            duration: 0.25,
+            delay: Math.min(index * 0.02, 0.15),
+            ease: "easeOut",
+          }}
+          sx={{ height: 36 }} // Compact and balanced cell height
+        </MotionTableRow>
+      );
+    },
+  ),
+);
+
+// Real Row implementation overriding placeholder wrapper for flawless UI flow
+const ActualTreeTableRow = memo(
+  forwardRef(
+    (
+      { node, isExpanded, isLoading, onToggle, maxVisibleLevel, index, activeMetrics },
+      ref,
+    ) => {
+      return (
+        <MotionTableRow
+          ref={ref}
+          hover
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -10 }}
+          transition={{
+            duration: 0.25,
+            delay: Math.min(index * 0.015, 0.12),
+            ease: "easeOut",
+          }}
+        >
+          {/* Hierarchy Depth Columns */}
+          {Array.from({ length: maxVisibleLevel + 1 }).map((_, colIndex) => {
+            if (colIndex === node.level) {
+              return (
+                <TableCell
+                  key={colIndex}
+                  sx={{
+                    borderRight: 1,
+                    borderColor: "divider",
+                    minWidth: 260,
+                    bgcolor: "background.paper",
+                    p: 0,
+                    verticalAlign: "middle",
+                  }}
+                >
+                  <MotionBox
+                    whileHover={{
+                      scale: 1.02,
+                      zIndex: 10,
+                      boxShadow: "0px 4px 12px rgba(0,0,0,0.08)",
+                      backgroundColor: "background.paper",
+                    }}
+                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      pl: node.level * 2.5 + 1,
+                      pr: 1.5,
+                      py: 0.5,
+                      position: "relative",
+                      width: "100%",
+                      boxSizing: "border-box",
+                    }}
+                  >
+                    {node.hasChildren ? (
+                      <MotionBox
+                        whileHover={{ scale: 1.15 }}
+                        whileTap={{ scale: 0.85 }}
+                        transition={{ type: "spring", stiffness: 500, damping: 15 }}
+                      >
+                        <IconButton
+                          size="small"
+                          color="primary"
+                          onClick={() => onToggle(node)}
+                          disabled={isLoading}
+                          sx={{
+                            mr: 1,
+                            border: 1,
+                            borderColor: "divider",
+                            borderRadius: "50%",
+                            height: 20,
+                            width: 20,
+                            p: 0,
+                            bgcolor: "action.hover",
+                            "&.Mui-focusVisible": {
+                              bgcolor: "action.selected",
+                            },
+                          }}
+                        >
+                          {isLoading ? (
+                            <CircularProgress size={12} color="inherit" />
+                          ) : isExpanded ? (
+                            "-"
+                          ) : (
+                            "+"
+                          )}
+                        </IconButton>
+                      </MotionBox>
+                    ) : (
+                      <Box sx={{ width: 20, mr: 1 }} />
+                    )}
+                    <Typography
+                      variant="body2"
+                      color="text.primary"
+                      sx={{ 
+                        fontWeight: node.level === 0 ? 600 : 400,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis"
+                      }}
+                    >
+                      {node.name}
+                    </Typography>
+                  </MotionBox>
+                </TableCell>
+              );
+            }
+            return (
+              <TableCell
+                key={colIndex}
+                sx={{
+                  borderRight: 1,
+                  borderColor: "divider",
+                  width: 80,
+                  minWidth: 80,
+                  bgcolor: "background.default",
+                  p: 0,
+                }}
+              />
+            );
+          })}
+
+          {/* Dynamic Metrics Columns */}
+          {activeMetrics.map((metric, mIdx) => {
+            const isLastColumn = mIdx === activeMetrics.length - 1;
+            return (
+              <TableCell
+                key={metric.logicalName}
+                align="right"
+                sx={{ borderRight: 1, borderColor: "divider", p: 0, verticalAlign: "middle" }}
+              >
+                <MotionBox
+                  whileHover={{
+                    scale: 1.03,
+                    zIndex: 20,
+                    boxShadow: "-4px 4px 15px rgba(0,0,0,0.1)",
+                    backgroundColor: "background.paper",
+                    borderRadius: "4px",
+                  }}
+                  // CRITICAL FIX: Directs the right-most cell expansion inwards to completely safe-guard screen real-estate
+                  transition={{ type: "spring", stiffness: 350, damping: 22 }}
+                  sx={{
+                    p: "8px 16px",
+                    color: "text.secondary",
+                    position: "relative",
+                    fontWeight: 500,
+                    transformOrigin: isLastColumn ? "right center" : "center center",
+                    whiteSpace: "nowrap"
+                  }}
+                >
+                  {formatCurrency(node[metric.logicalName])}
+                </MotionBox>
+              </TableCell>
+            );
+          })}
+        </MotionTableRow>
+      );
+    },
+  ),
+);
+ActualTreeTableRow.displayName = "ActualTreeTableRow";
+
+// 2. The Main Screen Component
+export default function ReportAnalysisScreen() {
+  const { callApi } = useApi();
+  const user = useSelector((state) => state.auth.user);
+  const showSnackBar = useCustomSnackbar();
+
+  const [reportsConfig, setReportsConfig] = useState([]);
+  const [selectedReportCode, setSelectedReportCode] = useState("");
+  const [selectedViewCode, setSelectedViewCode] = useState("");
+
+  const [data, setData] = useState([]);
+  const [expandedIds, setExpandedIds] = useState(new Set());
+  const [loadingIds, setLoadingIds] = useState(new Set());
+  const [isInitializing, setIsInitializing] = useState(false);
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
+
+  const theme = useTheme();
+
+  const activeReport = useMemo(() => {
+    return reportsConfig.find((r) => r.reportCode === selectedReportCode) || null;
+  }, [reportsConfig, selectedReportCode]);
+
+  const activeView = useMemo(() => {
+    return activeReport?.views?.find((v) => v.viewCode === selectedViewCode) || null;
+  }, [activeReport, selectedViewCode]);
+
+  const activeHierarchyConfig = activeView || DEFAULT_CONFIG;
+
+  useEffect(() => {
+    const fetchConfig = async () => {
+      try {
+        const response = await callApi("/api/analytics/config", {}, "GET");
+        const configData = Array.isArray(response) ? response : (response?.data || []);
+        setReportsConfig(configData);
+      } catch (error) {
+        console.error("Failed to fetch analytics configurations", error);
+        showSnackBar("Failed to fetch analytics configurations", "error");
+      }
+    };
+    if (user) fetchConfig();
+  }, [callApi, user, showSnackBar]);
+
+  useEffect(() => {
+    setPage(0);
+  }, [selectedReportCode, selectedViewCode]);
+
+  useEffect(() => {
+    const loadRoot = async () => {
+      if (!selectedReportCode || !selectedViewCode) {
+        setData((prev) => (prev.length === 0 ? prev : []));
+        return;
+      }
+      setIsInitializing(true);
+      setData([]);
+      setExpandedIds(new Set());
+
+      try {
+        const rootData = await fetchInitialData(
+          callApi,
+          showSnackBar,
+          selectedViewCode,
+          activeHierarchyConfig.hierarchy,
+          activeHierarchyConfig.availableMetrics
+        );
+        setData(rootData);
+      } catch (error) {
+        console.error("Failed to load initial data", error);
+      } finally {
+        setIsInitializing(false);
+      }
+    };
+    loadRoot();
+  }, [
+    selectedReportCode,
+    selectedViewCode,
+    activeHierarchyConfig,
+    callApi,
+    showSnackBar,
+  ]);
+
+  const appendChildrenToTree = useCallback((nodes, parentId, newChildren) => {
+    return nodes.map((node) => {
+      if (node.id === parentId) return { ...node, children: newChildren };
+      if (node.children)
+        return {
+          ...node,
+          children: appendChildrenToTree(node.children, parentId, newChildren),
+        };
+      return node;
+    });
+  }, []);
+
+  const handleToggle = useCallback(
+    async (node) => {
+      const isExpanded = expandedIds.has(node.id);
+
+      if (isExpanded) {
+        setExpandedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(node.id);
+
+          const removeDescendants = (currentNode) => {
+            if (currentNode.children) {
+              currentNode.children.forEach((child) => {
+                next.delete(child.id);
+                removeDescendants(child);
+              });
+            }
+          };
+          removeDescendants(node);
+          return next;
+        });
+      } else {
+        if (!node.children && node.hasChildren) {
+          setLoadingIds((prev) => new Set(prev).add(node.id));
+          try {
+            const children = await fetchChildrenData(
+              callApi,
+              showSnackBar,
+              node,
+              selectedViewCode,
+              activeHierarchyConfig.hierarchy,
+              activeHierarchyConfig.availableMetrics
+            );
+            setData((prevData) =>
+              appendChildrenToTree(prevData, node.id, children),
+            );
+          } catch (error) {
+            console.error("Failed to fetch children", error);
+          } finally {
+            setLoadingIds((prev) => {
+              const next = new Set(prev);
+              next.delete(node.id);
+              return next;
+            });
+          }
+        }
+        setExpandedIds((prev) => new Set(prev).add(node.id));
+      }
+    },
+    [
+      expandedIds,
+      appendChildrenToTree,
+      activeHierarchyConfig.hierarchy,
+      activeHierarchyConfig.availableMetrics,
+      selectedViewCode,
+      callApi,
+      showSnackBar,
+    ],
+  );
+
+  const visibleRows = useMemo(() => {
+    const rows = [];
+    const traverse = (nodes) => {
+      for (const node of nodes) {
+        rows.push(node);
+        if (expandedIds.has(node.id) && node.children) traverse(node.children);
+      }
+    };
+    traverse(data);
+    return rows;
+  }, [data, expandedIds]);
+
+  const maxVisibleLevel = useMemo(() => {
+    if (visibleRows.length === 0) return 0;
+    return Math.max(...visibleRows.map((row) => row.level));
+  }, [visibleRows]);
+
+  const visibleHierarchyLevels = activeHierarchyConfig.hierarchy.slice(
+    0,
+    maxVisibleLevel + 1,
+  );
+
+  const paginatedRows = useMemo(() => {
+    const startIndex = page * rowsPerPage;
+    return visibleRows.slice(startIndex, startIndex + rowsPerPage);
+  }, [visibleRows, page, rowsPerPage]);
+
+  const handleChangePage = (event, newPage) => setPage(newPage);
+  const handleChangeRowsPerPage = (event) => {
+    setRowsPerPage(parseInt(event.target.value, 10));
+    setPage(0);
+  };
+
+  const isSetupComplete = selectedReportCode && selectedViewCode;
+
+  const pathContainerVariants = {
+    hidden: { opacity: 0 },
+    show: {
+      opacity: 1,
+      transition: { staggerChildren: 0.08 },
+    },
+    exit: { opacity: 0, transition: { duration: 0.15 } },
+  };
+
+  const pathChipVariants = {
+    hidden: { opacity: 0, x: -25 },
+    show: {
+      opacity: 1,
+      x: 0,
+      transition: { type: "spring", stiffness: 300, damping: 22 },
+    },
+  };
+
+  return (
+    <Box sx={{ height: "calc(100vh - 64px)", display: "flex", flexDirection: "column", gap: 1.5, p: 1 }}>
+      {/* ================= UPPER BOX ================= */}
+      <Paper
+        elevation={0}
+        sx={{
+          p: 2,
+          borderRadius: 2,
+          boxShadow: "0 2px 10px rgba(0,0,0,0.03)",
+          border: 1,
+          borderColor: "divider",
+          display: "flex",
+          flexDirection: "column",
+          gap: 2,
+        }}
+      >
+        <Box display="flex" alignItems="center" gap={2}>
+          <MotionBox
+            initial={{ scale: 0, rotate: -180 }}
+            animate={{ scale: 1, rotate: 0 }}
+            transition={{ type: "spring", stiffness: 260, damping: 20 }}
+            sx={{
+              backgroundColor: "primary.main",
+              borderRadius: "10px",
+              width: 44,
+              height: 44,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <AnalyticsIcon sx={{ color: "primary.contrastText", fontSize: 24 }} />
+          </MotionBox>
+
+          <Box sx={{ overflow: "hidden" }}>
+            <AnimatePresence mode="wait">
+              <MotionBox
+                key={activeReport?.displayName || "Analytics"}
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                transition={{ duration: 0.2 }}
+              >
+                <Typography variant="h6" sx={{ fontWeight: 700, color: "text.primary" }}>
+                  {activeReport?.displayName || "Financial Analytics"}
+                </Typography>
+              </MotionBox>
+            </AnimatePresence>
+            <Typography variant="caption" sx={{ color: "text.secondary", opacity: 0.8 }}>
+              Dynamic Drill-Down Matrix
+            </Typography>
+          </Box>
+        </Box>
+
+        <Box display="flex" alignItems="center" gap={2}>
+          <FormControl
+            size="small"
+            sx={{
+              minWidth: 280,
+              bgcolor: "background.paper",
+              borderRadius: 1,
+              "& .MuiOutlinedInput-root.Mui-focused fieldset": {
+                boxShadow: `0 0 8px ${theme.palette.primary.light}`,
+              },
+            }}
+          >
+            <InputLabel id="report-source-label" shrink>
+              Database Report
+            </InputLabel>
+            <Select
+              labelId="report-source-label"
+              value={selectedReportCode}
+              label="Database Report"
+              onChange={(e) => {
+                setSelectedReportCode(e.target.value);
+                setSelectedViewCode("");
+              }}
+              displayEmpty
+              notched
+            >
+              <MenuItem value="" disabled>
+                <em>Please select a Report</em>
+              </MenuItem>
+              {reportsConfig.map((report) => (
+                <MenuItem key={report.reportCode} value={report.reportCode}>
+                  {report.displayName}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          <FormControl
+            size="small"
+            sx={{
+              minWidth: 240,
+              bgcolor: "background.paper",
+              borderRadius: 1,
+              "& .MuiOutlinedInput-root.Mui-focused fieldset": {
+                boxShadow: `0 0 8px ${theme.palette.primary.light}`,
+              },
+            }}
+          >
+            <InputLabel id="hierarchy-view-label" shrink>
+              Hierarchy View
+            </InputLabel>
+            <Select
+              labelId="hierarchy-view-label"
+              value={selectedViewCode}
+              label="Hierarchy View"
+              onChange={(e) => setSelectedViewCode(e.target.value)}
+              displayEmpty
+              notched
+              disabled={!activeReport}
+            >
+              <MenuItem value="" disabled>
+                <em>Please select a Hierarchy View</em>
+              </MenuItem>
+              {activeReport?.views?.map((view) => (
+                <MenuItem key={view.viewCode} value={view.viewCode}>
+                  {view.displayName}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Box>
+      </Paper>
+
+      {/* ================= LOWER BOX ================= */}
+      <Paper
+        elevation={0}
+        sx={{
+          flexGrow: 1,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          borderRadius: 2,
+          boxShadow: "0 2px 10px rgba(0,0,0,0.03)",
+          border: 1,
+          borderColor: "divider",
+        }}
+      >
+        <Box sx={{ borderBottom: 1, borderColor: "divider", px: 2, py: 1, minHeight: 44, display: "flex", alignItems: "center" }}>
+          <AnimatePresence>
+            {isSetupComplete && (
+              <MotionBox
+                variants={pathContainerVariants}
+                initial="hidden"
+                animate="show"
+                exit="hidden"
+                display="flex"
+                alignItems="center"
+                gap={0.5}
+              >
+                <Typography variant="body2" color="text.secondary" sx={{ mr: 1, fontWeight: 500 }}>
+                  Path:
+                </Typography>
+                {activeHierarchyConfig.hierarchy.map((item, index) => {
+                  const isActive = index <= maxVisibleLevel;
+                  const isCurrent = index === maxVisibleLevel;
+
+                  return (
+                    <Box key={index} display="flex" alignItems="center">
+                      <MotionBox variants={pathChipVariants} display="flex" alignItems="center" gap={1}>
+                        <MotionBox
+                          animate={
+                            isActive
+                              ? isCurrent
+                                ? { scale: [1, 1.2, 1], boxShadow: `0px 0px 8px ${theme.palette.primary.main}` }
+                                : { scale: 1, boxShadow: "none" }
+                              : { scale: 0.8, boxShadow: "none" }
+                          }
+                          transition={isCurrent ? { repeat: Infinity, duration: 1.5, ease: "easeInOut" } : { duration: 0.2 }}
+                          sx={{
+                            width: 10,
+                            height: 10,
+                            borderRadius: "50%",
+                            bgcolor: isActive ? "primary.main" : "background.paper",
+                            border: "2px solid",
+                            borderColor: isActive ? "primary.main" : "divider",
+                          }}
+                        />
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            fontWeight: isActive ? 600 : 500,
+                            color: isActive ? "text.primary" : "text.disabled",
+                            textTransform: "capitalize",
+                          }}
+                        >
+                          {item.replace("_", " ")}
+                        </Typography>
+                      </MotionBox>
+
+                      {index < activeHierarchyConfig.hierarchy.length - 1 && (
+                        <MotionBox
+                          variants={pathChipVariants}
+                          animate={{ backgroundColor: index < maxVisibleLevel ? theme.palette.primary.main : theme.palette.divider }}
+                          sx={{ width: 24, height: 2, mx: 1, borderRadius: 1 }}
+                        />
+                      )}
+                    </Box>
+                  );
+                })}
+              </MotionBox>
+            )}
+          </AnimatePresence>
+        </Box>
+
+        <TableContainer sx={{ flexGrow: 1, bgcolor: "background.default", position: "relative" }}>
+          {!isSetupComplete && (
+            <Box sx={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 10 }}>
+              <MotionBox animate={{ scale: [1, 1.05, 1] }} transition={{ repeat: Infinity, duration: 3 }}>
+                <DatasetIcon sx={{ fontSize: 64, color: "action.disabled", mb: 1 }} />
+              </MotionBox>
+              <Typography variant="h6" color="text.secondary">No Data to Display</Typography>
+            </Box>
+          )}
+
+          {isInitializing ? (
+            <Box sx={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+              <CircularProgress size={32} color="primary" sx={{ mb: 1 }} />
+              <Typography variant="body2" color="text.secondary">Executing Query ...</Typography>
+            </Box>
+          ) : isSetupComplete ? (
+            <Table stickyHeader size="small" sx={{ minWidth: 1000, tableLayout: "auto" }}>
+              <TableHead>
+                <TableRow>
+                  {visibleHierarchyLevels.map((levelName, index) => (
+                    <TableCell
+                      key={levelName}
+                      sx={{
+                        backgroundColor: "#f8f9fa",
+                        color: "text.primary",
+                        fontWeight: 700,
+                        borderRight: 1,
+                        borderColor: "divider",
+                        borderBottom: 2,
+                        py: 1,
+                        width: index === 0 ? 280 : "auto"
+                      }}
+                    >
+                      {levelName.replace("_", " ").toUpperCase()}
+                    </TableCell>
+                  ))}
+                  {activeHierarchyConfig.availableMetrics.map((metric) => (
+                    <TableCell
+                      key={metric.logicalName}
+                      align="right"
+                      sx={{ backgroundColor: "#f1f3f5", color: "text.primary", fontWeight: 700, borderRight: 1, borderColor: "divider", borderBottom: 2, py: 1 }}
+                    >
+                      {metric.displayName}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              </TableHead>
+              <TableBody key={page}>
+                <AnimatePresence initial={false}>
+                  {paginatedRows.map((row, index) => (
+                    <ActualTreeTableRow
+                      key={row.id}
+                      node={row}
+                      index={index}
+                      isExpanded={expandedIds.has(row.id)}
+                      isLoading={loadingIds.has(row.id)}
+                      onToggle={handleToggle}
+                      maxVisibleLevel={maxVisibleLevel}
+                      activeMetrics={activeHierarchyConfig.availableMetrics}
+                    />
+                  ))}
+                </AnimatePresence>
+              </TableBody>
+            </Table>
+          ) : null}
+        </TableContainer>
+
+        <Box sx={{ bgcolor: "background.paper", borderTop: 1, borderColor: "divider", px: 2, display: "flex", justifyContent: "space-between", alignItems: "center", minHeight: 40 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: isSetupComplete ? "success.main" : "action.disabled" }} />
+            <Typography variant="caption" color="text.secondary" fontWeight={500}>
+              {isSetupComplete ? "Connected & Synced" : "No Connection"}
+            </Typography>
+          </Box>
+          <TablePagination
+            component="div"
+            count={visibleRows.length}
+            page={page}
+            onPageChange={handleChangePage}
+            rowsPerPage={rowsPerPage}
+            onRowsPerPageChange={handleChangeRowsPerPage}
+            rowsPerPageOptions={[10, 25, 50, 100]}
+            sx={{ ".MuiTablePagination-toolbar": { minHeight: 40, padding: 0 } }}
+          />
+        </Box>
+      </Paper>
+    </Box>
+  );
+}
+
+
