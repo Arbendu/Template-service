@@ -978,3 +978,96 @@ export default function ReportAnalysisScreen() {
     </Box>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+{activeHierarchyConfig.hierarchy.map((item, index) => {
+  // We determine the state of each dot based on how deep the user has expanded the table
+  const isActive = index <= maxVisibleLevel;
+  const isCurrent = index === maxVisibleLevel;
+
+  return (
+    <Box key={index} display="flex" alignItems="center">
+      <MotionBox
+        variants={pathChipVariants}
+        display="flex"
+        alignItems="center"
+        gap={1}
+      >
+        {/* The Animated Dot */}
+        <MotionBox
+          animate={
+            isActive
+              ? isCurrent
+                ? { scale: [1, 1.3, 1], boxShadow: `0px 0px 10px ${theme.palette.primary.main}` }
+                : { scale: 1, boxShadow: "none" }
+              : { scale: 0.8, boxShadow: "none" }
+          }
+          transition={
+            isCurrent
+              ? { repeat: Infinity, duration: 1.5, ease: "easeInOut" }
+              : { duration: 0.3 }
+          }
+          sx={{
+            width: 12,
+            height: 12,
+            borderRadius: "50%",
+            bgcolor: isActive ? "primary.main" : "background.paper",
+            border: "2px solid",
+            borderColor: isActive ? "primary.main" : "divider",
+          }}
+        />
+        {/* The Text Label */}
+        <Typography
+          variant="body2"
+          sx={{
+            fontWeight: isActive ? 600 : 500,
+            color: isActive ? "text.primary" : "text.disabled",
+            textTransform: "capitalize",
+          }}
+        >
+          {item.replace("_", " ")}
+        </Typography>
+      </MotionBox>
+
+      {/* The Straight Connecting Line */}
+      {index < activeHierarchyConfig.hierarchy.length - 1 && (
+        <MotionBox
+          variants={pathChipVariants}
+          animate={{
+            backgroundColor:
+              index < maxVisibleLevel
+                ? theme.palette.primary.main
+                : theme.palette.divider,
+          }}
+          transition={{ duration: 0.4 }}
+          sx={{
+            width: 32,
+            height: 2,
+            mx: 1.5,
+            borderRadius: 1,
+          }}
+        />
+      )}
+    </Box>
+  );
+})}
+
