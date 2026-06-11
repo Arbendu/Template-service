@@ -1,1 +1,749 @@
+import {
+  useState,
+  useMemo,
+  useCallback,
+  useEffect,
+  useRef,
+  memo,
+} from "react";
+import { useSelector } from "react-redux";
+import {
+  Box,
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Typography,
+  IconButton,
+  CircularProgress,
+  MenuItem,
+  Select,
+  FormControl,
+  InputLabel,
+  TablePagination,
+} from "@mui/material";
+import AnalyticsIcon from "@mui/icons-material/Analytics";
+import DatasetIcon from "@mui/icons-material/Dataset";
+import { useTheme } from "@mui/material/styles";
+import { motion } from "framer-motion";
+
+import useApi from "../../hooks/useApi";
+import useCustomSnackbar from "../../utils/useCustomSnackbar";
+
+// ---------------------------------------------------------------------------
+// MOTION WRAPPERS  (defined once at module scope — never recreated)
+// ---------------------------------------------------------------------------
+const MotionTableRow = motion(TableRow);
+const MotionBox = motion(Box);
+
+// ---------------------------------------------------------------------------
+// ANIMATION VARIANTS  (module scope = stable object references always)
+// ---------------------------------------------------------------------------
+const pathContainerVariants = {
+  hidden: { opacity: 0 },
+  show: { opacity: 1, transition: { staggerChildren: 0.05 } },
+  exit:  { opacity: 0, transition: { duration: 0.1 } },
+};
+const pathChipVariants = {
+  hidden: { opacity: 0, x: -20 },
+  show:   { opacity: 1, x: 0, transition: { type: "spring", stiffness: 350, damping: 25 } },
+};
+const rowHoverTransition   = { type: "spring", stiffness: 400, damping: 25 };
+const metricHoverTransition = { type: "spring", stiffness: 350, damping: 22 };
+const btnHoverTransition    = { type: "spring", stiffness: 500, damping: 15 };
+
+// ---------------------------------------------------------------------------
+// CONSTANTS
+// ---------------------------------------------------------------------------
+const DEFAULT_CONFIG = { hierarchy: [], availableMetrics: [] };
+
+const formatCurrency = (value) =>
+  new Intl.NumberFormat("en-US", { style: "currency", currency: "INR" }).format(value || 0);
+
+// ---------------------------------------------------------------------------
+// API HELPERS  (pure functions, no React — keep outside components)
+// ---------------------------------------------------------------------------
+const callDrillDown = async (callApi, showSnackBar, payload) => {
+  try {
+    const res = await callApi("/AS/analytics/drill-down", payload, "POST");
+    return res?.data || [];
+  } catch (err) {
+    console.error("Error fetching analytics data:", err);
+    showSnackBar("Failed to fetch analytics data", "error");
+    return [];
+  }
+};
+
+const loadRootNodes = async (callApi, showSnackBar, viewCode, hierarchy, metrics) => {
+  const data = await callDrillDown(callApi, showSnackBar, {
+    viewCode,
+    dimensions: [hierarchy[0]],
+    metrics: metrics.map((m) => m.logicalName),
+    filters: [],
+  });
+  return (data || []).map((row) => ({ ...row, level: 0, nodeFilters: [], childIds: null }));
+};
+
+const loadChildNodes = async (callApi, showSnackBar, parentNode, viewCode, hierarchy, metrics) => {
+  const childLevel = parentNode.level + 1;
+  const filters = [
+    ...(parentNode.nodeFilters || []),
+    { logicalField: hierarchy[parentNode.level], operator: "EQUALS", value: parentNode.name },
+  ];
+  const data = await callDrillDown(callApi, showSnackBar, {
+    viewCode,
+    dimensions: [hierarchy[childLevel]],
+    metrics: metrics.map((m) => m.logicalName),
+    filters,
+  });
+  return (data || []).map((row) => ({ ...row, level: childLevel, nodeFilters: filters, childIds: null }));
+};
+
+// ---------------------------------------------------------------------------
+// FLAT MAP HELPERS
+// ---------------------------------------------------------------------------
+
+/**
+ * Build initial flat map from root rows returned by the API.
+ * Shape: { [id]: { ...rowData, childIds: null } }
+ * childIds = null  → children not yet fetched
+ * childIds = []    → leaf node (no children)
+ * childIds = [id…] → children loaded
+ */
+const buildInitialMap = (rows) => {
+  const map = {};
+  const rootIds = [];
+  for (const row of rows) {
+    map[row.id] = { ...row, childIds: null };
+    rootIds.push(row.id);
+  }
+  return { nodeMap: map, rootIds };
+};
+
+/**
+ * Add fetched children into the existing flat map.
+ * Returns a NEW map object (immutable update).
+ */
+const addChildrenToMap = (nodeMap, parentId, children) => {
+  const next = { ...nodeMap };
+  const childIds = [];
+  for (const child of children) {
+    next[child.id] = { ...child, childIds: null };
+    childIds.push(child.id);
+  }
+  next[parentId] = { ...next[parentId], childIds };
+  return next;
+};
+
+/**
+ * Collect all descendant IDs of a node (for bulk-removing from expandedIds).
+ * Uses the flat map — O(descendants), no deep tree walk.
+ */
+const collectDescendantIds = (nodeMap, nodeId) => {
+  const ids = [];
+  const stack = [...(nodeMap[nodeId]?.childIds || [])];
+  while (stack.length) {
+    const id = stack.pop();
+    ids.push(id);
+    const children = nodeMap[id]?.childIds;
+    if (children?.length) stack.push(...children);
+  }
+  return ids;
+};
+
+// ---------------------------------------------------------------------------
+// ROW COMPONENT  (memo — only re-renders when its own props change)
+// ---------------------------------------------------------------------------
+const TreeTableRow = memo(function TreeTableRow({
+  node,
+  isExpanded,
+  isLoading,
+  onToggle,
+  maxHierarchyLevel,
+  activeMetrics,
+}) {
+  // Play entrance animation only on first mount.
+  // Without this guard, every re-render (e.g. isExpanded changing on a
+  // sibling) would replay the fade-in on this row.
+  const isMounted = useRef(false);
+  useEffect(() => { isMounted.current = true; }, []);
+
+  return (
+    <MotionTableRow
+      hover
+      initial={isMounted.current ? false : { opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.18, ease: "easeOut" }}
+    >
+      {/* Hierarchy columns — one per configured level */}
+      {Array.from({ length: maxHierarchyLevel + 1 }).map((_, colIdx) => {
+        if (colIdx !== node.level) {
+          return (
+            <TableCell
+              key={colIdx}
+              sx={{ width: 260, minWidth: 180, borderRight: 1, borderColor: "divider", p: 0, bgcolor: "background.default" }}
+            />
+          );
+        }
+        return (
+          <TableCell
+            key={colIdx}
+            sx={{ width: 260, minWidth: 180, borderRight: 1, borderColor: "divider", p: 0, verticalAlign: "middle", overflow: "hidden" }}
+          >
+            <MotionBox
+              whileHover={{ scale: 1.015, boxShadow: "0px 2px 8px rgba(0,0,0,0.07)" }}
+              transition={rowHoverTransition}
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                pl: node.level * 2.5 + 1,
+                pr: 1.5,
+                py: 0.5,
+                width: "100%",
+                boxSizing: "border-box",
+              }}
+            >
+              {node.hasChildren ? (
+                <MotionBox
+                  whileHover={{ scale: 1.15 }}
+                  whileTap={{ scale: 0.85 }}
+                  transition={btnHoverTransition}
+                >
+                  <IconButton
+                    size="small"
+                    color="primary"
+                    onClick={() => onToggle(node)}
+                    disabled={isLoading}
+                    sx={{
+                      mr: 1, border: 1, borderColor: "divider",
+                      borderRadius: "50%", height: 20, width: 20, p: 0,
+                      bgcolor: "action.hover",
+                      "&.Mui-focusVisible": { bgcolor: "action.selected" },
+                    }}
+                  >
+                    {isLoading
+                      ? <CircularProgress size={12} color="inherit" />
+                      : isExpanded ? "−" : "+"}
+                  </IconButton>
+                </MotionBox>
+              ) : (
+                <Box sx={{ width: 20, mr: 1 }} />
+              )}
+              <Typography
+                variant="body2"
+                color="text.primary"
+                sx={{ fontWeight: node.level === 0 ? 600 : 400, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+              >
+                {node.name}
+              </Typography>
+            </MotionBox>
+          </TableCell>
+        );
+      })}
+
+      {/* Metric columns */}
+      {activeMetrics.map((metric, mIdx) => (
+        <TableCell
+          key={metric.logicalName}
+          align="right"
+          sx={{ borderRight: 1, borderColor: "divider", p: 0, verticalAlign: "middle" }}
+        >
+          <MotionBox
+            whileHover={{ scale: 1.03, boxShadow: "-4px 4px 15px rgba(0,0,0,0.08)", borderRadius: "4px" }}
+            transition={metricHoverTransition}
+            sx={{
+              p: "8px 16px",
+              color: "text.secondary",
+              fontWeight: 500,
+              transformOrigin: mIdx === activeMetrics.length - 1 ? "right center" : "center center",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {formatCurrency(node[metric.logicalName])}
+          </MotionBox>
+        </TableCell>
+      ))}
+    </MotionTableRow>
+  );
+});
+
+// ---------------------------------------------------------------------------
+// MAIN SCREEN
+// ---------------------------------------------------------------------------
+export default function ReportAnalysisScreen() {
+  const { callApi } = useApi();
+  const user        = useSelector((state) => state.auth.user);
+  const showSnackBar = useCustomSnackbar();
+  const theme        = useTheme();
+
+  // --- Config / selection state ---
+  const [reportsConfig,      setReportsConfig]      = useState([]);
+  const [selectedReportCode, setSelectedReportCode] = useState("");
+  const [selectedViewCode,   setSelectedViewCode]   = useState("");
+
+  // --- FLAT MAP STATE (replaces nested `data` tree) ---
+  // nodeMap : { [id]: node }   — single source of truth for all loaded nodes
+  // rootIds : string[]         — ordered IDs of root-level rows
+  const [nodeMap, setNodeMap] = useState({});
+  const [rootIds, setRootIds] = useState([]);
+
+  // --- Interaction state ---
+  const [expandedIds,  setExpandedIds]  = useState(() => new Set());
+  const [loadingIds,   setLoadingIds]   = useState(() => new Set());
+  const [isInitializing, setIsInitializing] = useState(false);
+
+  // --- Pagination ---
+  const [page,        setPage]        = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
+
+  // ---------------------------------------------------------------------------
+  // Derived config
+  // ---------------------------------------------------------------------------
+  const activeReport = useMemo(
+    () => reportsConfig.find((r) => r.reportCode === selectedReportCode) || null,
+    [reportsConfig, selectedReportCode],
+  );
+
+  const activeView = useMemo(
+    () => activeReport?.views?.find((v) => v.viewCode === selectedViewCode) || null,
+    [activeReport, selectedViewCode],
+  );
+
+  const activeHierarchyConfig = activeView || DEFAULT_CONFIG;
+
+  // Stable reference — avoids new array ref on every render defeating memo()
+  const activeMetrics = useMemo(
+    () => activeHierarchyConfig.availableMetrics,
+    [activeHierarchyConfig.availableMetrics],
+  );
+
+  // Max depth from config — stable between expand/collapse, unlike a
+  // dynamic Math.max over visible rows which changed every toggle and
+  // forced every row to re-render.
+  const maxHierarchyLevel = useMemo(
+    () => Math.max(0, activeHierarchyConfig.hierarchy.length - 1),
+    [activeHierarchyConfig.hierarchy],
+  );
+
+  // ---------------------------------------------------------------------------
+  // Load config on mount
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      try {
+        const res = await callApi("/AS/analytics/config", {}, "GET");
+        const cfg = Array.isArray(res) ? res : res?.data || [];
+        setReportsConfig(cfg);
+      } catch (err) {
+        console.error("Failed to fetch analytics configurations", err);
+        showSnackBar("Failed to fetch analytics configurations", "error");
+      }
+    })();
+  }, [callApi, user, showSnackBar]);
+
+  // ---------------------------------------------------------------------------
+  // Load root data when report + view selection changes
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    setPage(0);
+
+    if (!selectedReportCode || !selectedViewCode) {
+      setNodeMap({});
+      setRootIds([]);
+      setExpandedIds(new Set());
+      return;
+    }
+
+    let cancelled = false;
+    setIsInitializing(true);
+    setNodeMap({});
+    setRootIds([]);
+    setExpandedIds(new Set());
+
+    (async () => {
+      try {
+        const rows = await loadRootNodes(
+          callApi, showSnackBar,
+          selectedViewCode,
+          activeHierarchyConfig.hierarchy,
+          activeHierarchyConfig.availableMetrics,
+        );
+        if (cancelled) return;
+        const { nodeMap: map, rootIds: ids } = buildInitialMap(rows);
+        setNodeMap(map);
+        setRootIds(ids);
+      } catch (err) {
+        console.error("Failed to load root data", err);
+      } finally {
+        if (!cancelled) setIsInitializing(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedReportCode, selectedViewCode]);
+  // Note: activeHierarchyConfig is derived from selectedViewCode so it's safe
+  // to omit; callApi/showSnackBar are stable refs from custom hooks.
+
+  // ---------------------------------------------------------------------------
+  // nodeMap ref — lets handleToggle always read the latest map without
+  // including it in useCallback deps (which would recreate the fn every render)
+  // ---------------------------------------------------------------------------
+  const nodeMapRef = useRef(nodeMap);
+  useEffect(() => { nodeMapRef.current = nodeMap; }, [nodeMap]);
+
+  const expandedIdsRef = useRef(expandedIds);
+  useEffect(() => { expandedIdsRef.current = expandedIds; }, [expandedIds]);
+
+  // ---------------------------------------------------------------------------
+  // TOGGLE — the core of the flat-map approach
+  // ---------------------------------------------------------------------------
+  const handleToggle = useCallback(async (node) => {
+    const isExpanded = expandedIdsRef.current.has(node.id);
+
+    if (isExpanded) {
+      // ── COLLAPSE ────────────────────────────────────────────────────────────
+      // No setNodeMap call needed at all — the tree data is unchanged.
+      // We only mutate expandedIds, which is a tiny Set update.
+      setExpandedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(node.id);
+        // Remove all descendants using the flat map — no recursive tree walk
+        const descendants = collectDescendantIds(nodeMapRef.current, node.id);
+        descendants.forEach((id) => next.delete(id));
+        return next;
+      });
+    } else {
+      // ── EXPAND ──────────────────────────────────────────────────────────────
+      const currentNode = nodeMapRef.current[node.id];
+      const childrenAlreadyLoaded = currentNode?.childIds !== null;
+
+      if (!childrenAlreadyLoaded && node.hasChildren) {
+        // Fetch children and insert into flat map
+        setLoadingIds((prev) => new Set(prev).add(node.id));
+        try {
+          const children = await loadChildNodes(
+            callApi, showSnackBar, node,
+            selectedViewCode,
+            activeHierarchyConfig.hierarchy,
+            activeHierarchyConfig.availableMetrics,
+          );
+          // Single flat-map update: parent gets childIds, children added as entries
+          setNodeMap((prev) => addChildrenToMap(prev, node.id, children));
+        } catch (err) {
+          console.error("Failed to fetch children", err);
+          setLoadingIds((prev) => { const n = new Set(prev); n.delete(node.id); return n; });
+          return;
+        } finally {
+          setLoadingIds((prev) => { const n = new Set(prev); n.delete(node.id); return n; });
+        }
+      }
+
+      setExpandedIds((prev) => new Set(prev).add(node.id));
+    }
+  }, [
+    // nodeMap and expandedIds intentionally read via refs — including them
+    // here would recreate handleToggle on every state change, giving every
+    // memo'd row a new onToggle prop reference and forcing full re-renders.
+    callApi,
+    showSnackBar,
+    selectedViewCode,
+    activeHierarchyConfig.hierarchy,
+    activeHierarchyConfig.availableMetrics,
+  ]);
+
+  // ---------------------------------------------------------------------------
+  // VISIBLE ROWS — flat iterative walk (no recursion, no nested tree)
+  // ---------------------------------------------------------------------------
+  const visibleRows = useMemo(() => {
+    const result = [];
+    // Iterative stack traversal — O(visible nodes), no deep recursion
+    const stack = [...rootIds];
+    while (stack.length) {
+      const id = stack.shift();
+      const node = nodeMap[id];
+      if (!node) continue;
+      result.push(node);
+      if (expandedIds.has(id) && node.childIds?.length) {
+        // Prepend children so they appear directly after their parent
+        stack.unshift(...node.childIds);
+      }
+    }
+    return result;
+  }, [nodeMap, rootIds, expandedIds]);
+  // Key insight: nodeMap only changes on EXPAND (new children added).
+  // On COLLAPSE only expandedIds changes — nodeMap is untouched — so
+  // visibleRows recomputes from the same nodeMap with fewer expandedIds.
+  // No tree rebuilding, no recursive mutation.
+
+  // ---------------------------------------------------------------------------
+  // Max visible level (for breadcrumb header only — NOT passed to rows)
+  // ---------------------------------------------------------------------------
+  const maxVisibleLevel = useMemo(() => {
+    if (!visibleRows.length) return 0;
+    return Math.max(...visibleRows.map((r) => r.level));
+  }, [visibleRows]);
+
+  const visibleHierarchyLevels = useMemo(
+    () => activeHierarchyConfig.hierarchy.slice(0, maxVisibleLevel + 1),
+    [activeHierarchyConfig.hierarchy, maxVisibleLevel],
+  );
+
+  // ---------------------------------------------------------------------------
+  // Pagination
+  // ---------------------------------------------------------------------------
+  const paginatedRows = useMemo(() => {
+    const start = page * rowsPerPage;
+    return visibleRows.slice(start, start + rowsPerPage);
+  }, [visibleRows, page, rowsPerPage]);
+
+  const handleChangePage        = useCallback((_, newPage) => setPage(newPage), []);
+  const handleChangeRowsPerPage = useCallback((e) => {
+    setRowsPerPage(parseInt(e.target.value, 10));
+    setPage(0);
+  }, []);
+
+  const isSetupComplete = !!(selectedReportCode && selectedViewCode);
+
+  // ---------------------------------------------------------------------------
+  // RENDER
+  // ---------------------------------------------------------------------------
+  return (
+    <Box sx={{ height: "calc(100vh - 64px)", display: "flex", flexDirection: "column", gap: 1.5, p: 1 }}>
+
+      {/* ── UPPER PANEL ─────────────────────────────────────────────────── */}
+      <Paper
+        elevation={0}
+        sx={{ p: 2, borderRadius: 2, border: 1, borderColor: "divider", boxShadow: "0 2px 10px rgba(0,0,0,0.03)", display: "flex", flexDirection: "column", gap: 2 }}
+      >
+        {/* Title row */}
+        <Box display="flex" alignItems="center" gap={2}>
+          <MotionBox
+            initial={{ scale: 0, rotate: -180 }}
+            animate={{ scale: 1, rotate: 0 }}
+            transition={{ type: "spring", stiffness: 260, damping: 20 }}
+            sx={{ backgroundColor: "primary.main", borderRadius: "10px", width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center" }}
+          >
+            <AnalyticsIcon sx={{ color: "primary.contrastText", fontSize: 24 }} />
+          </MotionBox>
+          <Box sx={{ overflow: "hidden" }}>
+            <Typography variant="h6" sx={{ fontWeight: 700, color: "text.primary" }}>
+              {activeReport?.displayName || "Financial Analytics"}
+            </Typography>
+            <Typography variant="caption" sx={{ color: "text.secondary", opacity: 0.8 }}>
+              Dynamic Drill-Down Matrix
+            </Typography>
+          </Box>
+        </Box>
+
+        {/* Dropdowns row */}
+        <Box display="flex" alignItems="center" gap={2}>
+          <FormControl
+            size="small"
+            sx={{ minWidth: 280, bgcolor: "background.paper", borderRadius: 1, "& .MuiOutlinedInput-root.Mui-focused fieldset": { boxShadow: `0 0 8px ${theme.palette.primary.light}` } }}
+          >
+            <InputLabel id="report-source-label" shrink>Database Report</InputLabel>
+            <Select
+              labelId="report-source-label"
+              value={selectedReportCode}
+              label="Database Report"
+              onChange={(e) => { setSelectedReportCode(e.target.value); setSelectedViewCode(""); }}
+              displayEmpty notched
+            >
+              <MenuItem value="" disabled><em>Please select a Report</em></MenuItem>
+              {reportsConfig.map((r) => (
+                <MenuItem key={r.reportCode} value={r.reportCode}>{r.displayName}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          <FormControl
+            size="small"
+            sx={{ minWidth: 240, bgcolor: "background.paper", borderRadius: 1, "& .MuiOutlinedInput-root.Mui-focused fieldset": { boxShadow: `0 0 8px ${theme.palette.primary.light}` } }}
+          >
+            <InputLabel id="hierarchy-view-label" shrink>Hierarchy View</InputLabel>
+            <Select
+              labelId="hierarchy-view-label"
+              value={selectedViewCode}
+              label="Hierarchy View"
+              onChange={(e) => setSelectedViewCode(e.target.value)}
+              displayEmpty notched disabled={!activeReport}
+            >
+              <MenuItem value="" disabled><em>Please select a Hierarchy View</em></MenuItem>
+              {activeReport?.views?.map((v) => (
+                <MenuItem key={v.viewCode} value={v.viewCode}>{v.displayName}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Box>
+      </Paper>
+
+      {/* ── LOWER PANEL ─────────────────────────────────────────────────── */}
+      <Paper
+        elevation={0}
+        sx={{ flexGrow: 1, display: "flex", flexDirection: "column", overflow: "hidden", borderRadius: 2, border: 1, borderColor: "divider", boxShadow: "0 2px 10px rgba(0,0,0,0.03)" }}
+      >
+
+        {/* Breadcrumb path bar */}
+        <Box sx={{ borderBottom: 1, borderColor: "divider", px: 2, py: 1, minHeight: 44, display: "flex", alignItems: "center" }}>
+          {isSetupComplete && (
+            <MotionBox
+              variants={pathContainerVariants}
+              initial="hidden" animate="show" exit="hidden"
+              display="flex" alignItems="center" gap={0.5}
+            >
+              <Typography variant="body2" color="text.secondary" sx={{ mr: 1, fontWeight: 500 }}>
+                Path:
+              </Typography>
+              {activeHierarchyConfig.hierarchy.map((item, idx) => {
+                const isActive  = idx <= maxVisibleLevel;
+                const isCurrent = idx === maxVisibleLevel;
+                return (
+                  <Box key={idx} display="flex" alignItems="center">
+                    <MotionBox variants={pathChipVariants} display="flex" alignItems="center" gap={1}>
+                      <MotionBox
+                        animate={
+                          isActive
+                            ? isCurrent
+                              ? { scale: [1, 1.2, 1], boxShadow: `0px 0px 8px ${theme.palette.primary.main}` }
+                              : { scale: 1, boxShadow: "none" }
+                            : { scale: 0.8, boxShadow: "none" }
+                        }
+                        transition={isCurrent ? { repeat: Infinity, duration: 1.5, ease: "easeInOut" } : { duration: 0.2 }}
+                        sx={{
+                          width: 10, height: 10, borderRadius: "50%",
+                          bgcolor: isActive ? "primary.main" : "background.paper",
+                          border: "2px solid",
+                          borderColor: isActive ? "primary.main" : "divider",
+                        }}
+                      />
+                      <Typography
+                        variant="body2"
+                        sx={{ fontWeight: isActive ? 600 : 500, color: isActive ? "text.primary" : "text.disabled", textTransform: "capitalize" }}
+                      >
+                        {item.replace("_", " ")}
+                      </Typography>
+                    </MotionBox>
+                    {idx < activeHierarchyConfig.hierarchy.length - 1 && (
+                      <MotionBox
+                        variants={pathChipVariants}
+                        animate={{ backgroundColor: idx < maxVisibleLevel ? theme.palette.primary.main : theme.palette.divider }}
+                        sx={{ width: 24, height: 2, mx: 1, borderRadius: 1 }}
+                      />
+                    )}
+                  </Box>
+                );
+              })}
+            </MotionBox>
+          )}
+        </Box>
+
+        {/* Table area */}
+        <TableContainer sx={{ flexGrow: 1, bgcolor: "background.default", position: "relative" }}>
+
+          {/* Empty state */}
+          {!isSetupComplete && (
+            <Box sx={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 10 }}>
+              <DatasetIcon sx={{ fontSize: 64, color: "action.disabled", mb: 1 }} />
+              <Typography variant="h6" color="text.secondary">No Data to Display</Typography>
+              <Typography variant="body2" color="text.disabled">
+                Please select both a database report and a hierarchy view above.
+              </Typography>
+            </Box>
+          )}
+
+          {isInitializing ? (
+            <Box sx={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+              <CircularProgress size={32} color="primary" sx={{ mb: 1 }} />
+              <Typography variant="body2" color="text.secondary">Executing Query …</Typography>
+            </Box>
+          ) : isSetupComplete ? (
+            <Table
+              stickyHeader
+              size="small"
+              sx={{
+                // "fixed" layout: browser locks column widths after first pass,
+                // no reflow on row add/remove — removes the column-shift jitter.
+                tableLayout: "fixed",
+                minWidth: 600,
+              }}
+            >
+              <TableHead>
+                <TableRow>
+                  {visibleHierarchyLevels.map((levelName) => (
+                    <TableCell
+                      key={levelName}
+                      sx={{
+                        backgroundColor: "#f8f9fa", fontWeight: 700,
+                        borderRight: 1, borderColor: "divider", borderBottom: 2,
+                        py: 1, width: 260, minWidth: 180,
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      }}
+                    >
+                      {levelName.replace("_", " ").toUpperCase()}
+                    </TableCell>
+                  ))}
+                  {activeMetrics.map((metric) => (
+                    <TableCell
+                      key={metric.logicalName}
+                      align="right"
+                      sx={{
+                        backgroundColor: "#f1f3f5", fontWeight: 700,
+                        borderRight: 1, borderColor: "divider", borderBottom: 2,
+                        py: 1, minWidth: 160, whiteSpace: "nowrap",
+                      }}
+                    >
+                      {metric.displayName}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              </TableHead>
+
+              <TableBody>
+                {paginatedRows.map((row) => (
+                  // key=row.id (not index!) — React reuses the DOM node for
+                  // the same data row, so memo() comparison is meaningful and
+                  // the entrance animation fires only once on mount.
+                  <TreeTableRow
+                    key={row.id}
+                    node={row}
+                    isExpanded={expandedIds.has(row.id)}
+                    isLoading={loadingIds.has(row.id)}
+                    onToggle={handleToggle}
+                    maxHierarchyLevel={maxHierarchyLevel}
+                    activeMetrics={activeMetrics}
+                  />
+                ))}
+              </TableBody>
+            </Table>
+          ) : null}
+        </TableContainer>
+
+        {/* Footer / pagination */}
+        <Box sx={{ bgcolor: "background.paper", borderTop: 1, borderColor: "divider", px: 2, display: "flex", justifyContent: "space-between", alignItems: "center", minHeight: 40 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: isSetupComplete ? "success.main" : "action.disabled" }} />
+            <Typography variant="caption" color="text.secondary" fontWeight={500}>
+              {isSetupComplete ? "Connected & Synced" : "No Connection"}
+            </Typography>
+          </Box>
+          <TablePagination
+            component="div"
+            count={visibleRows.length}
+            page={page}
+            onPageChange={handleChangePage}
+            rowsPerPage={rowsPerPage}
+            onRowsPerPageChange={handleChangeRowsPerPage}
+            rowsPerPageOptions={[10, 25, 50, 100]}
+            sx={{ ".MuiTablePagination-toolbar": { minHeight: 40, padding: 0 } }}
+          />
+        </Box>
+      </Paper>
+    </Box>
+  );
+}
 
