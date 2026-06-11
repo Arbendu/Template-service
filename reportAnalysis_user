@@ -654,7 +654,7 @@ export default function ReportAnalysisScreen() {
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
-          borderRadius: 2,
+          borderRadius: 1,
           boxShadow: "0 2px 10px rgba(0,0,0,0.03)",
           border: 1,
           borderColor: "divider",
@@ -783,9 +783,18 @@ export default function ReportAnalysisScreen() {
                 zIndex: 10,
               }}
             >
-              <DatasetIcon
-                sx={{ fontSize: 64, color: "action.disabled", mb: 1 }}
-              />
+              <MotionBox
+                animate={{ y: [0, -15, 0] }}
+                transition={{
+                  repeat: Infinity,
+                  duration: 2.5,
+                  ease: "easeInOut",
+                }}
+              >
+                <DatasetIcon
+                  sx={{ fontSize: 64, color: "action.disabled", mb: 1 }}
+                />
+              </MotionBox>
               <Typography variant="h6" color="text.secondary">
                 No Data to Display
               </Typography>
@@ -822,7 +831,7 @@ export default function ReportAnalysisScreen() {
                     <TableCell
                       key={levelName}
                       sx={{
-                        backgroundColor: "#f8f9fa",
+                        backgroundColor: theme.palette.purple[100],
                         color: "text.primary",
                         fontWeight: 700,
                         borderRight: 1,
@@ -840,7 +849,7 @@ export default function ReportAnalysisScreen() {
                       key={metric.logicalName}
                       align="right"
                       sx={{
-                        backgroundColor: "#f1f3f5",
+                        backgroundColor: theme.palette.purple[200],
                         color: "text.primary",
                         fontWeight: 700,
                         borderRight: 1,
