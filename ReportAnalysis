@@ -1,4 +1,4 @@
-// ***************************************************************** ReportAnalysisScreen.jsx ****************************************************************************** //
+// **************************************************************************** ReportAnalysisScreen ****************************************************************************** //
 
 import {
   useState,
@@ -57,26 +57,27 @@ const fetchAnalyticsData = async (callApi, showSnackBar, payload) => {
     const responseData = await callApi(
       "/AS/analytics/drill-down",
       payload,
-      "POST"
+      "POST",
     );
-
-    console.log("responseData", responseData);
-    
-    // Drill-down endpoint still uses the { data: [...] } wrapper as per docs
     return responseData?.data || [];
-
   } catch (error) {
     console.error("Error fetching analytics data:", error);
     showSnackBar("Failed to fetch analytics data", "error");
   }
 };
 
-const fetchInitialData = async (callApi, showSnackBar, viewCode, hierarchy, metrics) => {
+const fetchInitialData = async (
+  callApi,
+  showSnackBar,
+  viewCode,
+  hierarchy,
+  metrics,
+) => {
   const rootDimension = hierarchy[0];
   const payload = {
     viewCode: viewCode,
     dimensions: [rootDimension],
-    metrics: metrics.map(m => m.logicalName),
+    metrics: metrics.map((m) => m.logicalName),
     filters: [],
   };
   const apiData = await fetchAnalyticsData(callApi, showSnackBar, payload);
@@ -94,7 +95,7 @@ const fetchChildrenData = async (
   parentNode,
   viewCode,
   hierarchy,
-  metrics
+  metrics,
 ) => {
   const childLevel = parentNode.level + 1;
   const nextDimension = hierarchy[childLevel];
@@ -110,7 +111,7 @@ const fetchChildrenData = async (
   const payload = {
     viewCode: viewCode,
     dimensions: [nextDimension],
-    metrics: metrics.map(m => m.logicalName),
+    metrics: metrics.map((m) => m.logicalName),
     filters: currentFilters,
   };
   const apiData = await fetchAnalyticsData(callApi, showSnackBar, payload);
@@ -124,24 +125,29 @@ const fetchChildrenData = async (
 
 // --- COMPONENTS ---
 
-// 1. The MUI Row Component
-const TreeTableRow = memo(
+const ActualTreeTableRow = memo(
   forwardRef(
     (
-      { node, isExpanded, isLoading, onToggle, maxVisibleLevel, index, activeMetrics },
+      {
+        node,
+        isExpanded,
+        isLoading,
+        onToggle,
+        maxVisibleLevel,
+        index,
+        activeMetrics,
+      },
       ref,
     ) => {
       return (
         <MotionTableRow
           ref={ref}
           hover
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-10px" }}
-          exit={{ opacity: 0, y: -20 }}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
           transition={{
-            duration: 0.4,
-            delay: Math.min(index * 0.03, 0.2),
+            duration: 0.2,
+            delay: Math.min(index * 0.01, 0.08),
             ease: "easeOut",
           }}
         >
@@ -154,37 +160,39 @@ const TreeTableRow = memo(
                   sx={{
                     borderRight: 1,
                     borderColor: "divider",
-                    minWidth: 220,
+                    minWidth: 260,
                     bgcolor: "background.paper",
-                    p: 0,
+                    p: 1,
+                    verticalAlign: "middle",
                   }}
                 >
                   <MotionBox
                     whileHover={{
                       scale: 1.04,
                       zIndex: 10,
-                      boxShadow: "0px 6px 15px rgba(0,0,0,0.12)",
+                      boxShadow: "0px 4px 12px rgba(0,0,0,0.08)",
                       backgroundColor: "background.paper",
-                      borderRadius: "6px",
                     }}
-                    transition={{ type: "spring", stiffness: 300, damping: 20 }}
+                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
                     sx={{
                       display: "flex",
                       alignItems: "center",
-                      pl: node.level * 3 + 2,
-                      pr: 2,
-                      py: 1,
+                      pl: node.level * 2.5 + 1,
+                      pr: 1.5,
+                      py: 0.5,
                       position: "relative",
+                      width: "100%",
+                      boxSizing: "border-box",
                     }}
                   >
                     {node.hasChildren ? (
                       <MotionBox
-                        whileHover={{ scale: 1.2 }}
-                        whileTap={{ scale: 0.8 }}
+                        whileHover={{ scale: 1.15 }}
+                        whileTap={{ scale: 0.85 }}
                         transition={{
                           type: "spring",
-                          stiffness: 400,
-                          damping: 17,
+                          stiffness: 500,
+                          damping: 15,
                         }}
                       >
                         <IconButton
@@ -193,13 +201,13 @@ const TreeTableRow = memo(
                           onClick={() => onToggle(node)}
                           disabled={isLoading}
                           sx={{
-                            mr: 1.5,
+                            mr: 1,
                             border: 1,
                             borderColor: "divider",
                             borderRadius: "50%",
-                            height: 22,
-                            width: 22,
-                            p: 0.3,
+                            height: 20,
+                            width: 20,
+                            p: 0,
                             bgcolor: "action.hover",
                             "&.Mui-focusVisible": {
                               bgcolor: "action.selected",
@@ -207,7 +215,7 @@ const TreeTableRow = memo(
                           }}
                         >
                           {isLoading ? (
-                            <CircularProgress size={14} color="inherit" />
+                            <CircularProgress size={12} color="inherit" />
                           ) : isExpanded ? (
                             "-"
                           ) : (
@@ -216,12 +224,17 @@ const TreeTableRow = memo(
                         </IconButton>
                       </MotionBox>
                     ) : (
-                      <Box sx={{ width: 26, mr: 1.5 }} />
+                      <Box sx={{ width: 20, mr: 1 }} />
                     )}
                     <Typography
                       variant="body2"
                       color="text.primary"
-                      sx={{ fontWeight: node.level === 0 ? 600 : 400 }}
+                      sx={{
+                        fontWeight: node.level === 0 ? 600 : 400,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
                     >
                       {node.name}
                     </Typography>
@@ -235,48 +248,61 @@ const TreeTableRow = memo(
                 sx={{
                   borderRight: 1,
                   borderColor: "divider",
-                  minWidth: 150,
+                  width: 80,
+                  minWidth: 80,
                   bgcolor: "background.default",
+                  p: 0,
                 }}
               />
             );
           })}
 
           {/* Dynamic Metrics Columns */}
-          {activeMetrics.map((metric) => (
-            <TableCell
-              key={metric.logicalName}
-              align="right"
-              sx={{ borderRight: 1, borderColor: "divider", p: 0 }}
-            >
-              <MotionBox
-                whileHover={{
-                  scale: 1.15,
-                  zIndex: 20,
-                  boxShadow: "0px 8px 25px rgba(0,0,0,0.15)",
-                  backgroundColor: "background.paper",
-                  borderRadius: "6px",
-                }}
-                transition={{ type: "spring", stiffness: 300, damping: 15 }}
+          {activeMetrics.map((metric, mIdx) => {
+            const isLastColumn = mIdx === activeMetrics.length - 1;
+            return (
+              <TableCell
+                key={metric.logicalName}
+                align="right"
                 sx={{
-                  p: "6px 16px",
-                  color: "text.secondary",
-                  position: "relative",
-                  fontWeight: 500,
+                  borderRight: 1,
+                  borderColor: "divider",
+                  p: 0,
+                  verticalAlign: "middle",
                 }}
               >
-                {formatCurrency(node[metric.logicalName])}
-              </MotionBox>
-            </TableCell>
-          ))}
+                <MotionBox
+                  whileHover={{
+                    scale: 1.03,
+                    zIndex: 20,
+                    boxShadow: "-4px 4px 15px rgba(0,0,0,0.1)",
+                    backgroundColor: "background.paper",
+                    borderRadius: "4px",
+                  }}
+                  transition={{ type: "spring", stiffness: 350, damping: 22 }}
+                  sx={{
+                    p: "8px 16px",
+                    color: "text.secondary",
+                    position: "relative",
+                    fontWeight: 500,
+                    transformOrigin: isLastColumn
+                      ? "right center"
+                      : "center center",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {formatCurrency(node[metric.logicalName])}
+                </MotionBox>
+              </TableCell>
+            );
+          })}
         </MotionTableRow>
       );
     },
   ),
 );
-TreeTableRow.displayName = "TreeTableRow";
+ActualTreeTableRow.displayName = "ActualTreeTableRow";
 
-// 2. The Main Screen Component
 export default function ReportAnalysisScreen() {
   const { callApi } = useApi();
   const user = useSelector((state) => state.auth.user);
@@ -287,7 +313,11 @@ export default function ReportAnalysisScreen() {
   const [selectedViewCode, setSelectedViewCode] = useState("");
 
   const [data, setData] = useState([]);
-  const [expandedIds, setExpandedIds] = useState(new Set());
+  
+  // FIX: Using a Map instead of a Set allows us to instantly auto-collapse 
+  // sibling branches by perfectly tracking the depth level of every opened row
+  const [expandedIds, setExpandedIds] = useState(new Map());
+  
   const [loadingIds, setLoadingIds] = useState(new Set());
   const [isInitializing, setIsInitializing] = useState(false);
   const [page, setPage] = useState(0);
@@ -295,13 +325,16 @@ export default function ReportAnalysisScreen() {
 
   const theme = useTheme();
 
-  // Dynamic derivation of configs
   const activeReport = useMemo(() => {
-    return reportsConfig.find((r) => r.reportCode === selectedReportCode) || null;
+    return (
+      reportsConfig.find((r) => r.reportCode === selectedReportCode) || null
+    );
   }, [reportsConfig, selectedReportCode]);
 
   const activeView = useMemo(() => {
-    return activeReport?.views?.find((v) => v.viewCode === selectedViewCode) || null;
+    return (
+      activeReport?.views?.find((v) => v.viewCode === selectedViewCode) || null
+    );
   }, [activeReport, selectedViewCode]);
 
   const activeHierarchyConfig = activeView || DEFAULT_CONFIG;
@@ -310,8 +343,9 @@ export default function ReportAnalysisScreen() {
     const fetchConfig = async () => {
       try {
         const response = await callApi("/AS/analytics/config", {}, "GET");
-        // FIX: Handles raw Array OR wrapped { data: [] } safely
-        const configData = Array.isArray(response) ? response : (response?.data || []);
+        const configData = Array.isArray(response)
+          ? response
+          : response?.data || [];
         setReportsConfig(configData);
       } catch (error) {
         console.error("Failed to fetch analytics configurations", error);
@@ -333,7 +367,7 @@ export default function ReportAnalysisScreen() {
       }
       setIsInitializing(true);
       setData([]);
-      setExpandedIds(new Set());
+      setExpandedIds(new Map());
 
       try {
         const rootData = await fetchInitialData(
@@ -341,7 +375,7 @@ export default function ReportAnalysisScreen() {
           showSnackBar,
           selectedViewCode,
           activeHierarchyConfig.hierarchy,
-          activeHierarchyConfig.availableMetrics
+          activeHierarchyConfig.availableMetrics,
         );
         setData(rootData);
       } catch (error) {
@@ -376,8 +410,9 @@ export default function ReportAnalysisScreen() {
       const isExpanded = expandedIds.has(node.id);
 
       if (isExpanded) {
+        // Manual Collapse
         setExpandedIds((prev) => {
-          const next = new Set(prev);
+          const next = new Map(prev);
           next.delete(node.id);
 
           const removeDescendants = (currentNode) => {
@@ -392,6 +427,7 @@ export default function ReportAnalysisScreen() {
           return next;
         });
       } else {
+        // Expansion (Auto-Collapse Sibling Mode)
         if (!node.children && node.hasChildren) {
           setLoadingIds((prev) => new Set(prev).add(node.id));
           try {
@@ -401,7 +437,7 @@ export default function ReportAnalysisScreen() {
               node,
               selectedViewCode,
               activeHierarchyConfig.hierarchy,
-              activeHierarchyConfig.availableMetrics
+              activeHierarchyConfig.availableMetrics,
             );
             setData((prevData) =>
               appendChildrenToTree(prevData, node.id, children),
@@ -416,7 +452,21 @@ export default function ReportAnalysisScreen() {
             });
           }
         }
-        setExpandedIds((prev) => new Set(prev).add(node.id));
+        
+        // ACCORDION LOGIC
+        setExpandedIds((prev) => {
+          const next = new Map();
+          // Loop through all currently expanded nodes
+          prev.forEach((level, id) => {
+            // Keep the node ONLY if it is at a higher depth level (meaning it's a direct ancestor)
+            if (level < node.level) {
+              next.set(id, level);
+            }
+          });
+          // Add the newly clicked node
+          next.set(node.id, node.level);
+          return next;
+        });
       }
     },
     [
@@ -441,6 +491,15 @@ export default function ReportAnalysisScreen() {
     traverse(data);
     return rows;
   }, [data, expandedIds]);
+
+  // PAGINATION SAFETY NET
+  // If the auto-collapse drops a huge branch, it snaps the user back to the correct page to prevent a blank screen
+  useEffect(() => {
+    const maxPage = Math.max(0, Math.ceil(visibleRows.length / rowsPerPage) - 1);
+    if (page > maxPage) {
+      setPage(maxPage);
+    }
+  }, [visibleRows.length, rowsPerPage, page]);
 
   const maxVisibleLevel = useMemo(() => {
     if (visibleRows.length === 0) return 0;
@@ -469,27 +528,27 @@ export default function ReportAnalysisScreen() {
     hidden: { opacity: 0 },
     show: {
       opacity: 1,
-      transition: { staggerChildren: 0.1 },
+      transition: { staggerChildren: 0.05 },
     },
-    exit: { opacity: 0, transition: { duration: 0.2 } },
+    exit: { opacity: 0, transition: { duration: 0.1 } },
   };
 
   const pathChipVariants = {
-    hidden: { opacity: 0, x: -40 },
+    hidden: { opacity: 0, x: -20 },
     show: {
       opacity: 1,
       x: 0,
-      transition: { type: "spring", stiffness: 250, damping: 20 },
+      transition: { type: "spring", stiffness: 350, damping: 25 },
     },
   };
 
   return (
     <Box
       sx={{
-        height: "calc(100vh - 64px)",
+        height: "calc(100vh - 220px)",
         display: "flex",
         flexDirection: "column",
-        gap: 2,
+        gap: 1.5,
       }}
     >
       {/* ================= UPPER BOX ================= */}
@@ -498,12 +557,12 @@ export default function ReportAnalysisScreen() {
         sx={{
           p: 3,
           borderRadius: 2,
-          boxShadow: "0 4px 20px rgba(0,0,0,0.05)",
+          boxShadow: "0 5px 10px rgba(0,0,0,0.2)",
           border: 1,
           borderColor: "divider",
           display: "flex",
-          flexDirection: "column",
-          gap: 3,
+          justifyContent: 'space-between',
+          flexDirection: "row",
         }}
       >
         <Box display="flex" alignItems="center" gap={2}>
@@ -513,16 +572,17 @@ export default function ReportAnalysisScreen() {
             transition={{ type: "spring", stiffness: 260, damping: 20 }}
             sx={{
               backgroundColor: "primary.main",
-              borderRadius: "12px",
-              width: 56,
-              height: 56,
+              borderRadius: "10px",
+              width: 44,
+              height: 44,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
             }}
           >
-            <AnalyticsIcon sx={{ color: "primary.contrastText", fontSize: 32 }} />
+            <AnalyticsIcon
+              sx={{ color: "primary.contrastText", fontSize: 24 }}
+            />
           </MotionBox>
 
           <Box sx={{ overflow: "hidden" }}>
@@ -534,133 +594,95 @@ export default function ReportAnalysisScreen() {
                 exit={{ opacity: 0, x: 30 }}
                 transition={{ duration: 0.3 }}
               >
-                <Typography
-                  variant="h5"
-                  sx={{ fontWeight: 700, color: "text.primary" }}
-                >
-                  {activeReport?.displayName || "Financial Analytics"}
-                </Typography>
-              </MotionBox>
+              <Typography
+                variant="h6"
+                sx={{ fontWeight: 700, color: "text.primary" }}
+              >
+                {activeReport?.displayName || "Financial Analytics"}
+              </Typography>
+            </MotionBox>
             </AnimatePresence>
-            <Typography variant="body2" sx={{ color: "text.secondary", opacity: 0.8 }}>
+            <Typography
+              variant="caption"
+              sx={{ color: "text.primary", }}
+            >
               Dynamic Drill-Down Matrix
             </Typography>
           </Box>
         </Box>
 
-        <Box display="flex" alignItems="center" gap={3}>
-          <MotionBox
-            initial={{ x: -50, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            transition={{ type: "spring", delay: 0.1 }}
+        <Box display="flex" alignItems="center" gap={2}>
+          <FormControl
+            size="small"
+            sx={{
+              minWidth: 400,
+              maxWidth: 500,
+              bgcolor: "background.paper",
+              borderRadius: 1,
+              "& .MuiOutlinedInput-root.Mui-focused fieldset": {
+                boxShadow: `0 0 8px ${theme.palette.primary.light}`,
+              },
+            }}
           >
-            <FormControl
-              size="small"
-              sx={{
-                minWidth: 300,
-                bgcolor: "background.paper",
-                borderRadius: 1,
-                "& .MuiOutlinedInput-root.Mui-focused fieldset": {
-                  boxShadow: `0 0 10px ${theme.palette.primary.light}`,
-                  transition: "box-shadow 0.3s ease-in-out",
-                },
+            <InputLabel id="report-source-label" shrink>
+              Database Report
+            </InputLabel>
+            <Select
+              labelId="report-source-label"
+              value={selectedReportCode}
+              label="Database Report"
+              onChange={(e) => {
+                setSelectedReportCode(e.target.value);
+                setSelectedViewCode("");
               }}
+              displayEmpty
+              notched
             >
-              <InputLabel id="report-source-label" shrink>
-                Database Report
-              </InputLabel>
-              <Select
-                labelId="report-source-label"
-                value={selectedReportCode}
-                label="Database Report"
-                onChange={(e) => {
-                  setSelectedReportCode(e.target.value);
-                  setSelectedViewCode(""); // Reset view when report changes
-                }}
-                displayEmpty
-                notched
-                MenuProps={{
-                  TransitionProps: { timeout: 400 },
-                  PaperProps: {
-                    component: motion.div,
-                    initial: { opacity: 0, y: -20 },
-                    animate: { opacity: 1, y: 0 },
-                    sx: { mt: 1, borderRadius: 2, boxShadow: 3 },
-                  },
-                }}
-              >
-                <MenuItem value="" disabled>
-                  <em>Please select a Report</em>
+              <MenuItem value="" disabled >
+                <Typography sx={{fontSize: '14px'}}> Please select a report</Typography>
+              </MenuItem>
+              {reportsConfig.map((report) => (
+                <MenuItem key={report.reportCode} value={report.reportCode}>
+                  <Typography sx={{fontSize: '14px'}}>{report.displayName}</Typography>
                 </MenuItem>
-                {reportsConfig.map((report, i) => (
-                  <MenuItem key={report.reportCode} value={report.reportCode}>
-                    <MotionBox
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: i * 0.05 }}
-                    >
-                      {report.displayName}
-                    </MotionBox>
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </MotionBox>
+              ))}
+            </Select>
+          </FormControl>
 
-          <MotionBox
-            initial={{ x: -50, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            transition={{ type: "spring", delay: 0.2 }}
+          <FormControl
+            size="small"
+            sx={{
+              minWidth: 300,
+              maxWidth: 350,
+              bgcolor: "background.paper",
+              borderRadius: 1,
+              "& .MuiOutlinedInput-root.Mui-focused fieldset": {
+                boxShadow: `0 0 8px ${theme.palette.primary.light}`,
+              },
+            }}
           >
-            <FormControl
-              size="small"
-              sx={{
-                minWidth: 260,
-                bgcolor: "background.paper",
-                borderRadius: 1,
-                "& .MuiOutlinedInput-root.Mui-focused fieldset": {
-                  boxShadow: `0 0 10px ${theme.palette.primary.light}`,
-                  transition: "box-shadow 0.3s ease-in-out",
-                },
-              }}
+            <InputLabel id="hierarchy-view-label" shrink>
+              Hierarchy View
+            </InputLabel>
+            <Select
+              labelId="hierarchy-view-label"
+              value={selectedViewCode}
+              label="Hierarchy View"
+              onChange={(e) => setSelectedViewCode(e.target.value)}
+              displayEmpty
+              notched
+              disabled={!activeReport}
             >
-              <InputLabel id="hierarchy-view-label" shrink>
-                Hierarchy View
-              </InputLabel>
-              <Select
-                labelId="hierarchy-view-label"
-                value={selectedViewCode}
-                label="Hierarchy View"
-                onChange={(e) => setSelectedViewCode(e.target.value)}
-                displayEmpty
-                notched
-                disabled={!activeReport}
-                MenuProps={{
-                  PaperProps: {
-                    component: motion.div,
-                    initial: { opacity: 0, y: -20 },
-                    animate: { opacity: 1, y: 0 },
-                    sx: { mt: 1, borderRadius: 2, boxShadow: 3 },
-                  },
-                }}
-              >
-                <MenuItem value="" disabled>
-                  <em>Please select a Hierarchy View</em>
+              <MenuItem value="" disabled>
+                <Typography sx={{fontSize: '14px'}}>Please select a view hierarchy</Typography>
+              </MenuItem>
+              {activeReport?.views?.map((view) => (
+                <MenuItem key={view.viewCode} value={view.viewCode}>
+                  <Typography sx={{fontSize: '14px'}}>{view.displayName}</Typography>
                 </MenuItem>
-                {activeReport?.views?.map((view, i) => (
-                  <MenuItem key={view.viewCode} value={view.viewCode}>
-                    <MotionBox
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: i * 0.05 }}
-                    >
-                      {view.displayName}
-                    </MotionBox>
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </MotionBox>
+              ))}
+            </Select>
+          </FormControl>
         </Box>
       </Paper>
 
@@ -672,8 +694,8 @@ export default function ReportAnalysisScreen() {
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
-          borderRadius: 2,
-          boxShadow: "0 4px 20px rgba(0,0,0,0.05)",
+          borderRadius: 1,
+          boxShadow: "0 2px 10px rgba(0,0,0,0.03)",
           border: 1,
           borderColor: "divider",
         }}
@@ -682,105 +704,101 @@ export default function ReportAnalysisScreen() {
           sx={{
             borderBottom: 1,
             borderColor: "divider",
-            px: 3,
-            py: 1.5,
-            minHeight: 52,
+            px: 2,
+            py: 2,
+            minHeight: 44,
             display: "flex",
             alignItems: "center",
           }}
         >
-          <AnimatePresence>
-            {isSetupComplete && (
-              <MotionBox
-                variants={pathContainerVariants}
-                initial="hidden"
-                animate="show"
-                exit="hidden"
-                display="flex"
-                alignItems="center"
-                gap={1}
+          {isSetupComplete && (
+            <MotionBox
+              variants={pathContainerVariants}
+              initial="hidden"
+              animate="show"
+              exit="hidden"
+              display="flex"
+              alignItems="center"
+              gap={0.5}
+            >
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ mr: 1, fontWeight: 500 }}
               >
-                <Typography
-                  variant="body2"
-                  color="text.secondary"
-                  sx={{ mr: 1, fontWeight: 500 }}
-                >
-                  Path:
-                </Typography>
-                {activeHierarchyConfig.hierarchy.map((item, index) => {
-                  // Timeline state variables
-                  const isActive = index <= maxVisibleLevel;
-                  const isCurrent = index === maxVisibleLevel;
+                Path:
+              </Typography>
+              {activeHierarchyConfig.hierarchy.map((item, index) => {
+                const isActive = index <= maxVisibleLevel;
+                const isCurrent = index === maxVisibleLevel;
+                return (
+                  <Box key={index} display="flex" alignItems="center">
+                    <MotionBox
+                      variants={pathChipVariants}
+                      display="flex"
+                      alignItems="center"
+                      gap={1}
+                    >
+                      <MotionBox
+                        animate={
+                          isActive
+                            ? isCurrent
+                              ? {
+                                  scale: [1, 1.2, 1],
+                                  boxShadow: `0px 0px 8px ${theme.palette.primary.main}`,
+                                }
+                              : { scale: 1, boxShadow: "none" }
+                            : { scale: 0.8, boxShadow: "none" }
+                        }
+                        transition={
+                          isCurrent
+                            ? {
+                                repeat: Infinity,
+                                duration: 1.5,
+                                ease: "easeInOut",
+                              }
+                            : { duration: 0.2 }
+                        }
+                        sx={{
+                          width: 10,
+                          height: 10,
+                          borderRadius: "50%",
+                          bgcolor: isActive
+                            ? "primary.main"
+                            : "background.paper",
+                          border: "2px solid",
+                          borderColor: isActive ? "primary.main" : "divider",
+                        }}
+                      />
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          fontWeight: isActive ? 600 : 500,
+                          color: isActive ? "text.primary" : "text.disabled",
+                          textTransform: "capitalize",
+                        }}
+                      >
+                        {item.replace("_", " ")}
+                      </Typography>
+                    </MotionBox>
 
-                  return (
-                    <Box key={index} display="flex" alignItems="center">
+                    {index < activeHierarchyConfig.hierarchy.length - 1 && (
                       <MotionBox
                         variants={pathChipVariants}
-                        display="flex"
-                        alignItems="center"
-                        gap={1}
-                      >
-                        {/* The Animated Dot */}
-                        <MotionBox
-                          animate={
-                            isActive
-                              ? isCurrent
-                                ? { scale: [1, 1.3, 1], boxShadow: `0px 0px 10px ${theme.palette.primary.main}` }
-                                : { scale: 1, boxShadow: "none" }
-                              : { scale: 0.8, boxShadow: "none" }
-                          }
-                          transition={
-                            isCurrent
-                              ? { repeat: Infinity, duration: 1.5, ease: "easeInOut" }
-                              : { duration: 0.3 }
-                          }
-                          sx={{
-                            width: 12,
-                            height: 12,
-                            borderRadius: "50%",
-                            bgcolor: isActive ? "primary.main" : "background.paper",
-                            border: "2px solid",
-                            borderColor: isActive ? "primary.main" : "divider",
-                          }}
-                        />
-                        {/* The Text Label */}
-                        <Typography
-                          variant="body2"
-                          sx={{
-                            fontWeight: isActive ? 600 : 500,
-                            color: isActive ? "text.primary" : "text.disabled",
-                            textTransform: "capitalize",
-                          }}
-                        >
-                          {item.replace("_", " ")}
-                        </Typography>
-                      </MotionBox>
-
-                      {/* The Straight Connecting Line */}
-                      {index < activeHierarchyConfig.hierarchy.length - 1 && (
-                        <MotionBox
-                          variants={pathChipVariants}
-                          animate={{
-                            backgroundColor:
-                              index < maxVisibleLevel
-                                ? theme.palette.primary.main
-                                : theme.palette.divider,
-                          }}
-                          transition={{ duration: 0.4 }}
-                          sx={{
-                            width: 32,
-                            height: 2,
-                            mx: 1.5,
-                            borderRadius: 1,
-                          }}
-                        />
-                      )}
-                    </Box>
-                  );
-                })}
-              </MotionBox>
-            )}
-          </AnimatePresence>
+                        animate={{
+                          backgroundColor:
+                            index < maxVisibleLevel
+                              ? theme.palette.primary.main
+                              : theme.palette.divider,
+                        }}
+                        sx={{ width: 24, height: 2, mx: 1, borderRadius: 1 }}
+                      />
+                    )}
+                  </Box>
+                );
+              })}
+            </MotionBox>
+          )}
         </Box>
 
         <TableContainer
@@ -814,7 +832,7 @@ export default function ReportAnalysisScreen() {
                 }}
               >
                 <DatasetIcon
-                  sx={{ fontSize: 72, color: "action.disabled", mb: 2 }}
+                  sx={{ fontSize: 64, color: "action.disabled", mb: 1 }}
                 />
               </MotionBox>
               <Typography variant="h6" color="text.secondary">
@@ -836,43 +854,37 @@ export default function ReportAnalysisScreen() {
                 justifyContent: "center",
               }}
             >
-              <CircularProgress size={40} color="primary" sx={{ mb: 2 }} />
-              <Typography variant="body1" color="text.secondary">
+              <CircularProgress size={32} color="primary" sx={{ mb: 1 }} />
+              <Typography variant="body2" color="text.secondary">
                 Executing Query ...
               </Typography>
             </Box>
           ) : isSetupComplete ? (
-            <Table stickyHeader size="small" sx={{ minWidth: 1000 }}>
+            <Table
+              stickyHeader
+              size="small"
+              sx={{ minWidth: 1000, tableLayout: "auto" }}
+            >
               <TableHead>
                 <TableRow>
-                  {/* Dynamic Dimension Headers */}
                   {visibleHierarchyLevels.map((levelName, index) => (
                     <TableCell
                       key={levelName}
                       sx={{
-                        backgroundColor: theme.palette.purple
-                          ? theme.palette.purple[100]
-                          : "#f5f5f5",
+                        backgroundColor: theme.palette.purple[100],
                         color: "text.primary",
                         fontWeight: 700,
                         borderRight: 1,
                         borderColor: "divider",
                         borderBottom: 2,
-                        width: 220,
+                        py: 1,
+                        width: index === 0 ? 280 : "auto",
                       }}
                     >
-                      <MotionBox
-                        initial={{ y: -20, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        transition={{ delay: index * 0.1 }}
-                      >
-                        {levelName.replace("_", " ").toUpperCase()}
-                      </MotionBox>
+                      {levelName.replace("_", " ").toUpperCase()}
                     </TableCell>
                   ))}
-                  
-                  {/* Dynamic Metric Headers */}
-                  {activeHierarchyConfig.availableMetrics.map((metric, idx) => (
+                  {activeHierarchyConfig.availableMetrics.map((metric) => (
                     <TableCell
                       key={metric.logicalName}
                       align="right"
@@ -885,25 +897,18 @@ export default function ReportAnalysisScreen() {
                         borderRight: 1,
                         borderColor: "divider",
                         borderBottom: 2,
+                        py: 1,
                       }}
                     >
-                      <MotionBox
-                        initial={{ y: -20, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        transition={{
-                          delay: (visibleHierarchyLevels.length + idx) * 0.1,
-                        }}
-                      >
-                        {metric.displayName}
-                      </MotionBox>
+                      {metric.displayName}
                     </TableCell>
                   ))}
                 </TableRow>
               </TableHead>
-              <TableBody key={page}>
-                <AnimatePresence>
+              <TableBody>
+                <AnimatePresence initial={false}>
                   {paginatedRows.map((row, index) => (
-                    <TreeTableRow
+                    <ActualTreeTableRow
                       key={row.id}
                       node={row}
                       index={index}
@@ -925,23 +930,18 @@ export default function ReportAnalysisScreen() {
             bgcolor: "background.paper",
             borderTop: 1,
             borderColor: "divider",
-            px: 3,
+            px: 2,
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
+            minHeight: 40,
           }}
         >
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            <MotionBox
-              animate={
-                isSetupComplete
-                  ? { scale: [1, 1.3, 1], opacity: [0.6, 1, 0.6] }
-                  : { scale: 1, opacity: 1 }
-              }
-              transition={{ repeat: Infinity, duration: 1.5 }}
+            <Box
               sx={{
-                width: 10,
-                height: 10,
+                width: 8,
+                height: 8,
                 borderRadius: "50%",
                 bgcolor: isSetupComplete ? "success.main" : "action.disabled",
               }}
@@ -963,9 +963,7 @@ export default function ReportAnalysisScreen() {
             onRowsPerPageChange={handleChangeRowsPerPage}
             rowsPerPageOptions={[10, 25, 50, 100]}
             sx={{
-              ".MuiTablePagination-toolbar": { minHeight: 50, padding: 0 },
-              ".MuiTablePagination-selectLabel, .MuiTablePagination-displayedRows":
-                { margin: 0, color: "text.secondary" },
+              ".MuiTablePagination-toolbar": { minHeight: 40, padding: 0 },
             }}
           />
         </Box>
