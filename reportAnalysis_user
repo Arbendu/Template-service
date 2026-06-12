@@ -150,6 +150,12 @@ const ActualTreeTableRow = memo(
             delay: Math.min(index * 0.01, 0.08),
             ease: "easeOut",
           }}
+          // sx={{
+          //   backgroundColor: isExpanded ? "primary.main" : "inherit",
+          //   borderLeft: isExpanded ? "4px solid" : "4px solid transparent",
+          //   borderLeftColor: isExpanded ? "primary.main" : "transparent",
+          //   transition: "all 0.2s ease-in-out"
+          // }}
         >
           {/* Hierarchy Depth Columns */}
           {Array.from({ length: maxVisibleLevel + 1 }).map((_, colIndex) => {
@@ -161,7 +167,7 @@ const ActualTreeTableRow = memo(
                     borderRight: 1,
                     borderColor: "divider",
                     minWidth: 260,
-                    bgcolor: "background.paper",
+                    bgcolor: isExpanded ? "primary.light" : "inherit",
                     p: 1,
                     verticalAlign: "middle",
                   }}
@@ -203,7 +209,7 @@ const ActualTreeTableRow = memo(
                           sx={{
                             mr: 1,
                             border: 1,
-                            borderColor: "divider",
+                            borderColor: isExpanded ? "primary.dark" : "divider",
                             borderRadius: "50%",
                             height: 20,
                             width: 20,
@@ -215,10 +221,10 @@ const ActualTreeTableRow = memo(
                           }}
                         >
                           {isLoading ? (
-                            <CircularProgress size={12} color="inherit" />
+                            <CircularProgress size={12} color={isExpanded ? "primary.dark" : "inherit"} />
                           ) : isExpanded ? (
                             "-"
-                          ) : (
+                          ) : (             
                             "+"
                           )}
                         </IconButton>
@@ -228,9 +234,9 @@ const ActualTreeTableRow = memo(
                     )}
                     <Typography
                       variant="body2"
-                      color="text.primary"
+                      color={isExpanded ? "primary.dark" : "text.primary"}
                       sx={{
-                        fontWeight: node.level === 0 ? 600 : 400,
+                        fontWeight: isExpanded ? "bold" : (node.level === 0 ? 600 : 400),
                         whiteSpace: "nowrap",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
@@ -282,7 +288,7 @@ const ActualTreeTableRow = memo(
                   transition={{ type: "spring", stiffness: 350, damping: 22 }}
                   sx={{
                     p: "8px 16px",
-                    color: "text.secondary",
+                    color: node[metric.logicalName] < 0 ? "error.main" : "success.main",
                     position: "relative",
                     fontWeight: 500,
                     transformOrigin: isLastColumn
