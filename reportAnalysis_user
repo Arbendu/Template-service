@@ -1,3 +1,5 @@
+// **************************************************************************** ReportAnalysisScreen ****************************************************************************** //
+
 import {
   useState,
   useMemo,
@@ -28,7 +30,7 @@ import {
 import AnalyticsIcon from "@mui/icons-material/Analytics";
 import DatasetIcon from "@mui/icons-material/Dataset";
 import { useTheme } from "@mui/material/styles";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 
 // Assume these are available in your project structure
 import useApi from "../../hooks/useApi";
@@ -160,13 +162,13 @@ const ActualTreeTableRow = memo(
                     borderColor: "divider",
                     minWidth: 260,
                     bgcolor: "background.paper",
-                    p: 0,
+                    p: 1,
                     verticalAlign: "middle",
                   }}
                 >
                   <MotionBox
                     whileHover={{
-                      scale: 1.02,
+                      scale: 1.04,
                       zIndex: 10,
                       boxShadow: "0px 4px 12px rgba(0,0,0,0.08)",
                       backgroundColor: "background.paper",
@@ -311,7 +313,11 @@ export default function ReportAnalysisScreen() {
   const [selectedViewCode, setSelectedViewCode] = useState("");
 
   const [data, setData] = useState([]);
-  const [expandedIds, setExpandedIds] = useState(new Set());
+  
+  // FIX: Using a Map instead of a Set allows us to instantly auto-collapse 
+  // sibling branches by perfectly tracking the depth level of every opened row
+  const [expandedIds, setExpandedIds] = useState(new Map());
+  
   const [loadingIds, setLoadingIds] = useState(new Set());
   const [isInitializing, setIsInitializing] = useState(false);
   const [page, setPage] = useState(0);
@@ -361,7 +367,7 @@ export default function ReportAnalysisScreen() {
       }
       setIsInitializing(true);
       setData([]);
-      setExpandedIds(new Set());
+      setExpandedIds(new Map());
 
       try {
         const rootData = await fetchInitialData(
@@ -404,8 +410,9 @@ export default function ReportAnalysisScreen() {
       const isExpanded = expandedIds.has(node.id);
 
       if (isExpanded) {
+        // Manual Collapse
         setExpandedIds((prev) => {
-          const next = new Set(prev);
+          const next = new Map(prev);
           next.delete(node.id);
 
           const removeDescendants = (currentNode) => {
@@ -420,6 +427,7 @@ export default function ReportAnalysisScreen() {
           return next;
         });
       } else {
+        // Expansion (Auto-Collapse Sibling Mode)
         if (!node.children && node.hasChildren) {
           setLoadingIds((prev) => new Set(prev).add(node.id));
           try {
@@ -444,7 +452,21 @@ export default function ReportAnalysisScreen() {
             });
           }
         }
-        setExpandedIds((prev) => new Set(prev).add(node.id));
+        
+        // ACCORDION LOGIC
+        setExpandedIds((prev) => {
+          const next = new Map();
+          // Loop through all currently expanded nodes
+          prev.forEach((level, id) => {
+            // Keep the node ONLY if it is at a higher depth level (meaning it's a direct ancestor)
+            if (level < node.level) {
+              next.set(id, level);
+            }
+          });
+          // Add the newly clicked node
+          next.set(node.id, node.level);
+          return next;
+        });
       }
     },
     [
@@ -469,6 +491,15 @@ export default function ReportAnalysisScreen() {
     traverse(data);
     return rows;
   }, [data, expandedIds]);
+
+  // PAGINATION SAFETY NET
+  // If the auto-collapse drops a huge branch, it snaps the user back to the correct page to prevent a blank screen
+  useEffect(() => {
+    const maxPage = Math.max(0, Math.ceil(visibleRows.length / rowsPerPage) - 1);
+    if (page > maxPage) {
+      setPage(maxPage);
+    }
+  }, [visibleRows.length, rowsPerPage, page]);
 
   const maxVisibleLevel = useMemo(() => {
     if (visibleRows.length === 0) return 0;
@@ -514,25 +545,24 @@ export default function ReportAnalysisScreen() {
   return (
     <Box
       sx={{
-        height: "calc(100vh - 64px)",
+        height: "calc(100vh - 220px)",
         display: "flex",
         flexDirection: "column",
         gap: 1.5,
-        p: 1,
       }}
     >
       {/* ================= UPPER BOX ================= */}
       <Paper
         elevation={0}
         sx={{
-          p: 2,
+          p: 3,
           borderRadius: 2,
-          boxShadow: "0 2px 10px rgba(0,0,0,0.03)",
+          boxShadow: "0 5px 10px rgba(0,0,0,0.2)",
           border: 1,
           borderColor: "divider",
           display: "flex",
-          flexDirection: "column",
-          gap: 2,
+          justifyContent: 'space-between',
+          flexDirection: "row",
         }}
       >
         <Box display="flex" alignItems="center" gap={2}>
@@ -555,7 +585,7 @@ export default function ReportAnalysisScreen() {
             />
           </MotionBox>
 
-          <Box sx={{ overflow: "hidden" }}>
+          <Box sx={{ overflow: "auto" }}>
             <Box>
               <Typography
                 variant="h6"
@@ -566,7 +596,7 @@ export default function ReportAnalysisScreen() {
             </Box>
             <Typography
               variant="caption"
-              sx={{ color: "text.secondary", opacity: 0.8 }}
+              sx={{ color: "text.primary", }}
             >
               Dynamic Drill-Down Matrix
             </Typography>
@@ -577,7 +607,8 @@ export default function ReportAnalysisScreen() {
           <FormControl
             size="small"
             sx={{
-              minWidth: 280,
+              minWidth: 400,
+              maxWidth: 500,
               bgcolor: "background.paper",
               borderRadius: 1,
               "& .MuiOutlinedInput-root.Mui-focused fieldset": {
@@ -599,12 +630,12 @@ export default function ReportAnalysisScreen() {
               displayEmpty
               notched
             >
-              <MenuItem value="" disabled>
-                <em>Please select a Report</em>
+              <MenuItem value="" disabled >
+                <Typography sx={{fontSize: '14px'}}> Please select a report</Typography>
               </MenuItem>
               {reportsConfig.map((report) => (
                 <MenuItem key={report.reportCode} value={report.reportCode}>
-                  {report.displayName}
+                  <Typography sx={{fontSize: '14px'}}>{report.displayName}</Typography>
                 </MenuItem>
               ))}
             </Select>
@@ -613,7 +644,8 @@ export default function ReportAnalysisScreen() {
           <FormControl
             size="small"
             sx={{
-              minWidth: 240,
+              minWidth: 300,
+              maxWidth: 350,
               bgcolor: "background.paper",
               borderRadius: 1,
               "& .MuiOutlinedInput-root.Mui-focused fieldset": {
@@ -634,11 +666,11 @@ export default function ReportAnalysisScreen() {
               disabled={!activeReport}
             >
               <MenuItem value="" disabled>
-                <em>Please select a Hierarchy View</em>
+                <Typography sx={{fontSize: '14px'}}>Please select a view hierarchy</Typography>
               </MenuItem>
               {activeReport?.views?.map((view) => (
                 <MenuItem key={view.viewCode} value={view.viewCode}>
-                  {view.displayName}
+                  <Typography sx={{fontSize: '14px'}}>{view.displayName}</Typography>
                 </MenuItem>
               ))}
             </Select>
@@ -665,7 +697,7 @@ export default function ReportAnalysisScreen() {
             borderBottom: 1,
             borderColor: "divider",
             px: 2,
-            py: 1,
+            py: 2,
             minHeight: 44,
             display: "flex",
             alignItems: "center",
@@ -849,7 +881,9 @@ export default function ReportAnalysisScreen() {
                       key={metric.logicalName}
                       align="right"
                       sx={{
-                        backgroundColor: theme.palette.purple[200],
+                        backgroundColor: theme.palette.purple
+                          ? theme.palette.purple[200]
+                          : "#eeeeee",
                         color: "text.primary",
                         fontWeight: 700,
                         borderRight: 1,
@@ -863,20 +897,21 @@ export default function ReportAnalysisScreen() {
                   ))}
                 </TableRow>
               </TableHead>
-              {/* Layout Stable TableBody running at 60FPS on collapse */}
-              <TableBody key={page}>
-                {paginatedRows.map((row, index) => (
-                  <ActualTreeTableRow
-                    key={row.id}
-                    node={row}
-                    index={index}
-                    isExpanded={expandedIds.has(row.id)}
-                    isLoading={loadingIds.has(row.id)}
-                    onToggle={handleToggle}
-                    maxVisibleLevel={maxVisibleLevel}
-                    activeMetrics={activeHierarchyConfig.availableMetrics}
-                  />
-                ))}
+              <TableBody>
+                <AnimatePresence initial={false}>
+                  {paginatedRows.map((row, index) => (
+                    <ActualTreeTableRow
+                      key={row.id}
+                      node={row}
+                      index={index}
+                      isExpanded={expandedIds.has(row.id)}
+                      isLoading={loadingIds.has(row.id)}
+                      onToggle={handleToggle}
+                      maxVisibleLevel={maxVisibleLevel}
+                      activeMetrics={activeHierarchyConfig.availableMetrics}
+                    />
+                  ))}
+                </AnimatePresence>
               </TableBody>
             </Table>
           ) : null}
