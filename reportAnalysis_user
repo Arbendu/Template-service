@@ -7,6 +7,7 @@ import {
   useEffect,
   memo,
   forwardRef,
+  useRef,
 } from "react";
 import { useSelector, useDispatch } from "react-redux";
 import {
@@ -25,12 +26,12 @@ import {
   Select,
   FormControl,
   InputLabel,
-  TablePagination,
 } from "@mui/material";
 import AnalyticsIcon from "@mui/icons-material/Analytics";
 import DatasetIcon from "@mui/icons-material/Dataset";
 import { useTheme } from "@mui/material/styles";
 import { motion, AnimatePresence } from "framer-motion";
+import { useVirtualizer } from "@tanstack/react-virtual";
 
 // Assume these are available in your project structure
 import useApi from "../../hooks/useApi";
@@ -136,6 +137,7 @@ const ActualTreeTableRow = memo(
         maxVisibleLevel,
         index,
         activeMetrics,
+        ...props // Passes the virtualizer data-index safely
       },
       ref,
     ) => {
@@ -156,6 +158,7 @@ const ActualTreeTableRow = memo(
             borderLeftColor: isExpanded ? "primary.main" : "transparent",
             transition: "all 0.2s ease-in-out",
           }}
+          {...props}
         >
           {/* Hierarchy Depth Columns */}
           {Array.from({ length: maxVisibleLevel + 1 }).map((_, colIndex) => {
@@ -314,7 +317,6 @@ export default function ReportAnalysisScreen() {
   
   // Safe extraction of cache (assumes you registered it in root reducer as "analyticsCache")
   const cachedNodes = useSelector((state) => state.analyticsCache?.nodes || {});
-  
   const showSnackBar = useCustomSnackbar();
 
   const [reportsConfig, setReportsConfig] = useState([]);
@@ -325,10 +327,11 @@ export default function ReportAnalysisScreen() {
   const [expandedIds, setExpandedIds] = useState(new Map());
   const [loadingIds, setLoadingIds] = useState(new Set());
   const [isInitializing, setIsInitializing] = useState(false);
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
 
   const theme = useTheme();
+  
+  // Virtualization Scroll Container Ref
+  const tableContainerRef = useRef(null);
 
   const activeReport = useMemo(() => {
     return (
@@ -359,10 +362,6 @@ export default function ReportAnalysisScreen() {
     };
     if (user) fetchConfig();
   }, [callApi, user, showSnackBar]);
-
-  useEffect(() => {
-    setPage(0);
-  }, [selectedReportCode, selectedViewCode]);
 
   useEffect(() => {
     const loadRoot = async () => {
@@ -458,17 +457,14 @@ export default function ReportAnalysisScreen() {
                 activeHierarchyConfig.hierarchy,
                 activeHierarchyConfig.availableMetrics,
               );
-              
               setData((prevData) =>
                 appendChildrenToTree(prevData, node.id, children),
               );
-
               // Dispatch the new data to Redux cache
               dispatch({
                 type: "analyticsCache/cacheNode", 
                 payload: { key: cacheKey, data: children, timestamp: Date.now() }
               });
-
             } catch (error) {
               console.error("Failed to fetch children", error);
             } finally {
@@ -523,14 +519,6 @@ export default function ReportAnalysisScreen() {
     return rows;
   }, [data, expandedIds]);
 
-  // PAGINATION SAFETY NET
-  useEffect(() => {
-    const maxPage = Math.max(0, Math.ceil(visibleRows.length / rowsPerPage) - 1);
-    if (page > maxPage) {
-      setPage(maxPage);
-    }
-  }, [visibleRows.length, rowsPerPage, page]);
-
   const maxVisibleLevel = useMemo(() => {
     if (visibleRows.length === 0) return 0;
     return Math.max(...visibleRows.map((row) => row.level));
@@ -541,16 +529,20 @@ export default function ReportAnalysisScreen() {
     maxVisibleLevel + 1,
   );
 
-  const paginatedRows = useMemo(() => {
-    const startIndex = page * rowsPerPage;
-    return visibleRows.slice(startIndex, startIndex + rowsPerPage);
-  }, [visibleRows, page, rowsPerPage]);
+  // --- VIRTUALIZATION ENGINE ---
+  const virtualizer = useVirtualizer({
+    count: visibleRows.length,
+    getScrollElement: () => tableContainerRef.current,
+    estimateSize: () => 50, // Approximation for smooth scroll calculation
+    overscan: 10,
+  });
 
-  const handleChangePage = (event, newPage) => setPage(newPage);
-  const handleChangeRowsPerPage = (event) => {
-    setRowsPerPage(parseInt(event.target.value, 10));
-    setPage(0);
-  };
+  const virtualItems = virtualizer.getVirtualItems();
+  const totalColumnsCount = visibleHierarchyLevels.length + activeHierarchyConfig.availableMetrics.length;
+  
+  // Padding elements to perfectly preserve scroll height without breaking the HTML table layout
+  const paddingTop = virtualItems.length > 0 ? virtualItems[0].start : 0;
+  const paddingBottom = virtualItems.length > 0 ? virtualizer.getTotalSize() - virtualItems[virtualItems.length - 1].end : 0;
 
   const isSetupComplete = selectedReportCode && selectedViewCode;
 
@@ -832,10 +824,12 @@ export default function ReportAnalysisScreen() {
         </Box>
 
         <TableContainer
+          ref={tableContainerRef}
           sx={{
             flexGrow: 1,
             bgcolor: "background.default",
             position: "relative",
+            overflow: "auto", // Essential for Virtualizer to read scrolling
           }}
         >
           {!isSetupComplete && (
@@ -862,7 +856,7 @@ export default function ReportAnalysisScreen() {
                 }}
               >
                 <DatasetIcon
-                   sx={{ fontSize: 64, color: "action.disabled", mb: 1 }}
+                  sx={{ fontSize: 64, color: "action.disabled", mb: 1 }}
                 />
               </MotionBox>
               <Typography variant="h6" color="text.secondary">
@@ -936,20 +930,39 @@ export default function ReportAnalysisScreen() {
                 </TableRow>
               </TableHead>
               <TableBody>
+                {/* Top Padding Row */}
+                {paddingTop > 0 && (
+                  <TableRow>
+                    <TableCell colSpan={totalColumnsCount} sx={{ height: `${paddingTop}px`, p: 0, border: "none" }} />
+                  </TableRow>
+                )}
+
                 <AnimatePresence initial={false}>
-                  {paginatedRows.map((row, index) => (
-                    <ActualTreeTableRow
-                      key={row.id}
-                      node={row}
-                      index={index}
-                      isExpanded={expandedIds.has(row.id)}
-                      isLoading={loadingIds.has(row.id)}
-                      onToggle={handleToggle}
-                      maxVisibleLevel={maxVisibleLevel}
-                      activeMetrics={activeHierarchyConfig.availableMetrics}
-                    />
-                  ))}
+                  {virtualItems.map((virtualRow) => {
+                    const row = visibleRows[virtualRow.index];
+                    return (
+                      <ActualTreeTableRow
+                        key={row.id}
+                        node={row}
+                        index={virtualRow.index}
+                        isExpanded={expandedIds.has(row.id)}
+                        isLoading={loadingIds.has(row.id)}
+                        onToggle={handleToggle}
+                        maxVisibleLevel={maxVisibleLevel}
+                        activeMetrics={activeHierarchyConfig.availableMetrics}
+                        ref={virtualizer.measureElement}
+                        data-index={virtualRow.index}
+                      />
+                    );
+                  })}
                 </AnimatePresence>
+
+                {/* Bottom Padding Row */}
+                {paddingBottom > 0 && (
+                  <TableRow>
+                    <TableCell colSpan={totalColumnsCount} sx={{ height: `${paddingBottom}px`, p: 0, border: "none" }} />
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           ) : null}
@@ -984,54 +997,15 @@ export default function ReportAnalysisScreen() {
               {isSetupComplete ? "Connected & Synced" : "No Connection"}
             </Typography>
           </Box>
-          <TablePagination
-            component="div"
-            count={visibleRows.length}
-            page={page}
-            onPageChange={handleChangePage}
-            rowsPerPage={rowsPerPage}
-            onRowsPerPageChange={handleChangeRowsPerPage}
-            rowsPerPageOptions={[10, 25, 50, 100]}
-            sx={{
-              ".MuiTablePagination-toolbar": { minHeight: 40, padding: 0 },
-            }}
-          />
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            fontWeight={500}
+          >
+            Showing {visibleRows.length} rows
+          </Typography>
         </Box>
       </Paper>
     </Box>
   );
 }
-
-
-
-
-
-
-
-
-
-// ************************************************* analyticsCacheSlice ***************************************************** //
-
-import { createSlice } from "@reduxjs/toolkit";
-
-const analyticsCacheSlice = createSlice({
-  name: "analyticsCache",
-  initialState: {
-    nodes: {}, // Structure: { [cacheKey]: { data: [], timestamp: 123456789 } }
-  },
-  reducers: {
-    cacheNode: (state, action) => {
-      const { key, data, timestamp } = action.payload;
-      state.nodes[key] = { data, timestamp };
-    },
-    // Optional: Call this on user logout or when manually refreshing reports
-    clearCache: (state) => {
-      state.nodes = {};
-    },
-  },
-});
-
-export const { cacheNode, clearCache } = analyticsCacheSlice.actions;
-export default analyticsCacheSlice.reducer;
-
-
