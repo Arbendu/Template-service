@@ -20,7 +20,6 @@ import {
   TableHead,
   TableRow,
   Typography,
-  IconButton,
   CircularProgress,
   MenuItem,
   Select,
@@ -44,7 +43,6 @@ const formatCurrency = (value) => {
   }).format(value || 0);
 };
 
-// Stable fallback reference to prevent infinite render loops
 const DEFAULT_CONFIG = { hierarchy: [], availableMetrics: [] };
 
 // --- ACTUAL API LOGIC ---
@@ -132,118 +130,102 @@ const ActualTreeTableRow = memo(
         maxVisibleLevel,
         index,
         activeMetrics,
-        ...props // Passes the virtualizer data-index safely
+        ...props
       },
       ref,
     ) => {
+      const isRoot = node.level === 0;
+
       return (
         <TableRow
           ref={ref}
-          hover
-          sx={{
-            height: 44, // Fixed height ensures the virtualizer calculates scroll accurately
-            bgcolor: isExpanded ? "#D8CCFF" : "inherit",
-            borderLeft: isExpanded ? "4px solid" : "4px solid transparent",
-            borderLeftColor: isExpanded ? "primary.main" : "transparent",
+          // RAW INLINE STYLES: Bypasses Emotion CSS-in-JS lag
+          style={{
+            backgroundColor: isExpanded ? "#D8CCFF" : "inherit",
+            borderLeft: isExpanded ? "4px solid #1976d2" : "4px solid transparent",
+            height: "40px",
           }}
           {...props}
         >
           {/* Hierarchy Depth Columns */}
           {Array.from({ length: maxVisibleLevel + 1 }).map((_, colIndex) => {
-            const colWidth = colIndex === 0 ? 280 : 200;
-
             if (colIndex === node.level) {
               return (
                 <TableCell
                   key={colIndex}
-                  sx={{
-                    borderRight: 1,
-                    borderColor: "divider",
-                    width: colWidth,
-                    minWidth: colWidth,
-                    maxWidth: colWidth,
-                    bgcolor: "transparent",
-                    p: 1,
+                  style={{
+                    borderRight: "1px solid #e0e0e0",
+                    borderBottom: "1px solid #e0e0e0",
+                    minWidth: "260px",
+                    padding: "4px 8px",
                     verticalAlign: "middle",
                   }}
                 >
-                  <Box
-                    sx={{
+                  <div
+                    style={{
                       display: "flex",
                       alignItems: "center",
-                      pl: node.level * 2.5 + 1,
-                      pr: 1.5,
-                      py: 0.5,
-                      position: "relative",
+                      paddingLeft: `${node.level * 20 + 8}px`,
+                      paddingRight: "12px",
                       width: "100%",
                       boxSizing: "border-box",
-                      "&:hover": {
-                        zIndex: 10,
-                        boxShadow: "0px 4px 12px rgba(0,0,0,0.08)",
-                        backgroundColor: "background.paper",
-                      },
                     }}
                   >
                     {node.hasChildren ? (
-                      <Box>
-                        <IconButton
-                          size="small"
-                          color="primary"
-                          onClick={() => onToggle(node)}
-                          disabled={isLoading}
-                          sx={{
-                            mr: 1,
-                            border: 1,
-                            borderColor: isExpanded ? "primary.dark" : "divider",
-                            borderRadius: "50%",
-                            height: 20,
-                            width: 20,
-                            p: 0,
-                            bgcolor: "action.hover",
-                            "&.Mui-focusVisible": {
-                              bgcolor: "action.selected",
-                            },
-                          }}
-                        >
-                          {isLoading ? (
-                            <CircularProgress size={12} color={isExpanded ? "primary.dark" : "inherit"} />
-                          ) : isExpanded ? (
-                            "-"
-                          ) : (
-                            "+"
-                          )}
-                        </IconButton>
-                      </Box>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onToggle(node);
+                        }}
+                        disabled={isLoading}
+                        style={{
+                          marginRight: "8px",
+                          padding: 0,
+                          width: "20px",
+                          height: "20px",
+                          border: `1px solid ${isExpanded ? "#1565c0" : "#bdbdbd"}`,
+                          borderRadius: "50%",
+                          backgroundColor: "transparent",
+                          cursor: isLoading ? "wait" : "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          color: isExpanded ? "#1565c0" : "inherit",
+                          fontSize: "14px",
+                          lineHeight: 1,
+                        }}
+                      >
+                        {isLoading ? "..." : isExpanded ? "-" : "+"}
+                      </button>
                     ) : (
-                      <Box sx={{ width: 20, mr: 1 }} />
+                      <div style={{ width: "28px" }} />
                     )}
-                    <Typography
-                      variant="body2"
-                      color={isExpanded ? "primary.main" : "text.primary"}
-                      sx={{
-                        fontWeight: isExpanded ? 700 : node.level === 0 ? 600 : 400,
+                    <span
+                      style={{
+                        fontWeight: isExpanded ? 700 : isRoot ? 600 : 400,
+                        color: isExpanded ? "#1976d2" : "inherit",
                         whiteSpace: "nowrap",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
+                        fontSize: "0.875rem",
+                        fontFamily: "Roboto, Helvetica, Arial, sans-serif",
                       }}
                     >
                       {node.name}
-                    </Typography>
-                  </Box>
+                    </span>
+                  </div>
                 </TableCell>
               );
             }
             return (
               <TableCell
                 key={colIndex}
-                sx={{
-                  borderRight: 1,
-                  borderColor: "divider",
-                  width: colWidth,
-                  minWidth: colWidth,
-                  maxWidth: colWidth,
-                  bgcolor: "background.default",
-                  p: 0,
+                style={{
+                  borderRight: "1px solid #e0e0e0",
+                  borderBottom: "1px solid #e0e0e0",
+                  width: "80px",
+                  minWidth: "80px",
+                  padding: 0,
                 }}
               />
             );
@@ -251,37 +233,24 @@ const ActualTreeTableRow = memo(
 
           {/* Dynamic Metrics Columns */}
           {activeMetrics.map((metric) => {
+            const value = node[metric.logicalName];
             return (
               <TableCell
                 key={metric.logicalName}
                 align="right"
-                sx={{
-                  borderRight: 1,
-                  borderColor: "divider",
-                  width: 160,
-                  minWidth: 160,
-                  maxWidth: 160,
-                  p: 0,
+                style={{
+                  borderRight: "1px solid #e0e0e0",
+                  borderBottom: "1px solid #e0e0e0",
+                  padding: "8px 16px",
+                  color: value < 0 ? "#d32f2f" : "#2e7d32",
+                  fontWeight: 500,
+                  whiteSpace: "nowrap",
                   verticalAlign: "middle",
+                  fontSize: "0.875rem",
+                  fontFamily: "Roboto, Helvetica, Arial, sans-serif",
                 }}
               >
-                <Box
-                  sx={{
-                    p: "8px 16px",
-                    color: node[metric.logicalName] < 0 ? "error.main" : "success.main",
-                    position: "relative",
-                    fontWeight: 500,
-                    whiteSpace: "nowrap",
-                    "&:hover": {
-                      zIndex: 20,
-                      boxShadow: "-4px 4px 15px rgba(0,0,0,0.1)",
-                      backgroundColor: "background.paper",
-                      borderRadius: "4px",
-                    },
-                  }}
-                >
-                  {formatCurrency(node[metric.logicalName])}
-                </Box>
+                {formatCurrency(value)}
               </TableCell>
             );
           })}
@@ -289,6 +258,16 @@ const ActualTreeTableRow = memo(
       );
     },
   ),
+  // STRICT EQUALITY CHECK: Prevents React from rendering unless these specific props change
+  (prevProps, nextProps) => {
+    return (
+      prevProps.isExpanded === nextProps.isExpanded &&
+      prevProps.isLoading === nextProps.isLoading &&
+      prevProps.node.id === nextProps.node.id &&
+      prevProps.maxVisibleLevel === nextProps.maxVisibleLevel &&
+      prevProps.index === nextProps.index
+    );
+  }
 );
 ActualTreeTableRow.displayName = "ActualTreeTableRow";
 
@@ -297,7 +276,6 @@ export default function ReportAnalysisScreen() {
   const dispatch = useDispatch();
   const user = useSelector((state) => state.auth.user);
   
-  // Safe extraction of cache
   const cachedNodes = useSelector((state) => state.analyticsCache?.nodes || {});
   const showSnackBar = useCustomSnackbar();
 
@@ -310,10 +288,9 @@ export default function ReportAnalysisScreen() {
   const [loadingIds, setLoadingIds] = useState(new Set());
   const [isInitializing, setIsInitializing] = useState(false);
 
-  // Virtualization Container Ref
-  const tableContainerRef = useRef(null);
-
   const theme = useTheme();
+  
+  const tableContainerRef = useRef(null);
 
   const activeReport = useMemo(() => {
     return (
@@ -413,13 +390,11 @@ export default function ReportAnalysisScreen() {
           return next;
         });
       } else {
-        // Expansion (Auto-Collapse Sibling Mode)
+        // Expansion
         if (!node.children && node.hasChildren) {
-          
-          // --- REDUX CACHE LOGIC START ---
           const cacheKey = `${selectedViewCode}_${node.id}`;
           const cachedEntry = cachedNodes[cacheKey];
-          // 15 minutes TTL check (15 * 60 * 1000 = 900000 ms)
+          // 15 minutes TTL check
           const isCacheValid = cachedEntry && (Date.now() - cachedEntry.timestamp < 900000);
 
           if (isCacheValid) {
@@ -456,7 +431,7 @@ export default function ReportAnalysisScreen() {
           }
         }
         
-        // ACCORDION LOGIC
+        // Auto-Collapse Sibling Logic
         setExpandedIds((prev) => {
           const next = new Map();
           prev.forEach((level, id) => {
@@ -504,18 +479,17 @@ export default function ReportAnalysisScreen() {
     maxVisibleLevel + 1,
   );
 
-  // --- VIRTUALIZER SETUP ---
+  // --- VIRTUALIZATION ENGINE ---
   const virtualizer = useVirtualizer({
     count: visibleRows.length,
     getScrollElement: () => tableContainerRef.current,
-    estimateSize: () => 44, // Matches the exact height of the TableRow
-    overscan: 10,
+    estimateSize: () => 40,
+    overscan: 5, // Dropped to 5 to reduce off-screen render burden
   });
 
   const virtualItems = virtualizer.getVirtualItems();
   const totalColumnsCount = visibleHierarchyLevels.length + activeHierarchyConfig.availableMetrics.length;
   
-  // Padding elements to perfectly preserve scroll height without breaking the HTML table layout
   const paddingTop = virtualItems.length > 0 ? virtualItems[0].start : 0;
   const paddingBottom = virtualItems.length > 0 ? virtualizer.getTotalSize() - virtualItems[virtualItems.length - 1].end : 0;
 
@@ -562,17 +536,15 @@ export default function ReportAnalysisScreen() {
           </Box>
 
           <Box sx={{ overflow: "hidden" }}>
-            <Box>
-              <Typography
-                variant="h6"
-                sx={{ fontWeight: 700, color: "text.primary" }}
-              >
-                {activeReport?.displayName || "Financial Analytics"}
-              </Typography>
-            </Box>
+            <Typography
+              variant="h6"
+              sx={{ fontWeight: 700, color: "text.primary" }}
+            >
+              {activeReport?.displayName || "Financial Analytics"}
+            </Typography>
             <Typography
               variant="caption"
-              sx={{ color: "text.primary" }}
+              sx={{ color: "text.primary", }}
             >
               Dynamic Drill-Down Matrix
             </Typography>
@@ -587,9 +559,6 @@ export default function ReportAnalysisScreen() {
               maxWidth: 500,
               bgcolor: "background.paper",
               borderRadius: 1,
-              "& .MuiOutlinedInput-root.Mui-focused fieldset": {
-                boxShadow: `0 0 8px ${theme.palette.primary.light}`,
-              },
             }}
           >
             <InputLabel id="report-source-label" shrink>
@@ -624,9 +593,6 @@ export default function ReportAnalysisScreen() {
               maxWidth: 350,
               bgcolor: "background.paper",
               borderRadius: 1,
-              "& .MuiOutlinedInput-root.Mui-focused fieldset": {
-                boxShadow: `0 0 8px ${theme.palette.primary.light}`,
-              },
             }}
           >
             <InputLabel id="hierarchy-view-label" shrink>
@@ -680,11 +646,7 @@ export default function ReportAnalysisScreen() {
           }}
         >
           {isSetupComplete && (
-            <Box
-              display="flex"
-              alignItems="center"
-              gap={0.5}
-            >
+            <Box display="flex" alignItems="center" gap={0.5}>
               <Typography
                 variant="body2"
                 color="text.secondary"
@@ -694,22 +656,15 @@ export default function ReportAnalysisScreen() {
               </Typography>
               {activeHierarchyConfig.hierarchy.map((item, index) => {
                 const isActive = index <= maxVisibleLevel;
-                
                 return (
                   <Box key={index} display="flex" alignItems="center">
-                    <Box
-                      display="flex"
-                      alignItems="center"
-                      gap={1}
-                    >
+                    <Box display="flex" alignItems="center" gap={1}>
                       <Box
                         sx={{
                           width: 10,
                           height: 10,
                           borderRadius: "50%",
-                          bgcolor: isActive
-                            ? "primary.main"
-                            : "background.paper",
+                          bgcolor: isActive ? "primary.main" : "background.paper",
                           border: "2px solid",
                           borderColor: isActive ? "primary.main" : "divider",
                         }}
@@ -728,12 +683,12 @@ export default function ReportAnalysisScreen() {
 
                     {index < activeHierarchyConfig.hierarchy.length - 1 && (
                       <Box
-                        sx={{ 
+                        sx={{
+                          backgroundColor: index < maxVisibleLevel ? theme.palette.primary.main : theme.palette.divider,
                           width: 24, 
                           height: 2, 
                           mx: 1, 
-                          borderRadius: 1,
-                          backgroundColor: index < maxVisibleLevel ? theme.palette.primary.main : theme.palette.divider 
+                          borderRadius: 1 
                         }}
                       />
                     )}
@@ -750,7 +705,8 @@ export default function ReportAnalysisScreen() {
             flexGrow: 1,
             bgcolor: "background.default",
             position: "relative",
-            overflow: "auto", // Essential for Virtualizer to read scrolling
+            overflow: "auto",
+            willChange: "transform", // Hardware acceleration hint
           }}
         >
           {!isSetupComplete && (
@@ -768,11 +724,9 @@ export default function ReportAnalysisScreen() {
                 zIndex: 10,
               }}
             >
-              <Box>
-                <DatasetIcon
-                  sx={{ fontSize: 64, color: "action.disabled", mb: 1 }}
-                />
-              </Box>
+              <DatasetIcon
+                sx={{ fontSize: 64, color: "action.disabled", mb: 1 }}
+              />
               <Typography variant="h6" color="text.secondary">
                 No Data to Display
               </Typography>
@@ -801,51 +755,39 @@ export default function ReportAnalysisScreen() {
             <Table
               stickyHeader
               size="small"
-              sx={{ minWidth: 1000, tableLayout: "fixed" }}
+              sx={{ minWidth: 1000, tableLayout: "auto" }}
             >
               <TableHead>
                 <TableRow>
-                  {visibleHierarchyLevels.map((levelName, index) => {
-                    const colWidth = index === 0 ? 280 : 200;
-                    return (
-                      <TableCell
-                        key={levelName}
-                        sx={{
-                          backgroundColor: theme.palette.purple
-                            ? theme.palette.purple[100]
-                            : "#f5f5f5",
-                          color: "text.primary",
-                          fontWeight: 700,
-                          borderRight: 1,
-                          borderColor: "divider",
-                          borderBottom: 2,
-                          py: 1,
-                          width: colWidth,
-                          minWidth: colWidth,
-                          maxWidth: colWidth,
-                        }}
-                      >
-                        {levelName.replace("_", " ").toUpperCase()}
-                      </TableCell>
-                    );
-                  })}
-                  {activeHierarchyConfig.availableMetrics.map((metric) => (
+                  {visibleHierarchyLevels.map((levelName, index) => (
                     <TableCell
-                      key={metric.logicalName}
-                      align="right"
+                      key={levelName}
                       sx={{
-                        backgroundColor: theme.palette.purple
-                          ? theme.palette.purple[200]
-                          : "#eeeeee",
+                        backgroundColor: theme.palette.purple?.[100] || "#e1bee7",
                         color: "text.primary",
                         fontWeight: 700,
                         borderRight: 1,
                         borderColor: "divider",
                         borderBottom: 2,
                         py: 1,
-                        width: 160,
-                        minWidth: 160,
-                        maxWidth: 160,
+                        width: index === 0 ? 280 : "auto",
+                      }}
+                    >
+                      {levelName.replace("_", " ").toUpperCase()}
+                    </TableCell>
+                  ))}
+                  {activeHierarchyConfig.availableMetrics.map((metric) => (
+                    <TableCell
+                      key={metric.logicalName}
+                      align="right"
+                      sx={{
+                        backgroundColor: theme.palette.purple?.[200] || "#ce93d8",
+                        color: "text.primary",
+                        fontWeight: 700,
+                        borderRight: 1,
+                        borderColor: "divider",
+                        borderBottom: 2,
+                        py: 1,
                       }}
                     >
                       {metric.displayName}
@@ -854,10 +796,10 @@ export default function ReportAnalysisScreen() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {/* Virtualization top spacing */}
+                {/* Top Padding Row */}
                 {paddingTop > 0 && (
                   <TableRow>
-                    <TableCell colSpan={totalColumnsCount} sx={{ height: `${paddingTop}px`, p: 0, border: "none" }} />
+                    <TableCell colSpan={totalColumnsCount} style={{ height: `${paddingTop}px`, padding: 0, border: "none" }} />
                   </TableRow>
                 )}
 
@@ -879,10 +821,10 @@ export default function ReportAnalysisScreen() {
                   );
                 })}
 
-                {/* Virtualization bottom spacing */}
+                {/* Bottom Padding Row */}
                 {paddingBottom > 0 && (
                   <TableRow>
-                    <TableCell colSpan={totalColumnsCount} sx={{ height: `${paddingBottom}px`, p: 0, border: "none" }} />
+                    <TableCell colSpan={totalColumnsCount} style={{ height: `${paddingBottom}px`, padding: 0, border: "none" }} />
                   </TableRow>
                 )}
               </TableBody>
@@ -923,13 +865,287 @@ export default function ReportAnalysisScreen() {
             variant="caption"
             color="text.secondary"
             fontWeight={500}
-            sx={{ mr: 2 }}
           >
-            Total rows: {visibleRows.length}
+            Showing {visibleRows.length} rows
           </Typography>
         </Box>
       </Paper>
     </Box>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+import { createTheme, alpha } from "@mui/material/styles";
+
+const purple = {
+  50: "#EDE8FF",
+  100: "#D8CCFF",
+  200: "#A28DF0", // light
+  300: "#7C63E6",
+  400: "#58469f", // main
+  500: "#4F30C1",
+  600: "#3E2C70", // dark
+  700: "#2F2157",
+  800: "#241A44",
+  900: "#1B1435",
+};
+
+const gold = {
+  50: "#FFF4CC",
+  100: "#FFE580", // light
+  200: "#FFD659",
+  300: "#FCCC3D",
+  400: "#F5C542", // main
+  500: "#E6B51F",
+  600: "#B48B00", // dark
+  700: "#8A6B00",
+  800: "#5C4800",
+  900: "#3C2F00",
+};
+
+const gray = {
+  50: "#F7F7F7",
+  100: "#EDEDED",
+  200: "#E0E0E0",
+  300: "#C7C7C7",
+  400: "#9E9E9E",
+  500: "#6F6F6F",
+  600: "#4F4F4F",
+  700: "#424242",
+  800: "#2E2E2E",
+  900: "#1E1E1E",
+};
+
+// Semantic aliases for glassmorphism
+export const glass = {
+  panel: (opacity = 0.25) => `rgba(255,255,255,${opacity})`,
+  border: "rgba(255,255,255,0.3)",
+  chip: "rgba(255,255,255,0.35)",
+  snackbar: "rgba(255,255,255,0.4)",
+};
+
+export const glassmorphismBaseStyles = (theme) => ({
+  background: "rgba(255, 255, 255, 0.1)", // Semi-transparent white
+  backdropFilter: "blur(20px) saturate(180%)", // Frosted glass effect
+  WebkitBackdropFilter: "blur(10px) saturate(180%)", // For Safari support
+  border: "1px solid rgba(255, 255, 255, 0.125)", // Subtle white border
+  boxShadow: theme.shadows[10], // Stronger shadow for depth
+  // borderRadius: "12px",
+});
+
+const base = createTheme();
+
+export const typography = {
+  fontFamily:
+    "Poppins, Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
+  button: { textTransform: "none", fontWeight: 600 },
+  h1: { fontWeight: 600, fontSize: "clamp(2rem, 2.4vw, 2.5rem)" },
+  h2: { fontWeight: 600, fontSize: "clamp(1.6rem, 1.9vw, 2rem)" },
+  h3: { fontWeight: 500, fontSize: base.typography.pxToRem(24) },
+  h4: { fontWeight: 500, fontSize: base.typography.pxToRem(20) },
+  h5: { fontWeight: 500, fontSize: base.typography.pxToRem(16) },
+  body1: { fontSize: base.typography.pxToRem(16) },
+  body2: { fontSize: base.typography.pxToRem(14) },
+};
+
+export const shape = { borderRadius: 12 };
+
+// Use CSS variables color schemes (MUI v7) like your other project. ?filecite?turn0file0?
+export const colorSchemes = {
+  light: {
+    palette: {
+      mode: "light",
+      primary: {
+        light: purple[200],
+        main: purple[400],
+        dark: purple[600],
+        contrastText: "#fff",
+      },
+      secondary: {
+        light: gold[100],
+        main: gold[400],
+        dark: gold[600],
+        contrastText: gray[900],
+      },
+      success: {
+        light: "#81C784",
+        main: "#006304",
+        dark: "#2E7D32",
+        contrastText: "#fff",
+      },
+      warning: {
+        light: "#ffcb95",
+        main: "#F57C00",
+        dark: "#E65100",
+        contrastText: "#fff",
+      },
+      error: {
+        light: "#EF5350",
+        main: "#9f0400",
+        dark: "#B71C1C",
+        contrastText: "#fff",
+      },
+      info: {
+        light: "#64B5F6",
+        main: "#2196F3",
+        dark: "#1565C0",
+        contrastText: "#fff",
+      },
+      // spacing: {
+      //  marginTop:"10px"
+      // },
+
+      grey: { ...gray },
+      purple: { ...purple },
+      divider: alpha(purple[400], 0.2),
+      background: {
+        default: glass.panel(0.25),
+        paper: glass.panel(0.25),
+        glass: glass.panel(0.18),
+      },
+      text: { primary: "#402b7f", secondary: "#3E2C70", disabled: gray[400] },
+      baseShadow: "0 8px 25px rgba(0,0,0,0.1)",
+    },
+  },
+  dark: {
+    palette: {
+      mode: "dark",
+      primary: {
+        light: purple[300],
+        main: purple[400],
+        dark: purple[700],
+        contrastText: "#fff",
+      },
+      secondary: {
+        light: alpha(gold[100], 0.9),
+        main: gold[400],
+        dark: gold[700],
+        contrastText: "#000",
+      },
+      success: {
+        light: "#66BB6A",
+        main: "#006304",
+        dark: "#1B5E20",
+        contrastText: "#fff",
+      },
+      warning: {
+        light: "#FFA726",
+        main: "#F57C00",
+        dark: "#E65100",
+        contrastText: "#fff",
+      },
+      error: {
+        light: "#EF5350",
+        main: "#9f0400",
+        dark: "#B71C1C",
+        contrastText: "#fff",
+      },
+      info: {
+        light: "#64B5F6",
+        main: "#2196F3",
+        dark: "#1565C0",
+        contrastText: "#fff",
+      },
+      grey: { ...gray },
+      divider: alpha(gray[700], 0.5),
+      background: {
+        default: "#0E0E12",
+        paper: alpha("#0E0E12", 0.8),
+        glass: alpha("#0E0E12", 0.5),
+      },
+      text: {
+        primary: "#F5F6FA",
+        secondary: alpha("#F5F6FA", 0.7),
+        disabled: alpha("#F5F6FA", 0.4),
+      },
+      baseShadow: "0 8px 40px rgba(0,0,0,0.35)",
+    },
+  },
+
+  //   leaf: {
+  //     palette: {
+  //       mode: "light",
+
+  //       primary: {
+  //         light: "#A5F5B2",  // soft mint
+  //         main:  "#4EC96F",  // main green
+  //         dark:  "#1E7C3A",
+  //         contrastText: "#ffffff",
+  //       },
+
+  //       secondary: {
+  //         light: "#D4FFD6",
+  //         main:  "#8DE19A",
+  //         dark:  "#3E8A4E",
+  //         contrastText: "#003300",
+  //       },
+
+  //       success: {
+  //         light: "#B6F6C0",
+  //         main:  "#4CAF50",
+  //         dark:  "#1E7C3A",
+  //         contrastText: "#ffffff",
+  //       },
+
+  //       warning: {
+  //         light: "#FFE7B5",
+  //         main:  "#FFC047",
+  //         dark:  "#B77706",
+  //         contrastText: "#3B2800",
+  //       },
+
+  //       error: {
+  //         light: "#FFB3B3",
+  //         main:  "#F44336",
+  //         dark:  "#AA2017",
+  //         contrastText: "#ffffff",
+  //       },
+
+  //       info: {
+  //         light: "#B3E5FC",
+  //         main:  "#29B6F6",
+  //         dark:  "#0277BD",
+  //         contrastText: "#ffffff",
+  //       },
+
+  //       // use the same grey + alpha helpers you already import
+  //       grey: {
+  //         ...grey,
+  //       },
+
+  //       background: {
+  //         // light green base similar to your image
+  //         default: "#E6FBD9",
+  //         paper:   "rgba(255,255,255,0.88)",
+  //         glass:   "rgba(230,251,217,0.7)",   // if you use 'glass' in your layouts
+  //       },
+
+  //       text: {
+  //         primary:   "#103B1B",
+  //         secondary: alpha("#103B1B", 0.7),
+  //         disabled:  alpha("#103B1B", 0.4),
+  //       },
+
+  //       baseShadow: "0 8px 40px rgba(0, 0, 0, 0.18)",
+  //     },
+
+  // },
+};
+
+// Shadows: keep default but use palette.baseShadow for level 1 like your prior approach
+const defaultTheme = createTheme();
+export const shadows = [
+  "none",
+  "var(--template-palette-baseShadow)",
+  ...defaultTheme.shadows.slice(2),
+];
 
