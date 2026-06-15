@@ -8,7 +8,7 @@ import {
   memo,
   forwardRef,
 } from "react";
-import { useSelector } from "react-redux";
+import { useSelector, useDispatch } from "react-redux";
 import {
   Box,
   Paper,
@@ -150,12 +150,12 @@ const ActualTreeTableRow = memo(
             delay: Math.min(index * 0.01, 0.08),
             ease: "easeOut",
           }}
-          // sx={{
-          //   backgroundColor: isExpanded ? "primary.main" : "inherit",
-          //   borderLeft: isExpanded ? "4px solid" : "4px solid transparent",
-          //   borderLeftColor: isExpanded ? "primary.main" : "transparent",
-          //   transition: "all 0.2s ease-in-out"
-          // }}
+          sx={{
+            bgcolor: isExpanded ? "#D8CCFF" : "inherit",
+            borderLeft: isExpanded ? "4px solid" : "4px solid transparent",
+            borderLeftColor: isExpanded ? "primary.main" : "transparent",
+            transition: "all 0.2s ease-in-out",
+          }}
         >
           {/* Hierarchy Depth Columns */}
           {Array.from({ length: maxVisibleLevel + 1 }).map((_, colIndex) => {
@@ -167,7 +167,7 @@ const ActualTreeTableRow = memo(
                     borderRight: 1,
                     borderColor: "divider",
                     minWidth: 260,
-                    bgcolor: isExpanded ? "primary.light" : "inherit",
+                    bgcolor: "transparent",
                     p: 1,
                     verticalAlign: "middle",
                   }}
@@ -224,7 +224,7 @@ const ActualTreeTableRow = memo(
                             <CircularProgress size={12} color={isExpanded ? "primary.dark" : "inherit"} />
                           ) : isExpanded ? (
                             "-"
-                          ) : (             
+                          ) : (
                             "+"
                           )}
                         </IconButton>
@@ -234,9 +234,9 @@ const ActualTreeTableRow = memo(
                     )}
                     <Typography
                       variant="body2"
-                      color={isExpanded ? "primary.dark" : "text.primary"}
+                      color={isExpanded ? "primary.main" : "text.primary"}
                       sx={{
-                        fontWeight: isExpanded ? "bold" : (node.level === 0 ? 600 : 400),
+                        fontWeight: isExpanded ? 700 : node.level === 0 ? 600 : 400,
                         whiteSpace: "nowrap",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
@@ -291,9 +291,7 @@ const ActualTreeTableRow = memo(
                     color: node[metric.logicalName] < 0 ? "error.main" : "success.main",
                     position: "relative",
                     fontWeight: 500,
-                    transformOrigin: isLastColumn
-                      ? "right center"
-                      : "center center",
+                    transformOrigin: isLastColumn ? "right center" : "center center",
                     whiteSpace: "nowrap",
                   }}
                 >
@@ -311,7 +309,12 @@ ActualTreeTableRow.displayName = "ActualTreeTableRow";
 
 export default function ReportAnalysisScreen() {
   const { callApi } = useApi();
+  const dispatch = useDispatch();
   const user = useSelector((state) => state.auth.user);
+  
+  // Safe extraction of cache (assumes you registered it in root reducer as "analyticsCache")
+  const cachedNodes = useSelector((state) => state.analyticsCache?.nodes || {});
+  
   const showSnackBar = useCustomSnackbar();
 
   const [reportsConfig, setReportsConfig] = useState([]);
@@ -319,11 +322,7 @@ export default function ReportAnalysisScreen() {
   const [selectedViewCode, setSelectedViewCode] = useState("");
 
   const [data, setData] = useState([]);
-  
-  // FIX: Using a Map instead of a Set allows us to instantly auto-collapse 
-  // sibling branches by perfectly tracking the depth level of every opened row
   const [expandedIds, setExpandedIds] = useState(new Map());
-  
   const [loadingIds, setLoadingIds] = useState(new Set());
   const [isInitializing, setIsInitializing] = useState(false);
   const [page, setPage] = useState(0);
@@ -435,28 +434,52 @@ export default function ReportAnalysisScreen() {
       } else {
         // Expansion (Auto-Collapse Sibling Mode)
         if (!node.children && node.hasChildren) {
-          setLoadingIds((prev) => new Set(prev).add(node.id));
-          try {
-            const children = await fetchChildrenData(
-              callApi,
-              showSnackBar,
-              node,
-              selectedViewCode,
-              activeHierarchyConfig.hierarchy,
-              activeHierarchyConfig.availableMetrics,
-            );
+          
+          // --- REDUX CACHE LOGIC START ---
+          const cacheKey = `${selectedViewCode}_${node.id}`;
+          const cachedEntry = cachedNodes[cacheKey];
+          // 15 minutes TTL check (15 * 60 * 1000 = 900000 ms)
+          const isCacheValid = cachedEntry && (Date.now() - cachedEntry.timestamp < 900000);
+
+          if (isCacheValid) {
+            // CACHE HIT: Instantly load data from Redux
             setData((prevData) =>
-              appendChildrenToTree(prevData, node.id, children),
+              appendChildrenToTree(prevData, node.id, cachedEntry.data)
             );
-          } catch (error) {
-            console.error("Failed to fetch children", error);
-          } finally {
-            setLoadingIds((prev) => {
-              const next = new Set(prev);
-              next.delete(node.id);
-              return next;
-            });
+          } else {
+            // CACHE MISS: Fetch from API
+            setLoadingIds((prev) => new Set(prev).add(node.id));
+            try {
+              const children = await fetchChildrenData(
+                callApi,
+                showSnackBar,
+                node,
+                selectedViewCode,
+                activeHierarchyConfig.hierarchy,
+                activeHierarchyConfig.availableMetrics,
+              );
+              
+              setData((prevData) =>
+                appendChildrenToTree(prevData, node.id, children),
+              );
+
+              // Dispatch the new data to Redux cache
+              dispatch({
+                type: "analyticsCache/cacheNode", 
+                payload: { key: cacheKey, data: children, timestamp: Date.now() }
+              });
+
+            } catch (error) {
+              console.error("Failed to fetch children", error);
+            } finally {
+              setLoadingIds((prev) => {
+                const next = new Set(prev);
+                next.delete(node.id);
+                return next;
+              });
+            }
           }
+          // --- REDUX CACHE LOGIC END ---
         }
         
         // ACCORDION LOGIC
@@ -483,6 +506,8 @@ export default function ReportAnalysisScreen() {
       selectedViewCode,
       callApi,
       showSnackBar,
+      cachedNodes,
+      dispatch
     ],
   );
 
@@ -499,7 +524,6 @@ export default function ReportAnalysisScreen() {
   }, [data, expandedIds]);
 
   // PAGINATION SAFETY NET
-  // If the auto-collapse drops a huge branch, it snaps the user back to the correct page to prevent a blank screen
   useEffect(() => {
     const maxPage = Math.max(0, Math.ceil(visibleRows.length / rowsPerPage) - 1);
     if (page > maxPage) {
@@ -600,13 +624,13 @@ export default function ReportAnalysisScreen() {
                 exit={{ opacity: 0, x: 30 }}
                 transition={{ duration: 0.3 }}
               >
-              <Typography
-                variant="h6"
-                sx={{ fontWeight: 700, color: "text.primary" }}
-              >
-                {activeReport?.displayName || "Financial Analytics"}
-              </Typography>
-            </MotionBox>
+                <Typography
+                  variant="h6"
+                  sx={{ fontWeight: 700, color: "text.primary" }}
+                >
+                  {activeReport?.displayName || "Financial Analytics"}
+                </Typography>
+              </MotionBox>
             </AnimatePresence>
             <Typography
               variant="caption"
@@ -838,7 +862,7 @@ export default function ReportAnalysisScreen() {
                 }}
               >
                 <DatasetIcon
-                  sx={{ fontSize: 64, color: "action.disabled", mb: 1 }}
+                   sx={{ fontSize: 64, color: "action.disabled", mb: 1 }}
                 />
               </MotionBox>
               <Typography variant="h6" color="text.secondary">
@@ -977,3 +1001,37 @@ export default function ReportAnalysisScreen() {
     </Box>
   );
 }
+
+
+
+
+
+
+
+
+
+// ************************************************* analyticsCacheSlice ***************************************************** //
+
+import { createSlice } from "@reduxjs/toolkit";
+
+const analyticsCacheSlice = createSlice({
+  name: "analyticsCache",
+  initialState: {
+    nodes: {}, // Structure: { [cacheKey]: { data: [], timestamp: 123456789 } }
+  },
+  reducers: {
+    cacheNode: (state, action) => {
+      const { key, data, timestamp } = action.payload;
+      state.nodes[key] = { data, timestamp };
+    },
+    // Optional: Call this on user logout or when manually refreshing reports
+    clearCache: (state) => {
+      state.nodes = {};
+    },
+  },
+});
+
+export const { cacheNode, clearCache } = analyticsCacheSlice.actions;
+export default analyticsCacheSlice.reducer;
+
+
