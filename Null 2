@@ -1,940 +1,487 @@
-// **************************************************************************** ReportAnalysisScreen ****************************************************************************** //
+// ****************************************************** TopToolbar ************************************************** //
 
-import {
-  useState,
-  useMemo,
-  useCallback,
-  useEffect,
-  memo,
-  forwardRef,
-  useRef,
-} from "react";
-import { useSelector, useDispatch } from "react-redux";
-import {
-  Box,
-  Paper,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Typography,
-  CircularProgress,
-  MenuItem,
-  Select,
-  FormControl,
-  InputLabel,
-  IconButton,
-  Tooltip,
-} from "@mui/material";
-import AnalyticsIcon from "@mui/icons-material/Analytics";
-import DatasetIcon from "@mui/icons-material/Dataset";
+import AppBar from "@mui/material/AppBar";
+import Toolbar from "@mui/material/Toolbar";
+import Typography from "@mui/material/Typography";
+import Button from "@mui/material/Button";
+import IconButton from "@mui/material/IconButton";
+import Box from "@mui/material/Box";
+import CircularProgress from "@mui/material/CircularProgress";
+import Chip from "@mui/material/Chip";
+import SaveIcon from "@mui/icons-material/Save";
+import DownloadIcon from "@mui/icons-material/Download";
+import UploadIcon from "@mui/icons-material/Upload";
+import TableChartIcon from "@mui/icons-material/TableChart";
+import TuneIcon from "@mui/icons-material/Tune";
+import SpeedIcon from "@mui/icons-material/Speed";
 import FullscreenIcon from "@mui/icons-material/Fullscreen";
 import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
-import { useTheme } from "@mui/material/styles";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import ReceiptLongIcon from "@mui/icons-material/ReceiptLong";
+import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 
-// Assume these are available in your project structure
+export const TopToolbar = ({
+  onBack,
+  onExport,
+  onSave,
+  onSaveVariants,
+  onImport,
+  onGenerateTestData,
+  reportName,
+  saving = false,
+  templateSaved = false,
+  variantsCount = 0,
+  isFullscreen,
+  toggleFullscreen,
+}) => {
+  return (
+    <AppBar
+      position="static"
+      // color="default"
+      elevation={0}
+      sx={{ borderRadius: 0 /* , borderBottom: "1px solid #e0e0e0" */ }}
+    >
+      <Toolbar>
+        <IconButton edge="start" color="primary" sx={{ mr: 2 }}>
+          <ReceiptLongIcon />
+        </IconButton>
+
+        <Typography
+          variant="h6"
+          component="div"
+          sx={{ flexGrow: 1, fontWeight: 600, color: "text.primary" }}
+        >
+          {/* reportName ||  */ "Report Template Builder"}
+        </Typography>
+
+        <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
+          {onBack && (
+            <Button
+              startIcon={<ArrowBackIcon />}
+              onClick={onBack}
+              sx={{ color: "text.secondary" }}
+              size="small"
+            >
+              Back
+            </Button>
+          )}
+          <Button
+            variant="outlined"
+            startIcon={<UploadIcon />}
+            onClick={onImport}
+            size="small"
+          >
+            Import
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<DownloadIcon />}
+            onClick={onExport}
+            size="small"
+          >
+            Export Template
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={
+              saving ? (
+                <CircularProgress size={16} color="inherit" />
+              ) : (
+                <SaveIcon />
+              )
+            }
+            onClick={onSave}
+            size="small"
+            disabled={saving}
+          >
+            Save Template
+          </Button>
+          {/* <Button
+            variant="outlined"
+            color="secondary"
+            startIcon={<TuneIcon />}
+            onClick={onSaveVariants}
+            size="small"
+            disabled={saving || !templateSaved}
+            title={!templateSaved ? "Save template first" : "Save variants"}
+          >
+            Save Variants
+            {variantsCount > 0 && (
+              <Chip
+                label={variantsCount}
+                size="small"
+                sx={{ ml: 1, height: 20, fontSize: "0.7rem" }}
+              />
+            )}
+          </Button> */}
+          {/* The full screen button */}
+          <IconButton
+            onClick={toggleFullscreen}
+            sx={{
+              /*  position: "absolute",
+                        top: 8,
+                        right: 8, */
+              zIndex: 10,
+              color: isFullscreen ? "white" : "inherit", // Change color when in fullscreen
+            }}
+          >
+            {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
+          </IconButton>
+        </Box>
+      </Toolbar>
+    </AppBar>
+  );
+};
+
+
+
+
+
+
+
+
+
+
+
+// ******************************************** ReportBuilder.component ************************************************ // 
+
+import { useCallback, useEffect, useState } from "react";
+import { useDispatch } from "react-redux";
+
+import Box from "@mui/material/Box";
+import CircularProgress from "@mui/material/CircularProgress"; // Added
+import Backdrop from "@mui/material/Backdrop"; // Added
+
+import { ReportCanvas } from "./components/editor/ReportCanvas";
+import { TopToolbar } from "./components/editor/TopToolbar";
+import { LeftPanel } from "./components/leftpanel/LeftPanel";
+import { RightPanel } from "./components/rightpanel/RightPanel";
+import { ImportTemplateDialog } from "./components/editor/ImportTemplateDialog";
+import ExportTemplateDialog from "./components/editor/ExportTemplateDialog";
+import {
+  fetchTableConfigs,
+  fetchTemplate,
+  saveTemplate,
+  saveVariants,
+} from "./services/api";
+import { useAppDispatch, useAppSelector } from "./store";
+import { generateBulkTestData } from "./utils/testDataGenerator";
+import {
+  setTemplate,
+  setTemplateMeta,
+  setSelectedCell,
+  setSaving,
+  setTemplateSaved,
+  resetTemplate,
+} from "./store/templateSlice";
+import {
+  enterComponentFullscreen,
+  exitComponentFullscreen,
+} from "../../store/slices/uiSlice";
+import { setLoading, setTableConfigs, setError } from "./store/configSlice";
+import {
+  selectTemplateMeta,
+  selectReportMeta,
+  selectVariants,
+  selectSaving,
+  selectTemplateSaved,
+  selectTemplateForExport,
+} from "./store/selectors";
+import { ActionCreators } from "redux-undo";
 import useApi from "../../hooks/useApi";
+import { useRef } from "react";
+import { useSelector } from "react-redux";
 import useCustomSnackbar from "../../utils/useCustomSnackbar";
 
-// --- CONFIGURATION & CONSTANTS ---
-const formatCurrency = (value) => {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "INR",
-  }).format(value || 0);
+const UndoRedoHandler = () => {
+  const dispatch = useAppDispatch();
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        dispatch(ActionCreators.undo());
+      } else if (
+        ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "z") ||
+        ((e.ctrlKey || e.metaKey) && e.key === "y")
+      ) {
+        e.preventDefault();
+        dispatch(ActionCreators.redo());
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [dispatch]);
+
+  return null;
 };
 
-const DEFAULT_CONFIG = { hierarchy: [], availableMetrics: [] };
-
-// --- ACTUAL API LOGIC ---
-const fetchAnalyticsData = async (callApi, showSnackBar, payload) => {
-  try {
-    const responseData = await callApi(
-      "/AS/analytics/drill-down",
-      payload,
-      "POST",
-    );
-    return responseData?.data || [];
-  } catch (error) {
-    console.error("Error fetching analytics data:", error);
-    showSnackBar("Failed to fetch analytics data", "error");
-  }
-};
-
-const fetchInitialData = async (
-  callApi,
-  showSnackBar,
-  viewCode,
-  hierarchy,
-  metrics,
-) => {
-  const rootDimension = hierarchy[0];
-  const payload = {
-    viewCode: viewCode,
-    dimensions: [rootDimension],
-    metrics: metrics.map((m) => m.logicalName),
-    filters: [],
-  };
-  const apiData = await fetchAnalyticsData(callApi, showSnackBar, payload);
-
-  return (apiData || []).map((row) => ({
-    ...row,
-    level: 0,
-    nodeFilters: [],
-  }));
-};
-
-const fetchChildrenData = async (
-  callApi,
-  showSnackBar,
-  parentNode,
-  viewCode,
-  hierarchy,
-  metrics,
-) => {
-  const childLevel = parentNode.level + 1;
-  const nextDimension = hierarchy[childLevel];
-
-  const currentFilters = [
-    ...(parentNode.nodeFilters || []),
-    {
-      logicalField: hierarchy[parentNode.level],
-      operator: "EQUALS",
-      value: parentNode.name,
-    },
-  ];
-  const payload = {
-    viewCode: viewCode,
-    dimensions: [nextDimension],
-    metrics: metrics.map((m) => m.logicalName),
-    filters: currentFilters,
-  };
-  const apiData = await fetchAnalyticsData(callApi, showSnackBar, payload);
-
-  return (apiData || []).map((row) => ({
-    ...row,
-    level: childLevel,
-    nodeFilters: currentFilters,
-  }));
-};
-
-// --- COMPONENTS ---
-
-const ActualTreeTableRow = memo(
-  forwardRef(
-    (
-      {
-        node,
-        isExpanded,
-        isLoading,
-        onToggle,
-        maxVisibleLevel,
-        index,
-        activeMetrics,
-        theme, // dynamically passed to avoid hook bottleneck in virtualized rows
-        ...props
-      },
-      ref,
-    ) => {
-      const isRoot = node.level === 0;
-
-      return (
-        <TableRow
-          ref={ref}
-          style={{
-            backgroundColor: isExpanded ? theme.palette.purple[100] : "inherit",
-            borderLeft: isExpanded ? `4px solid ${theme.palette.primary.main}` : "4px solid transparent",
-            height: "40px",
-          }}
-          {...props}
-        >
-          {/* Hierarchy Depth Columns */}
-          {Array.from({ length: maxVisibleLevel + 1 }).map((_, colIndex) => {
-            if (colIndex === node.level) {
-              return (
-                <TableCell
-                  key={colIndex}
-                  style={{
-                    borderRight: `1px solid ${theme.palette.divider}`,
-                    borderBottom: `1px solid ${theme.palette.divider}`,
-                    minWidth: "260px",
-                    padding: "12px 8px",
-                    verticalAlign: "middle",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      paddingLeft: `${node.level * 20 + 8}px`,
-                      paddingRight: "12px",
-                      width: "100%",
-                      boxSizing: "border-box",
-                    }}
-                  >
-                    {node.hasChildren ? (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onToggle(node);
-                        }}
-                        disabled={isLoading}
-                        style={{
-                          marginRight: "8px",
-                          padding: 0,
-                          width: "20px",
-                          height: "20px",
-                          border: `1px solid ${isExpanded ? theme.palette.primary.main : theme.palette.divider}`,
-                          borderRadius: "50%",
-                          backgroundColor: "transparent",
-                          cursor: isLoading ? "wait" : "pointer",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          color: isExpanded ? theme.palette.primary.main : "inherit",
-                          fontSize: "14px",
-                          lineHeight: 1,
-                        }}
-                      >
-                        {isLoading ? (
-                            <CircularProgress size={12} color={isExpanded ? "primary.dark" : "inherit"} />
-                          ) : isExpanded ? "-" : "+"}
-                      </button>
-                    ) : (
-                      <div style={{ width: "28px" }} />
-                    )}
-                    <span
-                      style={{
-                        fontWeight: isExpanded ? 700 : isRoot ? 600 : 400,
-                        color: isExpanded ? theme.palette.primary.main : "inherit",
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        fontSize: "0.875rem",
-                        fontFamily: theme.typography.fontFamily || "Roboto, Helvetica, Arial, sans-serif",
-                      }}
-                    >
-                      {node.name}
-                    </span>
-                  </div>
-                </TableCell>
-              );
-            }
-            return (
-              <TableCell
-                key={colIndex}
-                style={{
-                  borderRight: `1px solid ${theme.palette.divider}`,
-                  borderBottom: `1px solid ${theme.palette.divider}`,
-                  width: "80px",
-                  minWidth: "80px",
-                  padding: 0,
-                }}
-              />
-            );
-          })}
-
-          {/* Dynamic Metrics Columns */}
-          {activeMetrics.map((metric) => {
-            const value = node[metric.logicalName];
-            return (
-              <TableCell
-                key={metric.logicalName}
-                align="right"
-                style={{
-                  borderRight: `1px solid ${theme.palette.divider}`,
-                  borderBottom: `1px solid ${theme.palette.divider}`,
-                  padding: "8px 16px",
-                  color: value < 0 ? theme.palette.error.main : theme.palette.success.main,
-                  fontWeight: 500,
-                  whiteSpace: "nowrap",
-                  verticalAlign: "middle",
-                  fontSize: "0.875rem",
-                  fontFamily: theme.typography.fontFamily || "Roboto, Helvetica, Arial, sans-serif",
-                }}
-              >
-                {formatCurrency(value)}
-              </TableCell>
-            );
-          })}
-        </TableRow>
-      );
-    },
-  ),
-  // STRICT EQUALITY CHECK: Prevents React from rendering unless these specific props change
-  (prevProps, nextProps) => {
-    return (
-      prevProps.isExpanded === nextProps.isExpanded &&
-      prevProps.isLoading === nextProps.isLoading &&
-      prevProps.node.id === nextProps.node.id &&
-      prevProps.maxVisibleLevel === nextProps.maxVisibleLevel &&
-      prevProps.index === nextProps.index &&
-      prevProps.theme === nextProps.theme
-    );
-  }
-);
-ActualTreeTableRow.displayName = "ActualTreeTableRow";
-
-export default function ReportAnalysisScreen() {
-  const { callApi } = useApi();
-  const dispatch = useDispatch();
-  const user = useSelector((state) => state.auth.user);
-  
-  const cachedNodes = useSelector((state) => state.analyticsCache?.nodes || {});
+const ReportBuilderComponent = ({
+  setShowComponentTitle,
+  templateId, // Passed from URL params
+  onBack, // Function to return to table
+}) => {
+  //   const outletContext = useOutletContext();
+  const dispatch = useAppDispatch();
+  const normalDispatch = useDispatch();
+  // const navigate = useNavigate();
   const showSnackBar = useCustomSnackbar();
 
-  const [reportsConfig, setReportsConfig] = useState([]);
-  const [selectedReportCode, setSelectedReportCode] = useState("");
-  const [selectedViewCode, setSelectedViewCode] = useState("");
+  const templateMeta = useAppSelector(selectTemplateMeta);
+  const reportMeta = useAppSelector(selectReportMeta);
+  const variants = useAppSelector(selectVariants);
+  const saving = useAppSelector(selectSaving);
+  const templateSaved = useAppSelector(selectTemplateSaved);
+  const templateForExport = useAppSelector(selectTemplateForExport);
+  const isFullscreen = useSelector((state) => state.ui.isComponentFullscreen);
 
-  const [data, setData] = useState([]);
-  const [expandedIds, setExpandedIds] = useState(new Map());
-  const [loadingIds, setLoadingIds] = useState(new Set());
-  const [isInitializing, setIsInitializing] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [editorLoading, setEditorLoading] = useState(false);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  // console.log("reportMeta :: ", reportMeta);
+  const componentRef = useRef(null);
+  const { callApi } = useApi();
 
-  const theme = useTheme();
-  
-  const tableContainerRef = useRef(null);
-  const screenRef = useRef(null); // Ref attached to the outermost Box for Full Screen mode
-
-  const activeReport = useMemo(() => {
-    return (
-      reportsConfig.find((r) => r.reportCode === selectedReportCode) || null
-    );
-  }, [reportsConfig, selectedReportCode]);
-
-  const activeView = useMemo(() => {
-    return (
-      activeReport?.views?.find((v) => v.viewCode === selectedViewCode) || null
-    );
-  }, [activeReport, selectedViewCode]);
-
-  const activeHierarchyConfig = activeView || DEFAULT_CONFIG;
-
-  // Sync fullscreen state with browser (catches 'Esc' key exits)
   useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
-    document.addEventListener("fullscreenchange", handleFullscreenChange);
-    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
-  }, []);
-
-  const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      screenRef.current?.requestFullscreen().catch((err) => {
-        console.error(`Error attempting to enable fullscreen: ${err.message}`);
-      });
-    } else {
-      document.exitFullscreen();
+    if (setShowComponentTitle) {
+      setShowComponentTitle(true);
     }
-  };
-
-  useEffect(() => {
-    const fetchConfig = async () => {
-      try {
-        const response = await callApi("/AS/analytics/config", {}, "GET");
-        const configData = Array.isArray(response)
-          ? response
-          : response?.data || [];
-        setReportsConfig(configData);
-      } catch (error) {
-        console.error("Failed to fetch analytics configurations", error);
-        showSnackBar("Failed to fetch analytics configurations", "error");
+    return () => {
+      // Show title when unmounting/going back
+      if (setShowComponentTitle) {
+        setShowComponentTitle(true);
       }
     };
-    if (user) fetchConfig();
-  }, [callApi, user, showSnackBar]);
+  }, [normalDispatch, setShowComponentTitle]);
 
+  // Initialization Logic
   useEffect(() => {
-    const loadRoot = async () => {
-      if (!selectedReportCode || !selectedViewCode) {
-        setData((prev) => (prev.length === 0 ? prev : []));
-        return;
-      }
-      setIsInitializing(true);
-      setData([]);
-      setExpandedIds(new Map());
+    const initializeEditor = async () => {
+      if (!callApi) return;
 
+      setEditorLoading(true);
+      dispatch(setLoading(true));
+
+      // Fetch Configs
       try {
-        const rootData = await fetchInitialData(
-          callApi,
-          showSnackBar,
-          selectedViewCode,
-          activeHierarchyConfig.hierarchy,
-          activeHierarchyConfig.availableMetrics,
-        );
-        setData(rootData);
-      } catch (error) {
-        console.error("Failed to load initial data", error);
-      } finally {
-        setIsInitializing(false);
+        const configs = await fetchTableConfigs(callApi);
+        if (configs) dispatch(setTableConfigs(configs));
+      } catch (err) {
+        showSnackBar("Failed to load system configurations.", "error");
       }
-    };
-    loadRoot();
-  }, [
-    selectedReportCode,
-    selectedViewCode,
-    activeHierarchyConfig,
-    callApi,
-    showSnackBar,
-  ]);
 
-  const appendChildrenToTree = useCallback((nodes, parentId, newChildren) => {
-    return nodes.map((node) => {
-      if (node.id === parentId) return { ...node, children: newChildren };
-      if (node.children)
-        return {
-          ...node,
-          children: appendChildrenToTree(node.children, parentId, newChildren),
-        };
-      return node;
-    });
-  }, []);
+      // Fetch Template if ID exists (Edit Mode)
+      if (templateId) {
+        try {
+          // Clear any previous history/state first
+          dispatch(resetTemplate());
+          dispatch(ActionCreators.clearHistory());
 
-  const handleToggle = useCallback(
-    async (node) => {
-      const isExpanded = expandedIds.has(node.id);
-
-      if (isExpanded) {
-        setExpandedIds((prev) => {
-          const next = new Map(prev);
-          next.delete(node.id);
-
-          const removeDescendants = (currentNode) => {
-            if (currentNode.children) {
-              currentNode.children.forEach((child) => {
-                next.delete(child.id);
-                removeDescendants(child);
-              });
-            }
-          };
-          removeDescendants(node);
-          return next;
-        });
-      } else {
-        if (!node.children && node.hasChildren) {
-          const cacheKey = `${selectedViewCode}_${node.id}`;
-          const cachedEntry = cachedNodes[cacheKey];
-          // 15 minutes TTL check
-          const isCacheValid = cachedEntry && (Date.now() - cachedEntry.timestamp < 900000);
-
-          if (isCacheValid) {
-            setData((prevData) =>
-              appendChildrenToTree(prevData, node.id, cachedEntry.data)
+          const result = await fetchTemplate(callApi, templateId);
+          if (result?.data?.template) {
+            dispatch(
+              setTemplate({
+                ...result.data.template,
+                variants: result.data.variants || [],
+              }),
             );
+            dispatch(setTemplateMeta({ templateId: templateId }));
+            dispatch(setTemplateSaved(true));
+
+            // Clear history AGAIN after setting initial data
+            // so the user can't "Undo" back to the blank state
+            dispatch(ActionCreators.clearHistory());
           } else {
-            setLoadingIds((prev) => new Set(prev).add(node.id));
-            try {
-              const children = await fetchChildrenData(
-                callApi,
-                showSnackBar,
-                node,
-                selectedViewCode,
-                activeHierarchyConfig.hierarchy,
-                activeHierarchyConfig.availableMetrics,
-              );
-              setData((prevData) =>
-                appendChildrenToTree(prevData, node.id, children),
-              );
-              dispatch({
-                type: "analyticsCache/cacheNode", 
-                payload: { key: cacheKey, data: children, timestamp: Date.now() }
-              });
-            } catch (error) {
-              console.error("Failed to fetch children", error);
-            } finally {
-              setLoadingIds((prev) => {
-                const next = new Set(prev);
-                next.delete(node.id);
-                return next;
-              });
-            }
+            showSnackBar("Template data not found.", "error");
+            if (onBack) onBack();
           }
+        } catch (err) {
+          console.error("Template Fetch Error:", err);
+          showSnackBar("Failed to load the template.", "error");
         }
-        
-        // Auto-Collapse Sibling Logic
-        setExpandedIds((prev) => {
-          const next = new Map();
-          prev.forEach((level, id) => {
-            if (level < node.level) {
-              next.set(id, level);
-            }
-          });
-          next.set(node.id, node.level);
-          return next;
-        });
+      } else {
+        // Create Mode: Reset Redux to clean state
+        console.log("Creating new template - Resetting State");
+
+        //  Reset the state to empty
+        dispatch(resetTemplate());
+
+        //  Clear the undo history so the old report is gone
+        dispatch(ActionCreators.clearHistory());
+      }
+
+      setEditorLoading(false);
+      dispatch(setLoading(false));
+    };
+
+    initializeEditor();
+
+    // Cleanup on Unmount
+    return () => {
+      dispatch(resetTemplate());
+      dispatch(ActionCreators.clearHistory());
+    };
+  }, [dispatch, callApi, templateId, showSnackBar, onBack]);
+
+  const toggleFullscreen = useCallback(() => {
+    // handleExportJSON();
+    if (isFullscreen) {
+      normalDispatch(exitComponentFullscreen());
+    } else {
+      normalDispatch(enterComponentFullscreen());
+    }
+  }, [isFullscreen, normalDispatch]);
+
+  const handleExportJSON = useCallback(() => {
+    const exportData = { template: templateForExport, variants };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${reportMeta.reportName || "report"}-template.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    // toast({
+    //   title: "Template exported",
+    //   description: "Your template has been downloaded as JSON",
+    // });
+  }, [templateForExport, variants, reportMeta?.reportName]);
+
+  const handleSaveTemplate = useCallback(async () => {
+    dispatch(setSaving(true));
+    const result = await saveTemplate(callApi, {
+      template: templateForExport,
+      variants,
+    });
+    dispatch(setSaving(false));
+
+    if (result.success) {
+      dispatch(setTemplateSaved(true));
+      if (result.templateId) {
+        dispatch(setTemplateMeta({ templateId: result.templateId }));
+      }
+      showSnackBar("Your template has been saved successfully", "success");
+    } else {
+      showSnackBar("Failed to save template", "error");
+    }
+  }, [callApi, dispatch, showSnackBar, templateForExport, variants]);
+
+  const handleSaveVariants = useCallback(async () => {
+    if (!templateSaved && !templateMeta.templateId) {
+      return;
+    }
+
+    dispatch(setSaving(true));
+
+    const result = await saveVariants(
+      callApi,
+      templateMeta.templateId,
+      variants,
+    );
+    dispatch(setSaving(false));
+  }, [templateSaved, templateMeta.templateId, dispatch, callApi, variants]);
+
+  const fetchTemplateByTemplateId = useCallback(
+    async (templateId) => {
+      try {
+        const result = await fetchTemplate(callApi, templateId);
+        return {
+          template: result?.data?.template,
+          variants: result?.data?.variants,
+        };
+      } catch (e) {
+        showSnackBar("Failed to fetch template.", "error");
+        console.error("Error in fetching template :: ", e);
+        return {};
       }
     },
-    [
-      expandedIds,
-      appendChildrenToTree,
-      activeHierarchyConfig.hierarchy,
-      activeHierarchyConfig.availableMetrics,
-      selectedViewCode,
-      callApi,
-      showSnackBar,
-      cachedNodes,
-      dispatch
-    ],
+    [callApi, showSnackBar],
   );
 
-  const visibleRows = useMemo(() => {
-    const rows = [];
-    const traverse = (nodes) => {
-      for (const node of nodes) {
-        rows.push(node);
-        if (expandedIds.has(node.id) && node.children) traverse(node.children);
-      }
-    };
-    traverse(data);
-    return rows;
-  }, [data, expandedIds]);
-
-  const maxVisibleLevel = useMemo(() => {
-    if (visibleRows.length === 0) return 0;
-    return Math.max(...visibleRows.map((row) => row.level));
-  }, [visibleRows]);
-
-  const visibleHierarchyLevels = activeHierarchyConfig.hierarchy.slice(
-    0,
-    maxVisibleLevel + 1,
+  const handleImport = useCallback(
+    (data) => {
+      dispatch(
+        setTemplate({ ...data.template, variants: data.variants || [] }),
+      );
+      dispatch(setSelectedCell(null));
+      dispatch(setTemplateSaved(false));
+    },
+    [dispatch],
   );
 
-  // --- VIRTUALIZATION ENGINE ---
-  const virtualizer = useVirtualizer({
-    count: visibleRows.length,
-    getScrollElement: () => tableContainerRef.current,
-    estimateSize: () => 40, // Matches height inside TableRow style
-    overscan: 5,
-  });
-
-  const virtualItems = virtualizer.getVirtualItems();
-  const totalColumnsCount = visibleHierarchyLevels.length + activeHierarchyConfig.availableMetrics.length;
-  
-  const paddingTop = virtualItems.length > 0 ? virtualItems[0].start : 0;
-  const paddingBottom = virtualItems.length > 0 ? virtualizer.getTotalSize() - virtualItems[virtualItems.length - 1].end : 0;
-
-  const isSetupComplete = selectedReportCode && selectedViewCode;
+  const handleGenerateTestData = useCallback(
+    (rowCount) => {
+      const testData = generateBulkTestData(rowCount);
+      dispatch(setTemplate(testData));
+      dispatch(setSelectedCell(null));
+      dispatch(setTemplateSaved(false));
+    },
+    [dispatch],
+  );
 
   return (
-    <Box
-      ref={screenRef}
-      sx={{
-        height: isFullscreen ? "100vh" : "calc(100vh - 220px)",
-        width: isFullscreen ? "100vw" : "100%",
-        display: "flex",
-        flexDirection: "column",
-        gap: 1.5,
-        p: isFullscreen ? 2 : 0,
-        // SOLID COLOR FALLBACK: Prevents native black full-screen backdrop from bleeding through
-        bgcolor: isFullscreen 
-            ? (theme.palette.mode === "dark" ? "#121212" : "#f4f5f9") 
-            : "transparent",
-        overflow: "hidden", // Prevents page scrollbars appearing in fullscreen
-      }}
-    >
-      {/* ================= UPPER BOX ================= */}
-      <Paper
-        elevation={0}
-        sx={{
-          p: 3,
-          borderRadius: 2,
-          boxShadow: "0 5px 10px rgba(0,0,0,0.2)",
-          border: 1,
-          borderColor: "divider",
-          display: "flex",
-          justifyContent: 'space-between',
-          flexDirection: "row",
-          flexShrink: 0, // Prevents upper box from squishing if screen is small
-        }}
+    <Box ref={componentRef} sx={{ position: "relative" }}>
+      <UndoRedoHandler />
+      {/* Loading Overlay */}
+      <Backdrop
+        sx={{ color: "#fff", zIndex: (theme) => theme.zIndex.drawer + 1 }}
+        open={editorLoading}
       >
-        <Box display="flex" alignItems="center" gap={2}>
-          <Box
-            sx={{
-              backgroundColor: "primary.main",
-              borderRadius: "10px",
-              width: 44,
-              height: 44,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <AnalyticsIcon
-              sx={{ color: "primary.contrastText", fontSize: 24 }}
-            />
-          </Box>
-
-          <Box sx={{ overflow: "hidden" }}>
-            <Typography
-              variant="h6"
-              sx={{ fontWeight: 700, color: "text.primary" }}
-            >
-              {activeReport?.displayName || "Financial Analytics"}
-            </Typography>
-            <Typography
-              variant="caption"
-              sx={{ color: "text.primary", }}
-            >
-              Dynamic Drill-Down Matrix
-            </Typography>
-          </Box>
+        <Box sx={{ textAlign: "center" }}>
+          <CircularProgress color="inherit" />
+          <Box mt={2}>Loading Editor...</Box>
         </Box>
-
-        <Box display="flex" alignItems="center" gap={2}>
-          <FormControl
-            size="small"
-            sx={{
-              minWidth: 400,
-              maxWidth: 500,
-              bgcolor: "background.paper",
-              borderRadius: 1,
-            }}
-          >
-            <InputLabel id="report-source-label" shrink>
-              Database Report
-            </InputLabel>
-            <Select
-              labelId="report-source-label"
-              value={selectedReportCode}
-              label="Database Report"
-              onChange={(e) => {
-                setSelectedReportCode(e.target.value);
-                setSelectedViewCode("");
-              }}
-              displayEmpty
-              notched
-              MenuProps={{ disablePortal: true }} // CRITICAL FIX: Stops dropdown from freezing in Full Screen mode
-            >
-              <MenuItem value="" disabled >
-                <Typography sx={{fontSize: '14px'}}> Please select a report</Typography>
-              </MenuItem>
-              {reportsConfig.map((report) => (
-                <MenuItem key={report.reportCode} value={report.reportCode}>
-                  <Typography sx={{fontSize: '14px'}}>{report.displayName}</Typography>
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-
-          <FormControl
-            size="small"
-            sx={{
-              minWidth: 300,
-              maxWidth: 350,
-              bgcolor: "background.paper",
-              borderRadius: 1,
-            }}
-          >
-            <InputLabel id="hierarchy-view-label" shrink>
-              Hierarchy View
-            </InputLabel>
-            <Select
-              labelId="hierarchy-view-label"
-              value={selectedViewCode}
-              label="Hierarchy View"
-              onChange={(e) => setSelectedViewCode(e.target.value)}
-              displayEmpty
-              notched
-              disabled={!activeReport}
-              MenuProps={{ disablePortal: true }} // CRITICAL FIX: Stops dropdown from freezing in Full Screen mode
-            >
-              <MenuItem value="" disabled>
-                <Typography sx={{fontSize: '14px'}}>Please select a view hierarchy</Typography>
-              </MenuItem>
-              {activeReport?.views?.map((view) => (
-                <MenuItem key={view.viewCode} value={view.viewCode}>
-                  <Typography sx={{fontSize: '14px'}}>{view.displayName}</Typography>
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-
-          {/* Full Screen Toggle Button */}
-          <Tooltip title={isFullscreen ? "Exit Full Screen" : "Full Screen"} arrow placement="bottom">
-            <IconButton 
-              onClick={toggleFullscreen} 
-              color="primary" 
-              sx={{ 
-                ml: 1,
-                border: 1,
-                borderColor: "divider",
-                bgcolor: "background.default",
-                "&:hover": { bgcolor: "action.hover" }
-              }}
-            >
-              {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
-            </IconButton>
-          </Tooltip>
-        </Box>
-      </Paper>
-
-      {/* ================= LOWER BOX ================= */}
-      <Paper
-        elevation={0}
+      </Backdrop>
+      <Box
         sx={{
-          flexGrow: 1,
           display: "flex",
           flexDirection: "column",
+          height: "100vh",
           overflow: "hidden",
-          borderRadius: 1,
-          boxShadow: "0 2px 10px rgba(0,0,0,0.03)",
-          border: 1,
-          borderColor: "divider",
         }}
       >
-        <Box
-          sx={{
-            borderBottom: 1,
-            borderColor: "divider",
-            px: 2,
-            py: 2,
-            minHeight: 44,
-            display: "flex",
-            alignItems: "center",
-          }}
-        >
-          {isSetupComplete && (
-            <Box display="flex" alignItems="center" gap={0.5}>
-              <Typography
-                variant="body2"
-                color="text.secondary"
-                sx={{ mr: 1, fontWeight: 500 }}
-              >
-                Path:
-              </Typography>
-              {activeHierarchyConfig.hierarchy.map((item, index) => {
-                const isActive = index <= maxVisibleLevel;
-                return (
-                  <Box key={index} display="flex" alignItems="center">
-                    <Box display="flex" alignItems="center" gap={1}>
-                      <Box
-                        sx={{
-                          width: 10,
-                          height: 10,
-                          borderRadius: "50%",
-                          bgcolor: isActive ? "primary.main" : "background.paper",
-                          border: "2px solid",
-                          borderColor: isActive ? "primary.main" : "divider",
-                        }}
-                      />
-                      <Typography
-                        variant="body2"
-                        sx={{
-                          fontWeight: isActive ? 600 : 500,
-                          color: isActive ? "text.primary" : "text.disabled",
-                          textTransform: "capitalize",
-                        }}
-                      >
-                        {item.replace("_", " ")}
-                      </Typography>
-                    </Box>
+        <TopToolbar
+          onBack={onBack}
+          // onExport={handleExportJSON}
+          onExport={() => setExportDialogOpen(true)}
+          onSave={handleSaveTemplate}
+          onSaveVariants={handleSaveVariants}
+          onImport={() => setImportDialogOpen(true)}
+          onGenerateTestData={handleGenerateTestData}
+          reportName={reportMeta?.reportName}
+          saving={saving}
+          templateSaved={templateSaved}
+          variantsCount={variants.length}
+          isFullscreen={isFullscreen}
+          toggleFullscreen={toggleFullscreen}
+        />
 
-                    {index < activeHierarchyConfig.hierarchy.length - 1 && (
-                      <Box
-                        sx={{
-                          backgroundColor: index < maxVisibleLevel ? theme.palette.primary.main : theme.palette.divider,
-                          width: 24, 
-                          height: 2, 
-                          mx: 1, 
-                          borderRadius: 1 
-                        }}
-                      />
-                    )}
-                  </Box>
-                );
-              })}
-            </Box>
-          )}
+        <Box sx={{ display: "flex", flex: 1, overflow: "hidden" }}>
+          <LeftPanel />
+          <ReportCanvas />
+          <RightPanel />
         </Box>
+      </Box>
 
-        <TableContainer
-          ref={tableContainerRef}
-          sx={{
-            flexGrow: 1,
-            bgcolor: "background.default",
-            position: "relative",
-            overflow: "auto",
-            willChange: "transform", // Hardware acceleration hint
-          }}
-        >
-          {!isSetupComplete && (
-            <Box
-              sx={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                zIndex: 10,
-              }}
-            >
-              <Box>
-                <DatasetIcon sx={{ fontSize: 64, color: "action.disabled", mb: 1 }} />
-              </Box>
-              <Typography variant="h6" color="text.secondary">
-                No Data to Display
-              </Typography>
-              <Typography variant="body2" color="text.disabled">
-                Please select both a database report and a hierarchy view above.
-              </Typography>
-            </Box>
-          )}
-
-          {isInitializing ? (
-            <Box
-              sx={{
-                height: "100%",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <CircularProgress size={32} color="primary" sx={{ mb: 1 }} />
-              <Typography variant="body2" color="text.secondary">
-                Executing Query ...
-              </Typography>
-            </Box>
-          ) : isSetupComplete ? (
-            <Table
-              stickyHeader
-              size="small"
-              sx={{ minWidth: 1000, tableLayout: "fixed" }}
-            >
-              <TableHead>
-                <TableRow>
-                  {visibleHierarchyLevels.map((levelName, index) => {
-                    const colWidth = index === 0 ? 280 : 200;
-                    return (
-                      <TableCell
-                        key={levelName}
-                        sx={{
-                          backgroundColor: theme.palette.purple?.[100] || theme.palette.primary.light,
-                          color: "text.primary",
-                          fontWeight: 700,
-                          borderRight: 1,
-                          borderColor: "divider",
-                          borderBottom: 2,
-                          py: 1,
-                          width: colWidth,
-                          minWidth: colWidth,
-                          maxWidth: colWidth,
-                        }}
-                      >
-                        {levelName.replace("_", " ").toUpperCase()}
-                      </TableCell>
-                    );
-                  })}
-                  {activeHierarchyConfig.availableMetrics.map((metric) => (
-                    <TableCell
-                      key={metric.logicalName}
-                      align="right"
-                      sx={{
-                        backgroundColor: theme.palette.purple?.[200] || theme.palette.primary.light,
-                        color: "text.primary",
-                        fontWeight: 700,
-                        borderRight: 1,
-                        borderColor: "divider",
-                        borderBottom: 2,
-                        py: 1,
-                        width: 160,
-                        minWidth: 160,
-                        maxWidth: 160,
-                      }}
-                    >
-                      {metric.displayName}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {/* Virtualization top spacing */}
-                {paddingTop > 0 && (
-                  <TableRow>
-                    <TableCell colSpan={totalColumnsCount} style={{ height: `${paddingTop}px`, padding: 0, border: "none" }} />
-                  </TableRow>
-                )}
-
-                {virtualItems.map((virtualRow) => {
-                  const row = visibleRows[virtualRow.index];
-                  return (
-                    <ActualTreeTableRow
-                      key={row.id}
-                      node={row}
-                      index={virtualRow.index}
-                      isExpanded={expandedIds.has(row.id)}
-                      isLoading={loadingIds.has(row.id)}
-                      onToggle={handleToggle}
-                      maxVisibleLevel={maxVisibleLevel}
-                      activeMetrics={activeHierarchyConfig.availableMetrics}
-                      theme={theme}
-                      ref={virtualizer.measureElement}
-                      data-index={virtualRow.index}
-                    />
-                  );
-                })}
-
-                {/* Virtualization bottom spacing */}
-                {paddingBottom > 0 && (
-                  <TableRow>
-                    <TableCell colSpan={totalColumnsCount} style={{ height: `${paddingBottom}px`, padding: 0, border: "none" }} />
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          ) : null}
-        </TableContainer>
-
-        <Box
-          sx={{
-            bgcolor: "background.paper",
-            borderTop: 1,
-            borderColor: "divider",
-            px: 2,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            minHeight: 40,
-          }}
-        >
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            <Box
-              sx={{
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                bgcolor: isSetupComplete ? "success.main" : "action.disabled",
-              }}
-            />
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              fontWeight={500}
-            >
-              {isSetupComplete ? "Connected & Synced" : "No Connection"}
-            </Typography>
-          </Box>
-          <Typography
-            variant="caption"
-            color="text.secondary"
-            fontWeight={500}
-            sx={{ mr: 2 }}
-          >
-            Showing {visibleRows.length} rows
-          </Typography>
-        </Box>
-      </Paper>
+      <ImportTemplateDialog
+        open={importDialogOpen}
+        onClose={() => setImportDialogOpen(false)}
+        onImport={handleImport}
+        fetchTemplateByTemplateId={fetchTemplateByTemplateId}
+      />
+      <ExportTemplateDialog
+        open={exportDialogOpen}
+        onClose={() => setExportDialogOpen(false)}
+        templateId={templateMeta?.templateId}
+        templateForExport={templateForExport}
+        variants={variants}
+        reportName={reportMeta?.reportName}
+        callApi={callApi}
+      />
     </Box>
   );
-}
+};
 
+export default ReportBuilderComponent;
