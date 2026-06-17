@@ -1,1 +1,41 @@
 
+  // --- REDUX FULLSCREEN LOGIC ---
+  const toggleFullscreen = useCallback(() => {
+    if (isFullscreen) {
+      dispatch(exitComponentFullscreen());
+      
+      // If exiting via the UI button, safely remove the fake history state
+      if (window.history.state && window.history.state.isFullscreenOverlay) {
+        window.history.back();
+      }
+    } else {
+      dispatch(enterComponentFullscreen());
+      
+      // Inject fake state to activate the browser's Back button
+      window.history.pushState({ isFullscreenOverlay: true }, "");
+    }
+  }, [isFullscreen, dispatch]);
+
+  // Intercept the Browser's Back Button
+  useEffect(() => {
+    const handlePopState = () => {
+      // When the back button is clicked, exit full screen instead of changing pages
+      if (isFullscreen) {
+        dispatch(exitComponentFullscreen());
+      }
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [isFullscreen, dispatch]);
+
+  // Handle 'Escape' key press to automatically revert Redux Fullscreen
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape" && isFullscreen) {
+        dispatch(exitComponentFullscreen());
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isFullscreen, dispatch]);
