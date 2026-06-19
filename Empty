@@ -1,1 +1,213 @@
+// ***************************************************** UnifiedLayout.jsx *********************************************** //
+
+import React, { useMemo, useState, useCallback, useEffect } from "react";
+import { Box, Paper, Typography } from "@mui/material";
+import { Outlet } from "react-router-dom";
+import { useSelector } from "react-redux";
+import LayoutHeader from "../components/LayoutHeader";
+import SideBar from "../components/SideBar/SideBar";
+import { getParentMenu } from "../utils/CommonUtilities";
+import { getIconComponent } from "../utils/IconUtils";
+import useNavigateToPage from "../hooks/useNavigateToPage";
+
+const drawerWidth = 270;
+
+const UnifiedLayout = () => {
+  const selectedMenuItem = useSelector((state) => state.menus.selectedMenuItem);
+  const menus = useSelector((state) => state.menus.menus);
+  const isComponentFullscreen = useSelector(
+    (state) => state.ui.isComponentFullscreen
+  );
+
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [showComponentTitle, setShowComponentTitle] = useState(true);
+  const { navigateToPage } = useNavigateToPage();
+
+  const handleDrawerToggle = useCallback(() => {
+    setMobileOpen((prev) => !prev);
+  }, []);
+
+  const title = useMemo(() => {
+    if (!selectedMenuItem) return "";
+
+    if (Object.hasOwn(selectedMenuItem, "hasChildren")) {
+      return selectedMenuItem.title;
+    }
+
+    const parentMenu = getParentMenu(selectedMenuItem, menus);
+    if (!parentMenu) return selectedMenuItem.title;
+
+    return `${parentMenu.title} > ${selectedMenuItem.title}`;
+  }, [menus, selectedMenuItem]);
+
+  useEffect(() => {
+    if (!showComponentTitle) {
+      setShowComponentTitle(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMenuItem]);
+
+  return (
+    <Box
+      sx={{
+        display: "flex",
+        minHeight: "100vh",
+      }}
+    >
+      {!isComponentFullscreen && (
+        <>
+          <LayoutHeader
+            drawerWidth={drawerWidth}
+            title={title}
+            navigateToPage={navigateToPage}
+            handleDrawerToggle={handleDrawerToggle}
+          />
+
+          <SideBar
+            drawerWidth={drawerWidth}
+            getIconComponent={getIconComponent}
+            mobileOpen={mobileOpen}
+            handleDrawerToggle={handleDrawerToggle}
+          />
+        </>
+      )}
+
+      <Box
+        component="main"
+        sx={{
+          flexGrow: 1,
+          width: isComponentFullscreen
+            ? "100%"
+            : { xs: "100%", md: `calc(100% - ${drawerWidth}px)` },
+          p: isComponentFullscreen ? 0 : 3,
+          pt: isComponentFullscreen ? 0 : 11,
+          minHeight: isComponentFullscreen ? "100vh" : "calc(100vh - 88px)",
+          transition: "all 0.3s ease-in-out",
+        }}
+      >
+        <Box>
+          {showComponentTitle && !isComponentFullscreen && (
+            <Paper
+              elevation={2}
+              sx={{
+                p: 2,
+                mb: 4,
+                borderRadius: 1,
+              }}
+            >
+              <Typography
+                variant="h4"
+                color="textPrimary"
+                sx={{
+                  fontWeight: 700,
+                  letterSpacing: "-0.02em",
+                }}
+              >
+                {title}
+              </Typography>
+            </Paper>
+          )}
+
+          <Box>
+            <Outlet context={{ setShowComponentTitle }} />
+          </Box>
+        </Box>
+      </Box>
+    </Box>
+  );
+};
+
+export default React.memo(UnifiedLayout);
+
+
+
+
+
+
+
+
+
+
+
+// ****************************************** AppRouter.jsx ********************************************* //
+
+import React, { useMemo, Suspense } from "react";
+import { createBrowserRouter, RouterProvider } from "react-router-dom";
+import { useSelector } from "react-redux";
+import PrivateRouter from "./PrivateRouter";
+
+// Page Components
+import Home from "../pages/Home";
+import NotFound from "../pages/NotFound";
+import ServerError from "../pages/ServerError";
+import UnifiedLayout from "../layout/UnifiedLayout"; // <-- Assumed path based on standard structures
+import SubmenuSelectionPage from "../pages/SubmenuSelectionPage";
+import { generateRouteObjects } from "./RouteGenerator";
+import Help from "../features/help/Help";
+import LaunchScreen from "../components/live-countdown/components/LaunchScreen";
+
+const PageLoader = () => (
+  <div
+    style={{
+      display: "flex",
+      height: "100vh",
+      justifyContent: "center",
+      alignItems: "center",
+    }}
+  >
+    Loading...
+  </div>
+);
+
+const AppRouter = () => {
+  const menus = useSelector((state) => state.menus.menus);
+
+  const router = useMemo(() => {
+    const dynamicRoutes = generateRouteObjects(menus || []);
+
+    const routeConfig = [
+      {
+        path: "/",
+        element: <LaunchScreen />,
+        errorElement: <ServerError />,
+      },
+      {
+        path: "/server-error",
+        element: <ServerError />,
+      },
+      // Protected Routes
+      {
+        element: <PrivateRouter />,
+        children: [
+          {
+            element: <UnifiedLayout />, // <-- Using the stable layout
+            children: [
+              { path: "/home", element: <Home /> },
+              { path: "/help", element: <Help /> },
+              {
+                path: "/choose-option/:mainMenuTitle",
+                element: <SubmenuSelectionPage />,
+              },
+              ...dynamicRoutes,
+            ],
+          },
+        ].filter(Boolean),
+      },
+      {
+        path: "*",
+        element: <NotFound />,
+      },
+    ];
+
+    return createBrowserRouter(routeConfig);
+  }, [menus]);
+
+  return (
+    <Suspense fallback={<PageLoader />}>
+      <RouterProvider router={router} />
+    </Suspense>
+  );
+};
+
+export default AppRouter;
 
