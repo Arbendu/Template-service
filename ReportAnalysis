@@ -25,11 +25,23 @@ import {
   Select,
   FormControl,
   InputLabel,
+  IconButton,
+  Tooltip,
+  Button,
 } from "@mui/material";
 import AnalyticsIcon from "@mui/icons-material/Analytics";
 import DatasetIcon from "@mui/icons-material/Dataset";
+import FullscreenIcon from "@mui/icons-material/Fullscreen";
+import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
 import { useTheme } from "@mui/material/styles";
 import { useVirtualizer } from "@tanstack/react-virtual";
+
+// --- REDUX UI ACTIONS ---
+// Update this path if your uiSlice is located somewhere else in your project
+import {
+  enterComponentFullscreen,
+  exitComponentFullscreen,
+} from "../../store/slices/uiSlice";
 
 // Assume these are available in your project structure
 import useApi from "../../hooks/useApi";
@@ -47,12 +59,16 @@ const DEFAULT_CONFIG = { hierarchy: [], availableMetrics: [] };
 
 // --- ACTUAL API LOGIC ---
 const fetchAnalyticsData = async (callApi, showSnackBar, payload) => {
+  console.log("payload:", payload);
+
   try {
     const responseData = await callApi(
       "/AS/analytics/drill-down",
       payload,
       "POST",
     );
+    console.log("Response data : ", responseData);
+
     return responseData?.data || [];
   } catch (error) {
     console.error("Error fetching analytics data:", error);
@@ -140,16 +156,23 @@ const ActualTreeTableRow = memo(
       return (
         <TableRow
           ref={ref}
+          hover
           // RAW INLINE STYLES: Bypasses Emotion CSS-in-JS lag and uses exact Theme colors
           style={{
             backgroundColor: isExpanded ? theme.palette.purple[100] : "inherit",
-            borderLeft: isExpanded ? `4px solid ${theme.palette.primary.main}` : "4px solid transparent",
+            borderLeft: isExpanded
+              ? `4px solid ${theme.palette.primary.main}`
+              : "4px solid transparent",
             height: "40px",
+            transition:
+              "background-color 0.2s ease-in-out, border-color 0.2s ease-in-out",
           }}
           {...props}
         >
           {/* Hierarchy Depth Columns */}
           {Array.from({ length: maxVisibleLevel + 1 }).map((_, colIndex) => {
+            const colWidth = colIndex === 0 ? 280 : 200;
+
             if (colIndex === node.level) {
               return (
                 <TableCell
@@ -158,7 +181,9 @@ const ActualTreeTableRow = memo(
                     borderRight: `1px solid ${theme.palette.divider}`,
                     borderBottom: `1px solid ${theme.palette.divider}`,
                     minWidth: "260px",
-                    padding: "12px 8px",
+                    width: colWidth,
+                    maxWidth: colWidth,
+                    padding: "4px 8px",
                     verticalAlign: "middle",
                   }}
                 >
@@ -191,14 +216,30 @@ const ActualTreeTableRow = memo(
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
-                          color: isExpanded ? theme.palette.primary.main : "inherit",
+                          color: isExpanded
+                            ? theme.palette.primary.main
+                            : "inherit",
                           fontSize: "14px",
                           lineHeight: 1,
+                          transition: "all 0.15s ease",
                         }}
+                        onMouseOver={(e) =>
+                          (e.currentTarget.style.transform = "scale(1.15)")
+                        }
+                        onMouseOut={(e) =>
+                          (e.currentTarget.style.transform = "scale(1)")
+                        }
                       >
                         {isLoading ? (
-                            <CircularProgress size={12} color={isExpanded ? "primary.dark" : "inherit"} />
-                          ) : isExpanded ? "-" : "+"}
+                          <CircularProgress
+                            size={12}
+                            color={isExpanded ? "primary.dark" : "inherit"}
+                          />
+                        ) : isExpanded ? (
+                          "-"
+                        ) : (
+                          "+"
+                        )}
                       </button>
                     ) : (
                       <div style={{ width: "28px" }} />
@@ -206,12 +247,16 @@ const ActualTreeTableRow = memo(
                     <span
                       style={{
                         fontWeight: isExpanded ? 700 : isRoot ? 600 : 400,
-                        color: isExpanded ? theme.palette.primary.main : "inherit",
+                        color: isExpanded
+                          ? theme.palette.primary.main
+                          : "inherit",
                         whiteSpace: "nowrap",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
                         fontSize: "0.875rem",
-                        fontFamily: theme.typography.fontFamily || "Roboto, Helvetica, Arial, sans-serif",
+                        fontFamily:
+                          theme.typography.fontFamily ||
+                          "Roboto, Helvetica, Arial, sans-serif",
                       }}
                     >
                       {node.name}
@@ -226,8 +271,9 @@ const ActualTreeTableRow = memo(
                 style={{
                   borderRight: `1px solid ${theme.palette.divider}`,
                   borderBottom: `1px solid ${theme.palette.divider}`,
-                  width: "80px",
-                  minWidth: "80px",
+                  width: colWidth,
+                  minWidth: colWidth,
+                  maxWidth: colWidth,
                   padding: 0,
                 }}
               />
@@ -244,13 +290,21 @@ const ActualTreeTableRow = memo(
                 style={{
                   borderRight: `1px solid ${theme.palette.divider}`,
                   borderBottom: `1px solid ${theme.palette.divider}`,
+                  width: "160px",
+                  minWidth: "160px",
+                  maxWidth: "160px",
                   padding: "8px 16px",
-                  color: value < 0 ? theme.palette.error.main : theme.palette.success.main,
+                  color:
+                    value < 0
+                      ? theme.palette.error.main
+                      : theme.palette.success.main,
                   fontWeight: 500,
                   whiteSpace: "nowrap",
                   verticalAlign: "middle",
                   fontSize: "0.875rem",
-                  fontFamily: theme.typography.fontFamily || "Roboto, Helvetica, Arial, sans-serif",
+                  fontFamily:
+                    theme.typography.fontFamily ||
+                    "Roboto, Helvetica, Arial, sans-serif",
                 }}
               >
                 {formatCurrency(value)}
@@ -261,7 +315,6 @@ const ActualTreeTableRow = memo(
       );
     },
   ),
-  // STRICT EQUALITY CHECK: Prevents React from rendering unless these specific props change
   (prevProps, nextProps) => {
     return (
       prevProps.isExpanded === nextProps.isExpanded &&
@@ -271,7 +324,7 @@ const ActualTreeTableRow = memo(
       prevProps.index === nextProps.index &&
       prevProps.theme === nextProps.theme
     );
-  }
+  },
 );
 ActualTreeTableRow.displayName = "ActualTreeTableRow";
 
@@ -279,7 +332,12 @@ export default function ReportAnalysisScreen() {
   const { callApi } = useApi();
   const dispatch = useDispatch();
   const user = useSelector((state) => state.auth.user);
-  
+
+  // Fullscreen state managed strictly via Redux UI Slice
+  const isFullscreen = useSelector(
+    (state) => state.ui?.isComponentFullscreen || false,
+  );
+
   const cachedNodes = useSelector((state) => state.analyticsCache?.nodes || {});
   const showSnackBar = useCustomSnackbar();
 
@@ -293,7 +351,7 @@ export default function ReportAnalysisScreen() {
   const [isInitializing, setIsInitializing] = useState(false);
 
   const theme = useTheme();
-  
+
   const tableContainerRef = useRef(null);
 
   const activeReport = useMemo(() => {
@@ -310,17 +368,69 @@ export default function ReportAnalysisScreen() {
 
   const activeHierarchyConfig = activeView || DEFAULT_CONFIG;
 
+  // --- REDUX FULLSCREEN LOGIC ---
+  const toggleFullscreen = useCallback(() => {
+    if (isFullscreen) {
+      dispatch(exitComponentFullscreen());
+
+      // If exiting via the UI button, safely remove the fake history state
+      if (window.history.state && window.history.state.isFullscreenOverlay) {
+        window.history.back();
+      }
+    } else {
+      dispatch(enterComponentFullscreen());
+      showSnackBar("To exit ful screen press Esc", "info");
+
+      // Inject fake state to activate the browser's Back button
+      window.history.pushState({ isFullscreenOverlay: true }, "");
+    }
+  }, [isFullscreen, dispatch]);
+
+  // Intercept the Browser's Back Button
+  useEffect(() => {
+    const handlePopState = () => {
+      // When the back button is clicked, exit full screen instead of changing pages
+      if (isFullscreen) {
+        dispatch(exitComponentFullscreen());
+      }
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [isFullscreen, dispatch]);
+
+  // Handle 'Escape' key press to automatically revert Redux Fullscreen
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "f" && isFullscreen) {
+        dispatch(exitComponentFullscreen());
+        if (window.history.state && window.history.state.isFullscreenOverlay) {
+          window.history.back();
+        }
+      }
+      if (e.key === "f" && !isFullscreen) {
+        dispatch(enterComponentFullscreen());
+        window.history.pushState({ isFullscreenOverlay: true }, "");
+        showSnackBar("To exit ful screen press 'F'", "info");
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isFullscreen, dispatch]);
+
   useEffect(() => {
     const fetchConfig = async () => {
       try {
         const response = await callApi("/AS/analytics/config", {}, "GET");
+        console.log("Response : ", response);
+
         const configData = Array.isArray(response)
           ? response
           : response?.data || [];
         setReportsConfig(configData);
       } catch (error) {
         console.error("Failed to fetch analytics configurations", error);
-        showSnackBar("Failed to fetch analytics configurations", "error");
+        showSnackBar("Error: " + error.title, "error");
       }
     };
     if (user) fetchConfig();
@@ -399,11 +509,12 @@ export default function ReportAnalysisScreen() {
           const cacheKey = `${selectedViewCode}_${node.id}`;
           const cachedEntry = cachedNodes[cacheKey];
           // 15 minutes TTL check
-          const isCacheValid = cachedEntry && (Date.now() - cachedEntry.timestamp < 900000);
+          const isCacheValid =
+            cachedEntry && Date.now() - cachedEntry.timestamp < 900000;
 
           if (isCacheValid) {
             setData((prevData) =>
-              appendChildrenToTree(prevData, node.id, cachedEntry.data)
+              appendChildrenToTree(prevData, node.id, cachedEntry.data),
             );
           } else {
             setLoadingIds((prev) => new Set(prev).add(node.id));
@@ -420,8 +531,12 @@ export default function ReportAnalysisScreen() {
                 appendChildrenToTree(prevData, node.id, children),
               );
               dispatch({
-                type: "analyticsCache/cacheNode", 
-                payload: { key: cacheKey, data: children, timestamp: Date.now() }
+                type: "analyticsCache/cacheNode",
+                payload: {
+                  key: cacheKey,
+                  data: children,
+                  timestamp: Date.now(),
+                },
               });
             } catch (error) {
               console.error("Failed to fetch children", error);
@@ -434,7 +549,7 @@ export default function ReportAnalysisScreen() {
             }
           }
         }
-        
+
         // Auto-Collapse Sibling Logic
         setExpandedIds((prev) => {
           const next = new Map();
@@ -457,7 +572,7 @@ export default function ReportAnalysisScreen() {
       callApi,
       showSnackBar,
       cachedNodes,
-      dispatch
+      dispatch,
     ],
   );
 
@@ -487,25 +602,46 @@ export default function ReportAnalysisScreen() {
   const virtualizer = useVirtualizer({
     count: visibleRows.length,
     getScrollElement: () => tableContainerRef.current,
-    estimateSize: () => 40, // Matches height inside TableRow style
-    overscan: 5, // Kept low to reduce off-screen render burden
+    estimateSize: () => 40,
+    overscan: 5,
   });
 
   const virtualItems = virtualizer.getVirtualItems();
-  const totalColumnsCount = visibleHierarchyLevels.length + activeHierarchyConfig.availableMetrics.length;
-  
+  const totalColumnsCount =
+    visibleHierarchyLevels.length +
+    activeHierarchyConfig.availableMetrics.length;
+
   const paddingTop = virtualItems.length > 0 ? virtualItems[0].start : 0;
-  const paddingBottom = virtualItems.length > 0 ? virtualizer.getTotalSize() - virtualItems[virtualItems.length - 1].end : 0;
+  const paddingBottom =
+    virtualItems.length > 0
+      ? virtualizer.getTotalSize() - virtualItems[virtualItems.length - 1].end
+      : 0;
 
   const isSetupComplete = selectedReportCode && selectedViewCode;
 
   return (
     <Box
       sx={{
-        height: "calc(100vh - 220px)",
         display: "flex",
         flexDirection: "column",
         gap: 1.5,
+        // DYNAMIC REDUX FULLSCREEN STYLES
+        ...(isFullscreen
+          ? {
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              width: "100vw",
+              height: "100vh",
+              zIndex: 1299, // Safely below standard MUI dropdowns (1300), but over everything else
+              //bgcolor: theme.palette.mode === "dark" ? "#121212" : "#f4f5f9",
+              p: 2,
+            }
+          : {
+              height: "calc(100vh - 220px)",
+            }),
       }}
     >
       {/* ================= UPPER BOX ================= */}
@@ -518,8 +654,9 @@ export default function ReportAnalysisScreen() {
           border: 1,
           borderColor: "divider",
           display: "flex",
-          justifyContent: 'space-between',
+          justifyContent: "space-between",
           flexDirection: "row",
+          flexShrink: 0,
         }}
       >
         <Box display="flex" alignItems="center" gap={2}>
@@ -546,10 +683,7 @@ export default function ReportAnalysisScreen() {
             >
               {activeReport?.displayName || "Financial Analytics"}
             </Typography>
-            <Typography
-              variant="caption"
-              sx={{ color: "text.primary", }}
-            >
+            <Typography variant="caption" sx={{ color: "text.primary" }}>
               Dynamic Drill-Down Matrix
             </Typography>
           </Box>
@@ -579,12 +713,17 @@ export default function ReportAnalysisScreen() {
               displayEmpty
               notched
             >
-              <MenuItem value="" disabled >
-                <Typography sx={{fontSize: '14px'}}> Please select a report</Typography>
+              <MenuItem value="" disabled>
+                <Typography sx={{ fontSize: "14px" }}>
+                  {" "}
+                  Please select a report
+                </Typography>
               </MenuItem>
               {reportsConfig.map((report) => (
                 <MenuItem key={report.reportCode} value={report.reportCode}>
-                  <Typography sx={{fontSize: '14px'}}>{report.displayName}</Typography>
+                  <Typography sx={{ fontSize: "14px" }}>
+                    {report.displayName}
+                  </Typography>
                 </MenuItem>
               ))}
             </Select>
@@ -612,11 +751,15 @@ export default function ReportAnalysisScreen() {
               disabled={!activeReport}
             >
               <MenuItem value="" disabled>
-                <Typography sx={{fontSize: '14px'}}>Please select a view hierarchy</Typography>
+                <Typography sx={{ fontSize: "14px" }}>
+                  Please select a view hierarchy
+                </Typography>
               </MenuItem>
               {activeReport?.views?.map((view) => (
                 <MenuItem key={view.viewCode} value={view.viewCode}>
-                  <Typography sx={{fontSize: '14px'}}>{view.displayName}</Typography>
+                  <Typography sx={{ fontSize: "14px" }}>
+                    {view.displayName}
+                  </Typography>
                 </MenuItem>
               ))}
             </Select>
@@ -660,7 +803,6 @@ export default function ReportAnalysisScreen() {
               </Typography>
               {activeHierarchyConfig.hierarchy.map((item, index) => {
                 const isActive = index <= maxVisibleLevel;
-                const isCurrent = index === maxVisibleLevel;
                 return (
                   <Box key={index} display="flex" alignItems="center">
                     <Box display="flex" alignItems="center" gap={1}>
@@ -669,7 +811,9 @@ export default function ReportAnalysisScreen() {
                           width: 10,
                           height: 10,
                           borderRadius: "50%",
-                          bgcolor: isActive ? "primary.main" : "background.paper",
+                          bgcolor: isActive
+                            ? "primary.main"
+                            : "background.paper",
                           border: "2px solid",
                           borderColor: isActive ? "primary.main" : "divider",
                         }}
@@ -689,11 +833,14 @@ export default function ReportAnalysisScreen() {
                     {index < activeHierarchyConfig.hierarchy.length - 1 && (
                       <Box
                         sx={{
-                          backgroundColor: index < maxVisibleLevel ? theme.palette.primary.main : theme.palette.divider,
-                          width: 24, 
-                          height: 2, 
-                          mx: 1, 
-                          borderRadius: 1 
+                          backgroundColor:
+                            index < maxVisibleLevel
+                              ? theme.palette.primary.main
+                              : theme.palette.divider,
+                          width: 24,
+                          height: 2,
+                          mx: 1,
+                          borderRadius: 1,
                         }}
                       />
                     )}
@@ -711,7 +858,7 @@ export default function ReportAnalysisScreen() {
             bgcolor: "background.default",
             position: "relative",
             overflow: "auto",
-            willChange: "transform", // Hardware acceleration hint
+            willChange: "transform",
           }}
         >
           {!isSetupComplete && (
@@ -729,9 +876,11 @@ export default function ReportAnalysisScreen() {
                 zIndex: 10,
               }}
             >
-              <DatasetIcon
-                 sx={{ fontSize: 64, color: "action.disabled", mb: 1 }}
-              />
+              <Box>
+                <DatasetIcon
+                  sx={{ fontSize: 64, color: "action.disabled", mb: 1 }}
+                />
+              </Box>
               <Typography variant="h6" color="text.secondary">
                 No Data to Display
               </Typography>
@@ -760,39 +909,53 @@ export default function ReportAnalysisScreen() {
             <Table
               stickyHeader
               size="small"
-              sx={{ minWidth: 1000, tableLayout: "auto" }}
+              sx={{ minWidth: 1000, tableLayout: "fixed" }}
             >
               <TableHead>
                 <TableRow>
-                  {visibleHierarchyLevels.map((levelName, index) => (
-                    <TableCell
-                      key={levelName}
-                      sx={{
-                        backgroundColor: theme.palette.purple?.[100] || theme.palette.primary.light,
-                        color: "text.primary",
-                        fontWeight: 700,
-                        borderRight: 1,
-                        borderColor: "divider",
-                        borderBottom: 2,
-                        py: 1,
-                        width: index === 0 ? 280 : "auto",
-                      }}
-                    >
-                      {levelName.replace("_", " ").toUpperCase()}
-                    </TableCell>
-                  ))}
+                  {visibleHierarchyLevels.map((levelName, index) => {
+                    //const colWidth = index === 0 ? 100 : 200;
+                    return (
+                      <TableCell
+                        key={levelName}
+                        sx={{
+                          backgroundColor:
+                            theme.palette.purple?.[100] ||
+                            theme.palette.primary.light,
+                          color: "text.primary",
+                          fontWeight: 700,
+                          borderRight: 1,
+                          borderColor: "divider",
+                          borderBottom: 2,
+                          py: 1,
+                          whiteSpace: "nowrap",
+                          //width: colWidth,
+                          //minWidth: colWidth,
+                          //maxWidth: colWidth,
+                        }}
+                      >
+                        {levelName.replace("_", " ").toUpperCase()}
+                      </TableCell>
+                    );
+                  })}
                   {activeHierarchyConfig.availableMetrics.map((metric) => (
                     <TableCell
                       key={metric.logicalName}
                       align="right"
                       sx={{
-                        backgroundColor: theme.palette.purple?.[200] || theme.palette.primary.light,
+                        backgroundColor:
+                          theme.palette.purple?.[200] ||
+                          theme.palette.primary.light,
                         color: "text.primary",
                         fontWeight: 700,
                         borderRight: 1,
                         borderColor: "divider",
                         borderBottom: 2,
                         py: 1,
+                        whiteSpace: "nowrap",
+                        //width: 160,
+                        //minWidth: 160,
+                        //maxWidth: 160,
                       }}
                     >
                       {metric.displayName}
@@ -801,10 +964,17 @@ export default function ReportAnalysisScreen() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {/* Top Padding Row */}
+                {/* Virtualization top spacing */}
                 {paddingTop > 0 && (
                   <TableRow>
-                    <TableCell colSpan={totalColumnsCount} style={{ height: `${paddingTop}px`, padding: 0, border: "none" }} />
+                    <TableCell
+                      colSpan={totalColumnsCount}
+                      style={{
+                        height: `${paddingTop}px`,
+                        padding: 0,
+                        border: "none",
+                      }}
+                    />
                   </TableRow>
                 )}
 
@@ -827,10 +997,17 @@ export default function ReportAnalysisScreen() {
                   );
                 })}
 
-                {/* Bottom Padding Row */}
+                {/* Virtualization bottom spacing */}
                 {paddingBottom > 0 && (
                   <TableRow>
-                    <TableCell colSpan={totalColumnsCount} style={{ height: `${paddingBottom}px`, padding: 0, border: "none" }} />
+                    <TableCell
+                      colSpan={totalColumnsCount}
+                      style={{
+                        height: `${paddingBottom}px`,
+                        padding: 0,
+                        border: "none",
+                      }}
+                    />
                   </TableRow>
                 )}
               </TableBody>
@@ -851,26 +1028,129 @@ export default function ReportAnalysisScreen() {
           }}
         >
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            <Box
+            {/* <Box
               sx={{
                 width: 8,
                 height: 8,
                 borderRadius: "50%",
                 bgcolor: isSetupComplete ? "success.main" : "action.disabled",
               }}
-            />
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              fontWeight={500}
-            >
-              {isSetupComplete ? "Connected & Synced" : "No Connection"}
-            </Typography>
+            /> */}
+            {!isFullscreen ? (
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  // bgcolor: theme.palette.purple[200],
+                  // borderRadius: 4,
+                  // pl: 1,
+                  // pr: 1,
+                  // height: 30
+                }}
+              >
+                <Tooltip
+                  onClick={toggleFullscreen}
+                  sx={{ cursor: "pointer" }}
+                  // title={
+                  //   isFullscreen ? "Exit Full Screen (Esc)" : "Full Screen"
+                  // }
+                  // arrow
+                  // placement="bottom"
+                >
+                  {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
+                </Tooltip>
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  fontWeight={200}
+                  p={1}
+                >
+                  Press
+                  <Box
+                    component="kbd"
+                    sx={{
+                      display: "inline-flex",
+                      height: 20,
+                      minWidth: 20,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      borderRadius: "6px",
+                      border: "1px solid",
+                      borderColor: theme.palette.grey[400],
+                      backgroundColor: "background.paper",
+                      px: 0.75,
+                      mx: 0.5,
+                      fontFamily: "monospace",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      boxShadow: "0 1px 0 0 rgba(0,0,0,0.2)",
+                    }}
+                  >
+                    F
+                  </Box>
+                </Typography>
+                {/* REDUX Full Screen Toggle Button */}
+              </Box>
+            ) : (
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                {/* REDUX Full Screen Toggle Button */}
+                <Tooltip
+                  onClick={toggleFullscreen}
+                  sx={{ cursor: "pointer" }}
+                  title={
+                    isFullscreen ? "Exit Full Screen (Esc)" : "Full Screen"
+                  }
+                  arrow
+                  placement="top"
+                >
+                  {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
+                </Tooltip>
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  fontWeight={200}
+                  p={1}
+                >
+                  Press
+                  <Box
+                    component="kbd"
+                    sx={{
+                      display: "inline-flex",
+                      height: 20,
+                      minWidth: 20,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      borderRadius: "6px",
+                      border: "1px solid",
+                      borderColor: theme.palette.grey[400],
+                      backgroundColor: "background.paper",
+                      px: 0.75,
+                      mx: 0.5,
+                      fontFamily: "monospace",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      boxShadow: "0 1px 0 0 rgba(0,0,0,0.2)",
+                    }}
+                  >
+                    F
+                  </Box>
+                  to exit full screen
+                </Typography>
+              </Box>
+            )}
           </Box>
           <Typography
             variant="caption"
             color="text.secondary"
             fontWeight={500}
+            sx={{ mr: 2 }}
           >
             Showing {visibleRows.length} rows
           </Typography>
@@ -879,6 +1159,7 @@ export default function ReportAnalysisScreen() {
     </Box>
   );
 }
+
 
 
 
