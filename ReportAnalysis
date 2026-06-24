@@ -1,6 +1,6 @@
 // **************************************************************************** ReportAnalysisScreen ****************************************************************************** //
 
-import {
+import React, {
   useState,
   useMemo,
   useCallback,
@@ -46,7 +46,6 @@ import {
 // Assume these are available in your project structure
 import useApi from "../../hooks/useApi";
 import useCustomSnackbar from "../../utils/useCustomSnackbar";
-
 // --- CONFIGURATION & CONSTANTS ---
 const formatCurrency = (value) => {
   return new Intl.NumberFormat("en-US", {
@@ -171,7 +170,7 @@ const ActualTreeTableRow = memo(
         >
           {/* Hierarchy Depth Columns */}
           {Array.from({ length: maxVisibleLevel + 1 }).map((_, colIndex) => {
-            const colWidth = colIndex === 0 ? 280 : 200;
+            //const colWidth = colIndex === 0 ? 280 : 200;
 
             if (colIndex === node.level) {
               return (
@@ -181,8 +180,9 @@ const ActualTreeTableRow = memo(
                     borderRight: `1px solid ${theme.palette.divider}`,
                     borderBottom: `1px solid ${theme.palette.divider}`,
                     minWidth: "260px",
-                    width: colWidth,
-                    maxWidth: colWidth,
+                    whiteSpace: "nowrap",
+                    // width: colWidth,
+                    // maxWidth: colWidth,
                     padding: "4px 8px",
                     verticalAlign: "middle",
                   }}
@@ -271,9 +271,10 @@ const ActualTreeTableRow = memo(
                 style={{
                   borderRight: `1px solid ${theme.palette.divider}`,
                   borderBottom: `1px solid ${theme.palette.divider}`,
-                  width: colWidth,
-                  minWidth: colWidth,
-                  maxWidth: colWidth,
+                  whiteSpace: "nowrap",
+                  // width: colWidth,
+                  // minWidth: colWidth,
+                  // maxWidth: colWidth,
                   padding: 0,
                 }}
               />
@@ -379,7 +380,7 @@ export default function ReportAnalysisScreen() {
       }
     } else {
       dispatch(enterComponentFullscreen());
-      showSnackBar("To exit ful screen press Esc", "info");
+      showSnackBar("To exit ful screen press 'F'", "info");
 
       // Inject fake state to activate the browser's Back button
       window.history.pushState({ isFullscreenOverlay: true }, "");
@@ -764,6 +765,18 @@ export default function ReportAnalysisScreen() {
               ))}
             </Select>
           </FormControl>
+
+          <IconButton>
+            <Tooltip
+              onClick={toggleFullscreen}
+              sx={{ cursor: "pointer" }}
+              title={isFullscreen ? "Exit Full Screen (Esc)" : "Full Screen"}
+              arrow
+              placement="bottom"
+            >
+              {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
+            </Tooltip>
+          </IconButton>
         </Box>
       </Paper>
 
@@ -790,65 +803,188 @@ export default function ReportAnalysisScreen() {
             minHeight: 44,
             display: "flex",
             alignItems: "center",
+            //justifyContent: "space-between",
           }}
         >
-          {isSetupComplete && (
-            <Box display="flex" alignItems="center" gap={0.5}>
-              <Typography
-                variant="body2"
-                color="text.secondary"
-                sx={{ mr: 1, fontWeight: 500 }}
-              >
-                Path:
-              </Typography>
-              {activeHierarchyConfig.hierarchy.map((item, index) => {
-                const isActive = index <= maxVisibleLevel;
-                return (
-                  <Box key={index} display="flex" alignItems="center">
-                    <Box display="flex" alignItems="center" gap={1}>
-                      <Box
-                        sx={{
-                          width: 10,
-                          height: 10,
-                          borderRadius: "50%",
-                          bgcolor: isActive
-                            ? "primary.main"
-                            : "background.paper",
-                          border: "2px solid",
-                          borderColor: isActive ? "primary.main" : "divider",
-                        }}
-                      />
-                      <Typography
-                        variant="body2"
-                        sx={{
-                          fontWeight: isActive ? 600 : 500,
-                          color: isActive ? "text.primary" : "text.disabled",
-                          textTransform: "capitalize",
-                        }}
-                      >
-                        {item.replace("_", " ")}
-                      </Typography>
-                    </Box>
+          <Box>
+            {isSetupComplete && (
+              <Box display="flex" alignItems="center" gap={0.5}>
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{ mr: 1, fontWeight: 500 }}
+                >
+                  Path:
+                </Typography>
+                {activeHierarchyConfig.hierarchy.map((item, index) => {
+                  const isActive = index <= maxVisibleLevel;
+                  return (
+                    <Box key={index} display="flex" alignItems="center">
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <Box
+                          sx={{
+                            width: 10,
+                            height: 10,
+                            borderRadius: "50%",
+                            bgcolor: isActive
+                              ? "primary.main"
+                              : "background.paper",
+                            border: "2px solid",
+                            borderColor: isActive ? "primary.main" : "divider",
+                          }}
+                        />
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            fontWeight: isActive ? 600 : 500,
+                            color: isActive ? "text.primary" : "text.disabled",
+                            textTransform: "capitalize",
+                          }}
+                        >
+                          {item.replace("_", " ")}
+                        </Typography>
+                      </Box>
 
-                    {index < activeHierarchyConfig.hierarchy.length - 1 && (
-                      <Box
-                        sx={{
-                          backgroundColor:
-                            index < maxVisibleLevel
-                              ? theme.palette.primary.main
-                              : theme.palette.divider,
-                          width: 24,
-                          height: 2,
-                          mx: 1,
-                          borderRadius: 1,
-                        }}
-                      />
-                    )}
+                      {index < activeHierarchyConfig.hierarchy.length - 1 && (
+                        <Box
+                          sx={{
+                            backgroundColor:
+                              index < maxVisibleLevel
+                                ? theme.palette.primary.main
+                                : theme.palette.divider,
+                            width: 24,
+                            height: 2,
+                            mx: 1,
+                            borderRadius: 1,
+                          }}
+                        />
+                      )}
+                    </Box>
+                  );
+                })}
+              </Box>
+            )}
+          </Box>
+
+          {/* <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            {!isFullscreen ? (
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  bgcolor: theme.palette.purple[100],
+                  borderRadius: 1,
+                  boxShadow: "0 2px 2px 0 rgba(0, 0, 0, 0.2)",
+                  pl: 1,
+                  pr: 1,
+                  p: 1,
+                  height: 30,
+                }}
+              >
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  fontWeight={200}
+                  p={1}
+                >
+                  <b>Full screen</b>
+                  <Box
+                    component="kbd"
+                    sx={{
+                      display: "inline-flex",
+                      height: 20,
+                      minWidth: 20,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      borderRadius: "6px",
+                      border: "1px solid",
+                      borderColor: theme.palette.grey[400],
+                      backgroundColor: "background.paper",
+                      px: 0.75,
+                      mx: 0.5,
+                      fontFamily: "monospace",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      boxShadow: "0 1px 0 0 rgba(0,0,0,0.2)",
+                    }}
+                  >
+                    F
                   </Box>
-                );
-              })}
-            </Box>
-          )}
+                </Typography>
+                <Tooltip
+                  onClick={toggleFullscreen}
+                  sx={{ cursor: "pointer" }}
+                  title={
+                    isFullscreen ? "Exit Full Screen (Esc)" : "Full Screen"
+                  }
+                  arrow
+                  placement="bottom"
+                >
+                  {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
+                </Tooltip>
+                //    REDUX Full Screen Toggle Button
+              </Box>
+            ) : (
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  bgcolor: theme.palette.purple[100],
+                  borderRadius: 1,
+                  boxShadow: "0 2px 2px 0 rgba(0, 0, 0, 0.2)",
+                  pl: 1,
+                  pr: 1,
+                  p: 1,
+                  height: 30,
+                }}
+              >
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  fontWeight={200}
+                  p={1}
+                >
+                  <b>Exit full screen</b>
+                  <Box
+                    component="kbd"
+                    sx={{
+                      display: "inline-flex",
+                      height: 20,
+                      minWidth: 20,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      borderRadius: "6px",
+                      border: "1px solid",
+                      borderColor: theme.palette.grey[400],
+                      backgroundColor: "background.paper",
+                      px: 0.75,
+                      mx: 0.5,
+                      fontFamily: "monospace",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      boxShadow: "0 1px 0 0 rgba(0,0,0,0.2)",
+                    }}
+                  >
+                    F
+                  </Box>
+                </Typography>
+                <Tooltip
+                  onClick={toggleFullscreen}
+                  sx={{ cursor: "pointer" }}
+                  title={
+                    isFullscreen ? "Exit Full Screen (Esc)" : "Full Screen"
+                  }
+                  arrow
+                  placement="bottom"
+                >
+                  {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
+                </Tooltip>
+                //  REDUX Full Screen Toggle Button
+              </Box>
+            )}
+          </Box> */}
         </Box>
 
         <TableContainer
@@ -1022,130 +1158,11 @@ export default function ReportAnalysisScreen() {
             borderColor: "divider",
             px: 2,
             display: "flex",
-            justifyContent: "space-between",
+            justifyContent: "flex-end",
             alignItems: "center",
             minHeight: 40,
           }}
         >
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            {/* <Box
-              sx={{
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                bgcolor: isSetupComplete ? "success.main" : "action.disabled",
-              }}
-            /> */}
-            {!isFullscreen ? (
-              <Box
-                sx={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  // bgcolor: theme.palette.purple[200],
-                  // borderRadius: 4,
-                  // pl: 1,
-                  // pr: 1,
-                  // height: 30
-                }}
-              >
-                <Tooltip
-                  onClick={toggleFullscreen}
-                  sx={{ cursor: "pointer" }}
-                  // title={
-                  //   isFullscreen ? "Exit Full Screen (Esc)" : "Full Screen"
-                  // }
-                  // arrow
-                  // placement="bottom"
-                >
-                  {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
-                </Tooltip>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  fontWeight={200}
-                  p={1}
-                >
-                  Press
-                  <Box
-                    component="kbd"
-                    sx={{
-                      display: "inline-flex",
-                      height: 20,
-                      minWidth: 20,
-                      alignItems: "center",
-                      justifyContent: "center",
-                      borderRadius: "6px",
-                      border: "1px solid",
-                      borderColor: theme.palette.grey[400],
-                      backgroundColor: "background.paper",
-                      px: 0.75,
-                      mx: 0.5,
-                      fontFamily: "monospace",
-                      fontSize: 11,
-                      fontWeight: 600,
-                      boxShadow: "0 1px 0 0 rgba(0,0,0,0.2)",
-                    }}
-                  >
-                    F
-                  </Box>
-                </Typography>
-                {/* REDUX Full Screen Toggle Button */}
-              </Box>
-            ) : (
-              <Box
-                sx={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                {/* REDUX Full Screen Toggle Button */}
-                <Tooltip
-                  onClick={toggleFullscreen}
-                  sx={{ cursor: "pointer" }}
-                  title={
-                    isFullscreen ? "Exit Full Screen (Esc)" : "Full Screen"
-                  }
-                  arrow
-                  placement="top"
-                >
-                  {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
-                </Tooltip>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  fontWeight={200}
-                  p={1}
-                >
-                  Press
-                  <Box
-                    component="kbd"
-                    sx={{
-                      display: "inline-flex",
-                      height: 20,
-                      minWidth: 20,
-                      alignItems: "center",
-                      justifyContent: "center",
-                      borderRadius: "6px",
-                      border: "1px solid",
-                      borderColor: theme.palette.grey[400],
-                      backgroundColor: "background.paper",
-                      px: 0.75,
-                      mx: 0.5,
-                      fontFamily: "monospace",
-                      fontSize: 11,
-                      fontWeight: 600,
-                      boxShadow: "0 1px 0 0 rgba(0,0,0,0.2)",
-                    }}
-                  >
-                    F
-                  </Box>
-                  to exit full screen
-                </Typography>
-              </Box>
-            )}
-          </Box>
           <Typography
             variant="caption"
             color="text.secondary"
@@ -1159,6 +1176,7 @@ export default function ReportAnalysisScreen() {
     </Box>
   );
 }
+
 
 
 
