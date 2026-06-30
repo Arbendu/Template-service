@@ -101,3 +101,40 @@ const ActualTreeTableRow = memo(
 
 // ... [Keep rest of the file unchanged] ...
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+onClick={(e) => {
+  e.stopPropagation(); // Prevents row toggle when clicking the copy button
+
+  // Map through children and combine GLCODE and Amount with a Tab (\t)
+  // \t ensures it pastes cleanly into two columns in Excel/Spreadsheets
+  const combinedData = node.children
+    .map((child) => `${child.name}\t${child.TotalAmount}`)
+    .join("\n");
+
+  console.log("Copied Data:\n", combinedData);
+
+  // Write to clipboard exactly ONCE
+  navigator.clipboard.writeText(combinedData)
+    .then(() => {
+      // It's best practice to show the snackbar AFTER the promise resolves
+      showSnackBar("Text copied successfully", "success");
+    })
+    .catch((err) => {
+      console.error("Failed to copy text: ", err);
+      showSnackBar("Failed to copy text", "error");
+    });
+}}
+
