@@ -1,56 +1,19 @@
-// ************************************************ /analytics/drill-down *************************************************** //
-
-
-// If reportDate 2026-03-30
-
-{ 
-  "viewCode": "PNL_MAIN_VIEW",
-  "reportDate": "2026-03-30", 
-  "dimensions": ["PnlCategory"], 
-  "metrics": ["TotalAmount"], 
-  "filters": [] 
-}
-
-
-// Response
-{
-    "meta": {
-        "status": "SUCCESS",
-        "level": "PnlCategory",
-        "rowCount": 2,
-        "executionTimeMs": 582
-    },
-    "data": [
-        {
-            "id": "pnlcategory_expense",
-            "name": "EXPENSE",
-            "TotalAmount": 5.077723042E7,
-            "hasChildren": true
-        },
-        {
-            "id": "pnlcategory_income",
-            "name": "INCOME",
-            "TotalAmount": -1.2301548084E8,
-            "hasChildren": true
-        }
-    ]
-}
+// ********************************************** analyticsApi.js ********************************************** //
 
 
 
 
-// If reportDate was 2026-03-31
 
-// Response
-{
-    "meta": {
-        "status": "SUCCESS",
-        "level": "PnlCategory",
-        "rowCount": 0,
-        "executionTimeMs": 91
-    },
-    "data": []
-}
+
+
+
+
+
+
+
+
+
+// ************************************************ ReportAnalysisScreen ***************************************** //
 
 
 
