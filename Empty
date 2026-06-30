@@ -116,20 +116,24 @@ const ActualTreeTableRow = memo(
 
 
 onClick={(e) => {
-  e.stopPropagation(); // Prevents row toggle when clicking the copy button
+  e.stopPropagation();
 
-  // Map through children and combine GLCODE and Amount with a Tab (\t)
-  // \t ensures it pastes cleanly into two columns in Excel/Spreadsheets
+  // 1. Find the length of the longest GLCODE name in this specific group
+  const maxLength = Math.max(...node.children.map(child => child.name.length));
+
+  // 2. Map through and pad every name to match the longest one, plus a 5-space buffer
   const combinedData = node.children
-    .map((child) => `${child.name}\t${child.TotalAmount}`)
+    .map((child) => {
+      // padEnd adds spaces until the string reaches the target length
+      const alignedName = child.name.padEnd(maxLength + 5, " ");
+      return `${alignedName}${child.TotalAmount}`;
+    })
     .join("\n");
 
   console.log("Copied Data:\n", combinedData);
 
-  // Write to clipboard exactly ONCE
   navigator.clipboard.writeText(combinedData)
     .then(() => {
-      // It's best practice to show the snackbar AFTER the promise resolves
       showSnackBar("Text copied successfully", "success");
     })
     .catch((err) => {
@@ -137,4 +141,5 @@ onClick={(e) => {
       showSnackBar("Failed to copy text", "error");
     });
 }}
+
 
