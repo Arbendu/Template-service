@@ -143,3 +143,34 @@ onClick={(e) => {
 }}
 
 
+
+
+
+
+onClick={(e) => {
+  e.stopPropagation(); // Prevents row toggle when clicking the copy button
+
+  // 1. Format the parent (Headcode) row
+  // We use node.name and node.TotalAmount for the parent
+  const headcodeRow = `${node.name}\t${node.TotalAmount || ""}`;
+
+  // 2. Format the children (GLCODEs) rows
+  const childrenRows = node.children
+    .map((child) => `${child.name}\t${child.TotalAmount || ""}`)
+    .join("\n");
+
+  // 3. Combine them with a newline (\n) in between
+  const combinedData = `${headcodeRow}\n${childrenRows}`;
+
+  console.log("Copied Data:\n", combinedData);
+
+  // 4. Send the whole block to the clipboard
+  navigator.clipboard.writeText(combinedData)
+    .then(() => {
+      showSnackBar("Text copied successfully", "success");
+    })
+    .catch((err) => {
+      console.error("Failed to copy text: ", err);
+      showSnackBar("Failed to copy text", "error");
+    });
+}}
