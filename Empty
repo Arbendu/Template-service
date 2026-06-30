@@ -116,31 +116,33 @@ const ActualTreeTableRow = memo(
 
 
 onClick={(e) => {
-  e.stopPropagation();
+                              e.stopPropagation(); // Prevents row toggle when clicking the copy button
+                              // Maps through children and joins them by a new line.
+                              // Change '\n' to ', ' if you prefer a comma-separated list.
+                              const combinedData = node?.children
+                                .map(
+                                  (child) =>
+                                    `${child.name}\t${child.TotalAmount}`,
+                                )
+                                .join("\n");
 
-  // 1. Find the length of the longest GLCODE name in this specific group
-  const maxLength = Math.max(...node.children.map(child => child.name.length));
+                              console.log("Copied Data:\n", combinedData);
 
-  // 2. Map through and pad every name to match the longest one, plus a 5-space buffer
-  const combinedData = node.children
-    .map((child) => {
-      // padEnd adds spaces until the string reaches the target length
-      const alignedName = child.name.padEnd(maxLength + 5, " ");
-      return `${alignedName}${child.TotalAmount}`;
-    })
-    .join("\n");
-
-  console.log("Copied Data:\n", combinedData);
-
-  navigator.clipboard.writeText(combinedData)
-    .then(() => {
-      showSnackBar("Text copied successfully", "success");
-    })
-    .catch((err) => {
-      console.error("Failed to copy text: ", err);
-      showSnackBar("Failed to copy text", "error");
-    });
-}}
+                              // Write to clipboard exactly ONCE
+                              navigator.clipboard
+                                .writeText(combinedData)
+                                .then(() => {
+                                  // It's best practice to show the snackbar AFTER the promise resolves
+                                  showSnackBar(
+                                    "Text copied successfully",
+                                    "success",
+                                  );
+                                })
+                                .catch((err) => {
+                                  console.error("Failed to copy text: ", err);
+                                  showSnackBar("Failed to copy text", "error");
+                                });
+                            }}
 
 
 
