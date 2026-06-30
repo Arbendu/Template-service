@@ -1,105 +1,56 @@
-// ************************************************ ReportAnalysisScreen *************************************************** //
-
-// File: ReportAnalysisScreen.jsx
-
-{virtualItems.map((virtualRow) => {
-  const row = visibleRows[virtualRow.index];
-  return (
-    <ActualTreeTableRow
-      key={row.id}
-      node={row}
-      index={virtualRow.index}
-      isExpanded={expandedIds.has(row.id)}
-      isLoading={loadingIds.has(row.id)}
-      onToggle={handleToggle}
-      maxVisibleLevel={maxVisibleLevel}
-      activeMetrics={activeHierarchyConfig.availableMetrics}
-      theme={theme}
-      ref={virtualizer.measureElement}
-      data-index={virtualRow.index}
-      
-      // ADD THIS LINE: Pass the fullscreen state down
-      isFullscreen={isFullscreen} 
-    />
-  );
-})}
+// ************************************************ /analytics/drill-down *************************************************** //
 
 
+// If reportDate 2026-03-30
+
+{ 
+  "viewCode": "PNL_MAIN_VIEW",
+  "reportDate": "2026-03-30", 
+  "dimensions": ["PnlCategory"], 
+  "metrics": ["TotalAmount"], 
+  "filters": [] 
+}
+
+
+// Response
+{
+    "meta": {
+        "status": "SUCCESS",
+        "level": "PnlCategory",
+        "rowCount": 2,
+        "executionTimeMs": 582
+    },
+    "data": [
+        {
+            "id": "pnlcategory_expense",
+            "name": "EXPENSE",
+            "TotalAmount": 5.077723042E7,
+            "hasChildren": true
+        },
+        {
+            "id": "pnlcategory_income",
+            "name": "INCOME",
+            "TotalAmount": -1.2301548084E8,
+            "hasChildren": true
+        }
+    ]
+}
 
 
 
 
+// If reportDate was 2026-03-31
 
-
-
-
-
-// ************************************************ ActualTreeTableRow ***************************************************** //
-
-
-// File: components/ActualTreeTableRow.jsx
-
-// 1. ADD THESE IMPORTS at the top
-import ContentCopyIcon from "@mui/icons-material/ContentCopy";
-import { IconButton, Tooltip } from "@mui/material";
-
-// 2. ADD 'isFullscreen' to the destructured props
-const ActualTreeTableRow = memo(
-  forwardRef(
-    (
-      {
-        node,
-        isExpanded,
-        isLoading,
-        onToggle,
-        maxVisibleLevel,
-        index,
-        activeMetrics,
-        theme,
-        isFullscreen, // <--- ADD THIS HERE
-        ...props
-      },
-      ref,
-    ) => {
-
-      // ... [Keep existing code until the span rendering the node.name] ...
-
-      <span
-        style={{
-          fontWeight: isExpanded ? 700 : isRoot ? 600 : 400,
-          color: isExpanded ? theme.palette.primary.main : "inherit",
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          fontSize: "0.875rem",
-          fontFamily: theme.typography.fontFamily || "Roboto, Helvetica, Arial, sans-serif",
-        }}
-      >
-        {node.name}
-      </span>
-      
-      {/* 3. ADD THIS COPY BUTTON BLOCK */}
-      {/* Checks if it's fullscreen, expanded, data is loaded, and targets HeadCode (level 1) */}
-      {isFullscreen && isExpanded && !isLoading && node.level === 1 && node.children && (
-        <Tooltip title="Copy all GLCODEs" placement="top" arrow>
-          <IconButton
-            size="small"
-            onClick={(e) => {
-              e.stopPropagation(); // Prevents row toggle when clicking the copy button
-              // Maps through children and joins them by a new line. 
-              // Change '\n' to ', ' if you prefer a comma-separated list.
-              const glCodes = node.children.map(child => child.name).join('\n');
-              navigator.clipboard.writeText(glCodes);
-            }}
-            sx={{ ml: 1, padding: "2px" }}
-          >
-            <ContentCopyIcon sx={{ fontSize: 16, color: "text.secondary" }} />
-          </IconButton>
-        </Tooltip>
-      )}
-      {/* END COPY BUTTON BLOCK */}
-
-// ... [Keep rest of the file unchanged] ...
+// Response
+{
+    "meta": {
+        "status": "SUCCESS",
+        "level": "PnlCategory",
+        "rowCount": 0,
+        "executionTimeMs": 91
+    },
+    "data": []
+}
 
 
 
@@ -109,70 +60,3 @@ const ActualTreeTableRow = memo(
 
 
 
-
-
-
-
-
-
-onClick={(e) => {
-                              e.stopPropagation(); // Prevents row toggle when clicking the copy button
-                              // Maps through children and joins them by a new line.
-                              // Change '\n' to ', ' if you prefer a comma-separated list.
-                              const combinedData = node?.children
-                                .map(
-                                  (child) =>
-                                    `${child.name}\t${child.TotalAmount}`,
-                                )
-                                .join("\n");
-
-                              console.log("Copied Data:\n", combinedData);
-
-                              // Write to clipboard exactly ONCE
-                              navigator.clipboard
-                                .writeText(combinedData)
-                                .then(() => {
-                                  // It's best practice to show the snackbar AFTER the promise resolves
-                                  showSnackBar(
-                                    "Text copied successfully",
-                                    "success",
-                                  );
-                                })
-                                .catch((err) => {
-                                  console.error("Failed to copy text: ", err);
-                                  showSnackBar("Failed to copy text", "error");
-                                });
-                            }}
-
-
-
-
-
-
-onClick={(e) => {
-  e.stopPropagation(); // Prevents row toggle when clicking the copy button
-
-  // 1. Format the parent (Headcode) row
-  // We use node.name and node.TotalAmount for the parent
-  const headcodeRow = `${node.name}\t${node.TotalAmount || ""}`;
-
-  // 2. Format the children (GLCODEs) rows
-  const childrenRows = node.children
-    .map((child) => `${child.name}\t${child.TotalAmount || ""}`)
-    .join("\n");
-
-  // 3. Combine them with a newline (\n) in between
-  const combinedData = `${headcodeRow}\n${childrenRows}`;
-
-  console.log("Copied Data:\n", combinedData);
-
-  // 4. Send the whole block to the clipboard
-  navigator.clipboard.writeText(combinedData)
-    .then(() => {
-      showSnackBar("Text copied successfully", "success");
-    })
-    .catch((err) => {
-      console.error("Failed to copy text: ", err);
-      showSnackBar("Failed to copy text", "error");
-    });
-}}
