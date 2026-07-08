@@ -1,184 +1,20 @@
-// ********************************************** ReportAnalysisHeader ********************************************** //
+2.3	Drill down Enquiry
+User to have following options in order to view drill down data.
+•	Date – User to choose the date for enquiry
+•	Report – User to select report either YSA, PNL or NWSA from the drop down.
+•	Head – User will enter the code of the for which the data is required.
+•	Scope – User to choose if the data required is for Bank Level, Circle Level or for a particular Branch.
+o	Bank Level – the data will be shown for the consolidated for bank level.
+o	Circle Level – the user needs to choose the circle for which the data is required. A drop down to be provided for selecting the circle.
+o	Branch Level– in case user want to view data for a particular branch only, an input will be provided in enter the branch code.
+•	Once the above required details are entered, user can fetch the data.
+ 
+2.4	Data
+The system will fetch the data for the selected parameters and display in following manner.
+•	Bank Level Enquiry – in case of bank level enquiry the drill down will be available in Geography>Circle > CGL> Product > Branch. Sample data will be as below.
 
-import React from "react";
-// ADD TextField to imports, REMOVE IconButton, Tooltip, Fullscreen icons
-import { Box, Paper, Typography, FormControl, InputLabel, Select, MenuItem, TextField } from "@mui/material";
-import AnalyticsIcon from "@mui/icons-material/Analytics";
-
-export default function ReportAnalysisHeader({
-  activeReport,
-  reportsConfig,
-  selectedReportCode,
-  setSelectedReportCode,
-  selectedViewCode,
-  setSelectedViewCode,
-  // ADD NEW PROPS for Date Picker
-  selectedDate,
-  setSelectedDate
-}) {
-  return (
-    <Paper
-      elevation={0}
-      sx={{
-        p: 3,
-        borderRadius: 2,
-        boxShadow: "0 5px 10px rgba(0,0,0,0.2)",
-        border: 1,
-        borderColor: "divider",
-        display: "flex",
-        justifyContent: "space-between",
-        flexDirection: "row",
-        flexShrink: 0,
-      }}
-    >
-      {/* Left Side: Title & Icon */}
-      <Box display="flex" alignItems="center" gap={2}>
-        <Box sx={{ backgroundColor: "primary.main", borderRadius: "10px", width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <AnalyticsIcon sx={{ color: "primary.contrastText", fontSize: 24 }} />
-        </Box>
-        <Box sx={{ overflow: "hidden" }}>
-          <Typography variant="h6" sx={{ fontWeight: 700, color: "text.primary" }}>
-            {activeReport?.displayName || "Financial Analytics"}
-          </Typography>
-          <Typography variant="caption" sx={{ color: "text.primary" }}>
-            Dynamic Drill-Down Matrix
-          </Typography>
-        </Box>
-      </Box>
-
-      {/* Right Side: Controls */}
-      <Box display="flex" alignItems="center" gap={2}>
-        {/* CHANGED minWidth to 250 */}
-        <FormControl size="small" sx={{ minWidth: 250, maxWidth: 350, bgcolor: "background.paper", borderRadius: 1 }}>
-          <InputLabel id="report-source-label" shrink>Database Report</InputLabel>
-          <Select
-            labelId="report-source-label"
-            value={selectedReportCode}
-            label="Database Report"
-            onChange={(e) => {
-              setSelectedReportCode(e.target.value);
-              setSelectedViewCode("");
-            }}
-            displayEmpty
-            notched
-          >
-            <MenuItem value="" disabled><Typography sx={{ fontSize: "14px" }}>Please select a report</Typography></MenuItem>
-            {reportsConfig.map((report) => (
-              <MenuItem key={report.reportCode} value={report.reportCode}>
-                <Typography sx={{ fontSize: "14px" }}>{report.displayName}</Typography>
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-
-        {/* CHANGED minWidth to 250 */}
-        <FormControl size="small" sx={{ minWidth: 250, maxWidth: 350, bgcolor: "background.paper", borderRadius: 1 }}>
-          <InputLabel id="hierarchy-view-label" shrink>Hierarchy View</InputLabel>
-          <Select
-            labelId="hierarchy-view-label"
-            value={selectedViewCode}
-            label="Hierarchy View"
-            onChange={(e) => setSelectedViewCode(e.target.value)}
-            displayEmpty
-            notched
-            disabled={!activeReport}
-          >
-            <MenuItem value="" disabled><Typography sx={{ fontSize: "14px" }}>Please select a view hierarchy</Typography></MenuItem>
-            {activeReport?.views?.map((view) => (
-              <MenuItem key={view.viewCode} value={view.viewCode}>
-                <Typography sx={{ fontSize: "14px" }}>{view.displayName}</Typography>
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-
-        {/* ADDED Date Picker here */}
-        <TextField
-          type="date"
-          size="small"
-          label="Report Date"
-          InputLabelProps={{ shrink: true }}
-          value={selectedDate}
-          onChange={(e) => setSelectedDate(e.target.value)}
-          sx={{ bgcolor: "background.paper", minWidth: 160 }}
-        />
-      </Box>
-    </Paper>
-  );
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// ************************************************ ReportAnalysisScreen ***************************************** //
-
-// ADD Fullscreen icons and IconButton/Tooltip to imports at the top
-import FullscreenIcon from "@mui/icons-material/Fullscreen";
-import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
-import { IconButton, Tooltip } from "@mui/material";
-
-// ... [Inside ReportAnalysisScreen component] ...
-
-  return (
-    <Box sx={{ /* ... existing container styles ... */ }}>
-      
-      {/* 1. UPDATE Header Props */}
-      <ReportAnalysisHeader
-        activeReport={activeReport}
-        reportsConfig={reportsConfig}
-        selectedReportCode={selectedReportCode}
-        setSelectedReportCode={setSelectedReportCode}
-        selectedViewCode={selectedViewCode}
-        setSelectedViewCode={setSelectedViewCode}
-        // Pass date state instead of fullscreen state
-        selectedDate={selectedDate}
-        setSelectedDate={setSelectedDate}
-      />
-
-      <Paper elevation={0} sx={{ /* ... existing paper styles ... */ }}>
-        
-        {/* 2. UPDATE PATH BOX */}
-        <Box 
-          sx={{ 
-            borderBottom: 1, 
-            borderColor: "divider", 
-            px: 2, 
-            py: 1.5, 
-            minHeight: 44, 
-            display: "flex", 
-            alignItems: "center",
-            justifyContent: "space-between" 
-          }}
-        >
-          <Box>
-             <HierarchyPath activeHierarchyConfig={activeHierarchyConfig} maxVisibleLevel={maxVisibleLevel} isSetupComplete={isSetupComplete} />
-          </Box>
-          
-          {/* REPLACED Date Picker with Full Screen Button */}
-          <IconButton onClick={toggleFullscreen}>
-            <Tooltip title={isFullscreen ? "Exit Full Screen (Esc)" : "Full Screen"} arrow placement="bottom">
-              {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
-            </Tooltip>
-          </IconButton>
-        </Box>
-
-        {/* ... [Keep TableContainer and everything below unchanged] ... */}
-
-
-
-
-
-
-
-
-
+ 
+•	Circle Level Enquiry – in case of Circle level enquiry the drill down will be available in CGL> Product > Branch. Sample data will be as below.
+ 
+•	Branch Level Enquiry – in case of Branch level enquiry the drill down will be available in CGL> Product. Sample data will be as below.
+ 
