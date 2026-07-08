@@ -3,7 +3,13 @@
 
 export const fetchAnalyticsData = async (callApi, showSnackBar, payload) => {
   try {
-    const responseData = await callApi("/AS/analytics/drill-down", payload, "POST");
+    const responseData = await callApi(
+      "/AS/analytics/drill-down",
+      payload,
+      "POST",
+    );
+    console.log("Drill-down payload: ", payload);
+    
     return responseData?.data || [];
   } catch (error) {
     console.error("Error fetching analytics data:", error);
@@ -11,10 +17,18 @@ export const fetchAnalyticsData = async (callApi, showSnackBar, payload) => {
   }
 };
 
-export const fetchInitialData = async (callApi, showSnackBar, viewCode, hierarchy, metrics) => {
+export const fetchInitialData = async (
+  callApi,
+  showSnackBar,
+  viewCode,
+  hierarchy,
+  metrics,
+  reportDate
+) => {
   const rootDimension = hierarchy[0];
   const payload = {
     viewCode: viewCode,
+    reportDate: reportDate,
     dimensions: [rootDimension],
     metrics: metrics.map((m) => m.logicalName),
     filters: [],
@@ -28,7 +42,15 @@ export const fetchInitialData = async (callApi, showSnackBar, viewCode, hierarch
   }));
 };
 
-export const fetchChildrenData = async (callApi, showSnackBar, parentNode, viewCode, hierarchy, metrics) => {
+export const fetchChildrenData = async (
+  callApi,
+  showSnackBar,
+  parentNode,
+  viewCode,
+  hierarchy,
+  metrics,
+  reportDate
+) => {
   const childLevel = parentNode.level + 1;
   const nextDimension = hierarchy[childLevel];
 
@@ -43,6 +65,7 @@ export const fetchChildrenData = async (callApi, showSnackBar, parentNode, viewC
 
   const payload = {
     viewCode: viewCode,
+    reportDate: reportDate,
     dimensions: [nextDimension],
     metrics: metrics.map((m) => m.logicalName),
     filters: currentFilters,
@@ -64,16 +87,34 @@ export const fetchChildrenData = async (callApi, showSnackBar, parentNode, viewC
 
 
 
+
 // ************************ components/ActualTreeTableRow.jsx **************************** //
 
 
 import React, { memo, forwardRef } from "react";
 import { TableRow, TableCell, CircularProgress } from "@mui/material";
 import { formatCurrency } from "../utils/analyticsConstants";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
+import { IconButton, Tooltip } from "@mui/material";
 
 const ActualTreeTableRow = memo(
   forwardRef(
-    ({ node, isExpanded, isLoading, onToggle, maxVisibleLevel, index, activeMetrics, theme, ...props }, ref) => {
+    (
+      {
+        node,
+        isExpanded,
+        isLoading,
+        onToggle,
+        maxVisibleLevel,
+        index,
+        activeMetrics,
+        theme,
+        isFullscreen,
+        showSnackBar,
+        ...props
+      },
+      ref,
+    ) => {
       const isRoot = node.level === 0;
 
       return (
@@ -81,10 +122,15 @@ const ActualTreeTableRow = memo(
           ref={ref}
           hover
           style={{
-            backgroundColor: isExpanded ? theme.palette.purple?.[100] || "inherit" : "inherit",
-            borderLeft: isExpanded ? `4px solid ${theme.palette.primary.main}` : "4px solid transparent",
+            backgroundColor: isExpanded
+              ? theme.palette.purple?.[100] || "inherit"
+              : "inherit",
+            borderLeft: isExpanded
+              ? `4px solid ${theme.palette.primary.main}`
+              : "4px solid transparent",
             height: "40px",
-            transition: "background-color 0.2s ease-in-out, border-color 0.2s ease-in-out",
+            transition:
+              "background-color 0.2s ease-in-out, border-color 0.2s ease-in-out",
           }}
           {...props}
         >
@@ -96,16 +142,28 @@ const ActualTreeTableRow = memo(
                   style={{
                     borderRight: `1px solid ${theme.palette.divider}`,
                     borderBottom: `1px solid ${theme.palette.divider}`,
-                    minWidth: "260px",
+                    //minWidth: "260px",
                     whiteSpace: "nowrap",
-                    padding: "4px 8px",
+                    padding: "4px 4px",
                     verticalAlign: "middle",
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", paddingLeft: `${node.level * 20 + 8}px`, paddingRight: "12px", width: "100%", boxSizing: "border-box" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      paddingLeft: `${node.level * 10 + 8}px`,
+                      paddingRight: "16px",
+                      width: "100%",
+                      boxSizing: "border-box",
+                    }}
+                  >
                     {node.hasChildren ? (
                       <button
-                        onClick={(e) => { e.stopPropagation(); onToggle(node); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onToggle(node);
+                        }}
                         disabled={isLoading}
                         style={{
                           marginRight: "8px",
@@ -119,15 +177,30 @@ const ActualTreeTableRow = memo(
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
-                          color: isExpanded ? theme.palette.primary.main : "inherit",
+                          color: isExpanded
+                            ? theme.palette.primary.main
+                            : "inherit",
                           fontSize: "14px",
                           lineHeight: 1,
                           transition: "all 0.15s ease",
                         }}
-                        onMouseOver={(e) => (e.currentTarget.style.transform = "scale(1.15)")}
-                        onMouseOut={(e) => (e.currentTarget.style.transform = "scale(1)")}
+                        onMouseOver={(e) =>
+                          (e.currentTarget.style.transform = "scale(1.15)")
+                        }
+                        onMouseOut={(e) =>
+                          (e.currentTarget.style.transform = "scale(1)")
+                        }
                       >
-                        {isLoading ? <CircularProgress size={12} color={isExpanded ? "primary.dark" : "inherit"} /> : isExpanded ? "-" : "+"}
+                        {isLoading ? (
+                          <CircularProgress
+                            size={12}
+                            color={isExpanded ? "primary.dark" : "inherit"}
+                          />
+                        ) : isExpanded ? (
+                          "-"
+                        ) : (
+                          "+"
+                        )}
                       </button>
                     ) : (
                       <div style={{ width: "28px" }} />
@@ -135,16 +208,72 @@ const ActualTreeTableRow = memo(
                     <span
                       style={{
                         fontWeight: isExpanded ? 700 : isRoot ? 600 : 400,
-                        color: isExpanded ? theme.palette.primary.main : "inherit",
+                        color: isExpanded
+                          ? theme.palette.primary.main
+                          : "inherit",
                         whiteSpace: "nowrap",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
                         fontSize: "0.875rem",
-                        fontFamily: theme.typography.fontFamily || "Roboto, Helvetica, Arial, sans-serif",
+                        fontFamily:
+                          theme.typography.fontFamily ||
+                          "Roboto, Helvetica, Arial, sans-serif",
                       }}
                     >
                       {node.name}
                     </span>
+
+                    {/* Checks if it's fullscreen, expanded, data is loaded, and targets HeadCode (level 1) */}
+                    {isFullscreen &&
+                      isExpanded &&
+                      !isLoading &&
+                      node.level === 1 &&
+                      node.children && (
+                        <Tooltip title="Copy all GLCODEs" placement="top" arrow>
+                          <IconButton
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation(); // Prevents row toggle when clicking the copy button
+
+                              // 1. Format the parent (Headcode) row
+                              // We use node.name and node.TotalAmount for the parent
+                              const headcodeRow = `${node.name}\t${node.TotalAmount || ""}`;
+
+                              // 2. Format the children (GLCODEs) rows
+                              const childrenRows = node.children
+                                .map(
+                                  (child) =>
+                                    `${child.name}\t${child.TotalAmount || ""}`,
+                                )
+                                .join("\n");
+
+                              // 3. Combine them with a newline (\n) in between
+                              const combinedData = `${headcodeRow}\n${childrenRows}`;
+
+                              console.log("Copied Data:\n", combinedData);
+
+                              // 4. Send the whole block to the clipboard
+                              navigator.clipboard
+                                .writeText(combinedData)
+                                .then(() => {
+                                  showSnackBar(
+                                    "Text copied successfully",
+                                    "success",
+                                  );
+                                })
+                                .catch((err) => {
+                                  console.error("Failed to copy text: ", err);
+                                  showSnackBar("Failed to copy text", "error");
+                                });
+                            }}
+                            sx={{ ml: 2, padding: "2px" }}
+                          >
+                            <ContentCopyIcon
+                              sx={{ fontSize: 16, color: "text.secondary" }}
+                            />
+                          </IconButton>
+                        </Tooltip>
+                      )}
                   </div>
                 </TableCell>
               );
@@ -171,16 +300,21 @@ const ActualTreeTableRow = memo(
                 style={{
                   borderRight: `1px solid ${theme.palette.divider}`,
                   borderBottom: `1px solid ${theme.palette.divider}`,
-                  width: "160px",
-                  minWidth: "160px",
-                  maxWidth: "160px",
-                  padding: "8px 16px",
-                  color: value < 0 ? theme.palette.error.main : theme.palette.success.main,
+                  // width: "160px",
+                  // minWidth: "160px",
+                  // maxWidth: "160px",
+                  //padding: "8px 16px",
+                  color:
+                    value < 0
+                      ? theme.palette.error.main
+                      : theme.palette.success.main,
                   fontWeight: 500,
                   whiteSpace: "nowrap",
                   verticalAlign: "middle",
                   fontSize: "0.875rem",
-                  fontFamily: theme.typography.fontFamily || "Roboto, Helvetica, Arial, sans-serif",
+                  fontFamily:
+                    theme.typography.fontFamily ||
+                    "Roboto, Helvetica, Arial, sans-serif",
                 }}
               >
                 {formatCurrency(value)}
@@ -189,7 +323,7 @@ const ActualTreeTableRow = memo(
           })}
         </TableRow>
       );
-    }
+    },
   ),
   (prevProps, nextProps) => {
     return (
@@ -198,13 +332,15 @@ const ActualTreeTableRow = memo(
       prevProps.node.id === nextProps.node.id &&
       prevProps.maxVisibleLevel === nextProps.maxVisibleLevel &&
       prevProps.index === nextProps.index &&
-      prevProps.theme === nextProps.theme
+      prevProps.theme === nextProps.theme &&
+      prevProps.isFullscreen === nextProps.isFullscreen
     );
-  }
+  },
 );
 
 ActualTreeTableRow.displayName = "ActualTreeTableRow";
 export default ActualTreeTableRow;
+
 
 
 
@@ -220,13 +356,21 @@ import React from "react";
 import { Box, Typography } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 
-export default function HierarchyPath({ activeHierarchyConfig, maxVisibleLevel, isSetupComplete }) {
+export default function HierarchyPath({
+  activeHierarchyConfig,
+  maxVisibleLevel,
+  isSetupComplete,
+}) {
   const theme = useTheme();
   if (!isSetupComplete) return null;
 
   return (
     <Box display="flex" alignItems="center" gap={0.5}>
-      <Typography variant="body2" color="text.secondary" sx={{ mr: 1, fontWeight: 500 }}>
+      <Typography
+        variant="body2"
+        color="text.secondary"
+        sx={{ mr: 1, fontWeight: 500 }}
+      >
         Path:
       </Typography>
       {activeHierarchyConfig.hierarchy.map((item, index) => {
@@ -258,7 +402,10 @@ export default function HierarchyPath({ activeHierarchyConfig, maxVisibleLevel, 
             {index < activeHierarchyConfig.hierarchy.length - 1 && (
               <Box
                 sx={{
-                  backgroundColor: index < maxVisibleLevel ? theme.palette.primary.main : theme.palette.divider,
+                  backgroundColor:
+                    index < maxVisibleLevel
+                      ? theme.palette.primary.main
+                      : theme.palette.divider,
                   width: 24,
                   height: 2,
                   mx: 1,
@@ -281,13 +428,25 @@ export default function HierarchyPath({ activeHierarchyConfig, maxVisibleLevel, 
 
 
 
+
 // ******************************* components/ReportAnalysisHeader.jsx ******************************* //
 
 import React from "react";
-import { Box, Paper, Typography, FormControl, InputLabel, Select, MenuItem, IconButton, Tooltip } from "@mui/material";
+import {
+  Box,
+  Paper,
+  Typography,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  TextField,
+  // IconButton,
+  // Tooltip,
+} from "@mui/material";
 import AnalyticsIcon from "@mui/icons-material/Analytics";
-import FullscreenIcon from "@mui/icons-material/Fullscreen";
-import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
+// import FullscreenIcon from "@mui/icons-material/Fullscreen";
+// import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
 
 export default function ReportAnalysisHeader({
   activeReport,
@@ -296,8 +455,10 @@ export default function ReportAnalysisHeader({
   setSelectedReportCode,
   selectedViewCode,
   setSelectedViewCode,
-  isFullscreen,
-  toggleFullscreen
+  selectedDate,
+  setSelectedDate,
+  // isFullscreen,
+  // toggleFullscreen,
 }) {
   return (
     <Paper
@@ -315,11 +476,24 @@ export default function ReportAnalysisHeader({
       }}
     >
       <Box display="flex" alignItems="center" gap={2}>
-        <Box sx={{ backgroundColor: "primary.main", borderRadius: "10px", width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <Box
+          sx={{
+            backgroundColor: "primary.main",
+            borderRadius: "10px",
+            width: 44,
+            height: 44,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
           <AnalyticsIcon sx={{ color: "primary.contrastText", fontSize: 24 }} />
         </Box>
         <Box sx={{ overflow: "hidden" }}>
-          <Typography variant="h6" sx={{ fontWeight: 700, color: "text.primary" }}>
+          <Typography
+            variant="h6"
+            sx={{ fontWeight: 700, color: "text.primary" }}
+          >
             {activeReport?.displayName || "Financial Analytics"}
           </Typography>
           <Typography variant="caption" sx={{ color: "text.primary" }}>
@@ -329,8 +503,21 @@ export default function ReportAnalysisHeader({
       </Box>
 
       <Box display="flex" alignItems="center" gap={2}>
-        <FormControl size="small" sx={{ minWidth: 400, maxWidth: 500, bgcolor: "background.paper", borderRadius: 1 }}>
-          <InputLabel id="report-source-label" shrink>Database Report</InputLabel>
+        <FormControl
+          size="small"
+          sx={{
+            minWidth: 250,
+            maxWidth: 500,
+            bgcolor: "background.paper",
+            borderRadius: 1.25,
+            boxShadow: "0 5px 10px rgba(0,0,0,0.2)",
+            border: 1,
+            borderColor: "divider",
+          }}
+        >
+          <InputLabel id="report-source-label" shrink>
+            Database Report
+          </InputLabel>
           <Select
             labelId="report-source-label"
             value={selectedReportCode}
@@ -342,17 +529,36 @@ export default function ReportAnalysisHeader({
             displayEmpty
             notched
           >
-            <MenuItem value="" disabled><Typography sx={{ fontSize: "14px" }}>Please select a report</Typography></MenuItem>
+            <MenuItem value="" disabled>
+              <Typography sx={{ fontSize: "14px" }}>
+                Please select a report
+              </Typography>
+            </MenuItem>
             {reportsConfig.map((report) => (
               <MenuItem key={report.reportCode} value={report.reportCode}>
-                <Typography sx={{ fontSize: "14px" }}>{report.displayName}</Typography>
+                <Typography sx={{ fontSize: "14px" }}>
+                  {report.displayName}
+                </Typography>
               </MenuItem>
             ))}
           </Select>
         </FormControl>
 
-        <FormControl size="small" sx={{ minWidth: 300, maxWidth: 350, bgcolor: "background.paper", borderRadius: 1 }}>
-          <InputLabel id="hierarchy-view-label" shrink>Hierarchy View</InputLabel>
+        <FormControl
+          size="small"
+          sx={{
+            minWidth: 250,
+            maxWidth: 350,
+            bgcolor: "background.paper",
+            borderRadius: 1.25,
+            boxShadow: "0 5px 10px rgba(0,0,0,0.2)",
+            border: 1,
+            borderColor: "divider",
+          }}
+        >
+          <InputLabel id="hierarchy-view-label" shrink>
+            Hierarchy View
+          </InputLabel>
           <Select
             labelId="hierarchy-view-label"
             value={selectedViewCode}
@@ -362,24 +568,51 @@ export default function ReportAnalysisHeader({
             notched
             disabled={!activeReport}
           >
-            <MenuItem value="" disabled><Typography sx={{ fontSize: "14px" }}>Please select a view hierarchy</Typography></MenuItem>
+            <MenuItem value="" disabled>
+              <Typography sx={{ fontSize: "14px" }}>
+                Please select a view hierarchy
+              </Typography>
+            </MenuItem>
             {activeReport?.views?.map((view) => (
               <MenuItem key={view.viewCode} value={view.viewCode}>
-                <Typography sx={{ fontSize: "14px" }}>{view.displayName}</Typography>
+                <Typography sx={{ fontSize: "14px" }}>
+                  {view.displayName}
+                </Typography>
               </MenuItem>
             ))}
           </Select>
         </FormControl>
 
-        <IconButton onClick={toggleFullscreen}>
-          <Tooltip title={isFullscreen ? "Exit Full Screen (Esc)" : "Full Screen"} arrow placement="bottom">
+        <TextField
+          type="date"
+          size="small"
+          label="Report Date"
+          InputLabelProps={{ shrink: true }}
+          value={selectedDate}
+          onChange={(e) => setSelectedDate(e.target.value)}
+          sx={{
+            minWidth: 160,
+            boxShadow: "0 5px 10px rgba(0,0,0,0.2)",
+            border: 1,
+            borderColor: "divider",
+            borderRadius: 1,
+          }}
+        />
+
+        {/* <IconButton onClick={toggleFullscreen}>
+          <Tooltip
+            title={isFullscreen ? "Exit Full Screen (Esc)" : "Full Screen"}
+            arrow
+            placement="bottom"
+          >
             {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
           </Tooltip>
-        </IconButton>
+        </IconButton> */}
       </Box>
     </Paper>
   );
 }
+
 
 
 
@@ -411,15 +644,1221 @@ export const DEFAULT_CONFIG = { hierarchy: [], availableMetrics: [] };
 
 // ********************************* ReportAnalysisScreen.jsx ****************************** //
 
-import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
+// import React, {
+//   useState,
+//   useMemo,
+//   useCallback,
+//   useEffect,
+//   memo,
+//   forwardRef,
+//   useRef,
+// } from "react";
+// import { useSelector, useDispatch } from "react-redux";
+// import {
+//   Box,
+//   Paper,
+//   Table,
+//   TableBody,
+//   TableCell,
+//   TableContainer,
+//   TableHead,
+//   TableRow,
+//   Typography,
+//   CircularProgress,
+//   MenuItem,
+//   Select,
+//   FormControl,
+//   InputLabel,
+//   IconButton,
+//   Tooltip,
+//   Button,
+// } from "@mui/material";
+// import AnalyticsIcon from "@mui/icons-material/Analytics";
+// import DatasetIcon from "@mui/icons-material/Dataset";
+// import FullscreenIcon from "@mui/icons-material/Fullscreen";
+// import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
+// import { useTheme } from "@mui/material/styles";
+// import { useVirtualizer } from "@tanstack/react-virtual";
+
+// // --- REDUX UI ACTIONS ---
+// // Update this path if your uiSlice is located somewhere else in your project
+// import {
+//   enterComponentFullscreen,
+//   exitComponentFullscreen,
+// } from "../../store/slices/uiSlice";
+
+// // Assume these are available in your project structure
+// import useApi from "../../hooks/useApi";
+// import useCustomSnackbar from "../../utils/useCustomSnackbar";
+// // --- CONFIGURATION & CONSTANTS ---
+// const formatCurrency = (value) => {
+//   return new Intl.NumberFormat("en-US", {
+//     style: "currency",
+//     currency: "INR",
+//   }).format(value || 0);
+// };
+
+// const DEFAULT_CONFIG = { hierarchy: [], availableMetrics: [] };
+
+// // --- ACTUAL API LOGIC ---
+// const fetchAnalyticsData = async (callApi, showSnackBar, payload) => {
+//   console.log("payload:", payload);
+
+//   try {
+//     const responseData = await callApi(
+//       "/AS/analytics/drill-down",
+//       payload,
+//       "POST",
+//     );
+//     console.log("Response data : ", responseData);
+
+//     return responseData?.data || [];
+//   } catch (error) {
+//     console.error("Error fetching analytics data:", error);
+//     showSnackBar("Error: " + error.title, "error");
+//   }
+// };
+
+// const fetchInitialData = async (
+//   callApi,
+//   showSnackBar,
+//   viewCode,
+//   hierarchy,
+//   metrics,
+// ) => {
+//   const rootDimension = hierarchy[0];
+//   const payload = {
+//     viewCode: viewCode,
+//     dimensions: [rootDimension],
+//     metrics: metrics.map((m) => m.logicalName),
+//     filters: [],
+//   };
+//   const apiData = await fetchAnalyticsData(callApi, showSnackBar, payload);
+
+//   return (apiData || []).map((row) => ({
+//     ...row,
+//     level: 0,
+//     nodeFilters: [],
+//   }));
+// };
+
+// const fetchChildrenData = async (
+//   callApi,
+//   showSnackBar,
+//   parentNode,
+//   viewCode,
+//   hierarchy,
+//   metrics,
+// ) => {
+//   const childLevel = parentNode.level + 1;
+//   const nextDimension = hierarchy[childLevel];
+
+//   const currentFilters = [
+//     ...(parentNode.nodeFilters || []),
+//     {
+//       logicalField: hierarchy[parentNode.level],
+//       operator: "EQUALS",
+//       value: parentNode.name,
+//     },
+//   ];
+//   const payload = {
+//     viewCode: viewCode,
+//     dimensions: [nextDimension],
+//     metrics: metrics.map((m) => m.logicalName),
+//     filters: currentFilters,
+//   };
+//   const apiData = await fetchAnalyticsData(callApi, showSnackBar, payload);
+
+//   return (apiData || []).map((row) => ({
+//     ...row,
+//     level: childLevel,
+//     nodeFilters: currentFilters,
+//   }));
+// };
+
+// // --- COMPONENTS ---
+
+// const ActualTreeTableRow = memo(
+//   forwardRef(
+//     (
+//       {
+//         node,
+//         isExpanded,
+//         isLoading,
+//         onToggle,
+//         maxVisibleLevel,
+//         index,
+//         activeMetrics,
+//         theme, // dynamically passed to avoid hook bottleneck in virtualized rows
+//         ...props
+//       },
+//       ref,
+//     ) => {
+//       const isRoot = node.level === 0;
+
+//       return (
+//         <TableRow
+//           ref={ref}
+//           hover
+//           // RAW INLINE STYLES: Bypasses Emotion CSS-in-JS lag and uses exact Theme colors
+//           style={{
+//             backgroundColor: isExpanded ? theme.palette.purple[100] : "inherit",
+//             borderLeft: isExpanded
+//               ? `4px solid ${theme.palette.primary.main}`
+//               : "4px solid transparent",
+//             height: "40px",
+//             transition:
+//               "background-color 0.2s ease-in-out, border-color 0.2s ease-in-out",
+//           }}
+//           {...props}
+//         >
+//           {/* Hierarchy Depth Columns */}
+//           {Array.from({ length: maxVisibleLevel + 1 }).map((_, colIndex) => {
+//             //const colWidth = colIndex === 0 ? 280 : 200;
+
+//             if (colIndex === node.level) {
+//               return (
+//                 <TableCell
+//                   key={colIndex}
+//                   style={{
+//                     borderRight: `1px solid ${theme.palette.divider}`,
+//                     borderBottom: `1px solid ${theme.palette.divider}`,
+//                     minWidth: "260px",
+//                     whiteSpace: "nowrap",
+//                     // width: colWidth,
+//                     // maxWidth: colWidth,
+//                     padding: "4px 8px",
+//                     verticalAlign: "middle",
+//                   }}
+//                 >
+//                   <div
+//                     style={{
+//                       display: "flex",
+//                       alignItems: "center",
+//                       paddingLeft: `${node.level * 20 + 8}px`,
+//                       paddingRight: "12px",
+//                       width: "100%",
+//                       boxSizing: "border-box",
+//                     }}
+//                   >
+//                     {node.hasChildren ? (
+//                       <button
+//                         onClick={(e) => {
+//                           e.stopPropagation();
+//                           onToggle(node);
+//                         }}
+//                         disabled={isLoading}
+//                         style={{
+//                           marginRight: "8px",
+//                           padding: 0,
+//                           width: "20px",
+//                           height: "20px",
+//                           border: `1px solid ${isExpanded ? theme.palette.primary.main : theme.palette.divider}`,
+//                           borderRadius: "50%",
+//                           backgroundColor: "transparent",
+//                           cursor: isLoading ? "wait" : "pointer",
+//                           display: "flex",
+//                           alignItems: "center",
+//                           justifyContent: "center",
+//                           color: isExpanded
+//                             ? theme.palette.primary.main
+//                             : "inherit",
+//                           fontSize: "14px",
+//                           lineHeight: 1,
+//                           transition: "all 0.15s ease",
+//                         }}
+//                         onMouseOver={(e) =>
+//                           (e.currentTarget.style.transform = "scale(1.15)")
+//                         }
+//                         onMouseOut={(e) =>
+//                           (e.currentTarget.style.transform = "scale(1)")
+//                         }
+//                       >
+//                         {isLoading ? (
+//                           <CircularProgress
+//                             size={12}
+//                             color={isExpanded ? "primary.dark" : "inherit"}
+//                           />
+//                         ) : isExpanded ? (
+//                           "-"
+//                         ) : (
+//                           "+"
+//                         )}
+//                       </button>
+//                     ) : (
+//                       <div style={{ width: "28px" }} />
+//                     )}
+//                     <span
+//                       style={{
+//                         fontWeight: isExpanded ? 700 : isRoot ? 600 : 400,
+//                         color: isExpanded
+//                           ? theme.palette.primary.main
+//                           : "inherit",
+//                         whiteSpace: "nowrap",
+//                         overflow: "hidden",
+//                         textOverflow: "ellipsis",
+//                         fontSize: "0.875rem",
+//                         fontFamily:
+//                           theme.typography.fontFamily ||
+//                           "Roboto, Helvetica, Arial, sans-serif",
+//                       }}
+//                     >
+//                       {node.name}
+//                     </span>
+//                   </div>
+//                 </TableCell>
+//               );
+//             }
+//             return (
+//               <TableCell
+//                 key={colIndex}
+//                 style={{
+//                   borderRight: `1px solid ${theme.palette.divider}`,
+//                   borderBottom: `1px solid ${theme.palette.divider}`,
+//                   whiteSpace: "nowrap",
+//                   // width: colWidth,
+//                   // minWidth: colWidth,
+//                   // maxWidth: colWidth,
+//                   padding: 0,
+//                 }}
+//               />
+//             );
+//           })}
+
+//           {/* Dynamic Metrics Columns */}
+//           {activeMetrics.map((metric) => {
+//             const value = node[metric.logicalName];
+//             return (
+//               <TableCell
+//                 key={metric.logicalName}
+//                 align="right"
+//                 style={{
+//                   borderRight: `1px solid ${theme.palette.divider}`,
+//                   borderBottom: `1px solid ${theme.palette.divider}`,
+//                   width: "160px",
+//                   minWidth: "160px",
+//                   maxWidth: "160px",
+//                   padding: "8px 16px",
+//                   color:
+//                     value < 0
+//                       ? theme.palette.error.main
+//                       : theme.palette.success.main,
+//                   fontWeight: 500,
+//                   whiteSpace: "nowrap",
+//                   verticalAlign: "middle",
+//                   fontSize: "0.875rem",
+//                   fontFamily:
+//                     theme.typography.fontFamily ||
+//                     "Roboto, Helvetica, Arial, sans-serif",
+//                 }}
+//               >
+//                 {formatCurrency(value)}
+//               </TableCell>
+//             );
+//           })}
+//         </TableRow>
+//       );
+//     },
+//   ),
+//   (prevProps, nextProps) => {
+//     return (
+//       prevProps.isExpanded === nextProps.isExpanded &&
+//       prevProps.isLoading === nextProps.isLoading &&
+//       prevProps.node.id === nextProps.node.id &&
+//       prevProps.maxVisibleLevel === nextProps.maxVisibleLevel &&
+//       prevProps.index === nextProps.index &&
+//       prevProps.theme === nextProps.theme
+//     );
+//   },
+// );
+// ActualTreeTableRow.displayName = "ActualTreeTableRow";
+
+// export default function ReportAnalysisScreen() {
+//   const { callApi } = useApi();
+//   const dispatch = useDispatch();
+//   const user = useSelector((state) => state.auth.user);
+
+//   // Fullscreen state managed strictly via Redux UI Slice
+//   const isFullscreen = useSelector(
+//     (state) => state.ui?.isComponentFullscreen || false,
+//   );
+
+//   const cachedNodes = useSelector((state) => state.analyticsCache?.nodes || {});
+//   const showSnackBar = useCustomSnackbar();
+
+//   const [reportsConfig, setReportsConfig] = useState([]);
+//   const [selectedReportCode, setSelectedReportCode] = useState("");
+//   const [selectedViewCode, setSelectedViewCode] = useState("");
+
+//   const [data, setData] = useState([]);
+//   const [expandedIds, setExpandedIds] = useState(new Map());
+//   const [loadingIds, setLoadingIds] = useState(new Set());
+//   const [isInitializing, setIsInitializing] = useState(false);
+
+//   const theme = useTheme();
+
+//   const tableContainerRef = useRef(null);
+
+//   const activeReport = useMemo(() => {
+//     return (
+//       reportsConfig.find((r) => r.reportCode === selectedReportCode) || null
+//     );
+//   }, [reportsConfig, selectedReportCode]);
+
+//   const activeView = useMemo(() => {
+//     return (
+//       activeReport?.views?.find((v) => v.viewCode === selectedViewCode) || null
+//     );
+//   }, [activeReport, selectedViewCode]);
+
+//   const activeHierarchyConfig = activeView || DEFAULT_CONFIG;
+
+//   // --- REDUX FULLSCREEN LOGIC ---
+//   const toggleFullscreen = useCallback(() => {
+//     if (isFullscreen) {
+//       dispatch(exitComponentFullscreen());
+
+//       // If exiting via the UI button, safely remove the fake history state
+//       if (window.history.state && window.history.state.isFullscreenOverlay) {
+//         window.history.back();
+//       }
+//     } else {
+//       dispatch(enterComponentFullscreen());
+//       showSnackBar("To exit ful screen press 'F'", "info");
+
+//       // Inject fake state to activate the browser's Back button
+//       window.history.pushState({ isFullscreenOverlay: true }, "");
+//     }
+//   }, [isFullscreen, dispatch]);
+
+//   // Intercept the Browser's Back Button
+//   useEffect(() => {
+//     const handlePopState = () => {
+//       // When the back button is clicked, exit full screen instead of changing pages
+//       if (isFullscreen) {
+//         dispatch(exitComponentFullscreen());
+//       }
+//     };
+
+//     window.addEventListener("popstate", handlePopState);
+//     return () => window.removeEventListener("popstate", handlePopState);
+//   }, [isFullscreen, dispatch]);
+
+//   // Handle 'Escape' key press to automatically revert Redux Fullscreen
+//   useEffect(() => {
+//     const handleKeyDown = (e) => {
+//       if (e.key === "f" && isFullscreen) {
+//         dispatch(exitComponentFullscreen());
+//         if (window.history.state && window.history.state.isFullscreenOverlay) {
+//           window.history.back();
+//         }
+//       }
+//       if (e.key === "f" && !isFullscreen) {
+//         dispatch(enterComponentFullscreen());
+//         window.history.pushState({ isFullscreenOverlay: true }, "");
+//         showSnackBar("To exit ful screen press 'F'", "info");
+//       }
+//     };
+//     window.addEventListener("keydown", handleKeyDown);
+//     return () => window.removeEventListener("keydown", handleKeyDown);
+//   }, [isFullscreen, dispatch]);
+
+//   useEffect(() => {
+//     const fetchConfig = async () => {
+//       try {
+//         const response = await callApi("/AS/analytics/config", {}, "GET");
+//         console.log("Response : ", response);
+
+//         const configData = Array.isArray(response)
+//           ? response
+//           : response?.data || [];
+//         setReportsConfig(configData);
+//       } catch (error) {
+//         console.error("Failed to fetch analytics configurations", error);
+//         showSnackBar("Error: " + error.title, "error");
+//       }
+//     };
+//     if (user) fetchConfig();
+//   }, [callApi, user, showSnackBar]);
+
+//   useEffect(() => {
+//     const loadRoot = async () => {
+//       if (!selectedReportCode || !selectedViewCode) {
+//         setData((prev) => (prev.length === 0 ? prev : []));
+//         return;
+//       }
+//       setIsInitializing(true);
+//       setData([]);
+//       setExpandedIds(new Map());
+
+//       try {
+//         const rootData = await fetchInitialData(
+//           callApi,
+//           showSnackBar,
+//           selectedViewCode,
+//           activeHierarchyConfig.hierarchy,
+//           activeHierarchyConfig.availableMetrics,
+//         );
+//         setData(rootData);
+//       } catch (error) {
+//         console.error("Failed to load initial data", error);
+//       } finally {
+//         setIsInitializing(false);
+//       }
+//     };
+//     loadRoot();
+//   }, [
+//     selectedReportCode,
+//     selectedViewCode,
+//     activeHierarchyConfig,
+//     callApi,
+//     showSnackBar,
+//   ]);
+
+//   const appendChildrenToTree = useCallback((nodes, parentId, newChildren) => {
+//     return nodes.map((node) => {
+//       if (node.id === parentId) return { ...node, children: newChildren };
+//       if (node.children)
+//         return {
+//           ...node,
+//           children: appendChildrenToTree(node.children, parentId, newChildren),
+//         };
+//       return node;
+//     });
+//   }, []);
+
+//   const handleToggle = useCallback(
+//     async (node) => {
+//       const isExpanded = expandedIds.has(node.id);
+
+//       if (isExpanded) {
+//         // Manual Collapse
+//         setExpandedIds((prev) => {
+//           const next = new Map(prev);
+//           next.delete(node.id);
+
+//           const removeDescendants = (currentNode) => {
+//             if (currentNode.children) {
+//               currentNode.children.forEach((child) => {
+//                 next.delete(child.id);
+//                 removeDescendants(child);
+//               });
+//             }
+//           };
+//           removeDescendants(node);
+//           return next;
+//         });
+//       } else {
+//         // Expansion
+//         if (!node.children && node.hasChildren) {
+//           const cacheKey = `${selectedViewCode}_${node.id}`;
+//           const cachedEntry = cachedNodes[cacheKey];
+//           // 15 minutes TTL check
+//           const isCacheValid =
+//             cachedEntry && Date.now() - cachedEntry.timestamp < 900000;
+
+//           if (isCacheValid) {
+//             setData((prevData) =>
+//               appendChildrenToTree(prevData, node.id, cachedEntry.data),
+//             );
+//           } else {
+//             setLoadingIds((prev) => new Set(prev).add(node.id));
+//             try {
+//               const children = await fetchChildrenData(
+//                 callApi,
+//                 showSnackBar,
+//                 node,
+//                 selectedViewCode,
+//                 activeHierarchyConfig.hierarchy,
+//                 activeHierarchyConfig.availableMetrics,
+//               );
+//               setData((prevData) =>
+//                 appendChildrenToTree(prevData, node.id, children),
+//               );
+//               dispatch({
+//                 type: "analyticsCache/cacheNode",
+//                 payload: {
+//                   key: cacheKey,
+//                   data: children,
+//                   timestamp: Date.now(),
+//                 },
+//               });
+//             } catch (error) {
+//               console.error("Failed to fetch children", error);
+//             } finally {
+//               setLoadingIds((prev) => {
+//                 const next = new Set(prev);
+//                 next.delete(node.id);
+//                 return next;
+//               });
+//             }
+//           }
+//         }
+
+//         // Auto-Collapse Sibling Logic
+//         setExpandedIds((prev) => {
+//           const next = new Map();
+//           prev.forEach((level, id) => {
+//             if (level < node.level) {
+//               next.set(id, level);
+//             }
+//           });
+//           next.set(node.id, node.level);
+//           return next;
+//         });
+//       }
+//     },
+//     [
+//       expandedIds,
+//       appendChildrenToTree,
+//       activeHierarchyConfig.hierarchy,
+//       activeHierarchyConfig.availableMetrics,
+//       selectedViewCode,
+//       callApi,
+//       showSnackBar,
+//       cachedNodes,
+//       dispatch,
+//     ],
+//   );
+
+//   const visibleRows = useMemo(() => {
+//     const rows = [];
+//     const traverse = (nodes) => {
+//       for (const node of nodes) {
+//         rows.push(node);
+//         if (expandedIds.has(node.id) && node.children) traverse(node.children);
+//       }
+//     };
+//     traverse(data);
+//     return rows;
+//   }, [data, expandedIds]);
+
+//   const maxVisibleLevel = useMemo(() => {
+//     if (visibleRows.length === 0) return 0;
+//     return Math.max(...visibleRows.map((row) => row.level));
+//   }, [visibleRows]);
+
+//   const visibleHierarchyLevels = activeHierarchyConfig.hierarchy.slice(
+//     0,
+//     maxVisibleLevel + 1,
+//   );
+
+//   // --- VIRTUALIZATION ENGINE ---
+//   const virtualizer = useVirtualizer({
+//     count: visibleRows.length,
+//     getScrollElement: () => tableContainerRef.current,
+//     estimateSize: () => 40,
+//     overscan: 5,
+//   });
+
+//   const virtualItems = virtualizer.getVirtualItems();
+//   const totalColumnsCount =
+//     visibleHierarchyLevels.length +
+//     activeHierarchyConfig.availableMetrics.length;
+
+//   const paddingTop = virtualItems.length > 0 ? virtualItems[0].start : 0;
+//   const paddingBottom =
+//     virtualItems.length > 0
+//       ? virtualizer.getTotalSize() - virtualItems[virtualItems.length - 1].end
+//       : 0;
+
+//   const isSetupComplete = selectedReportCode && selectedViewCode;
+
+//   return (
+//     <Box
+//       sx={{
+//         display: "flex",
+//         flexDirection: "column",
+//         gap: 1.5,
+//         // DYNAMIC REDUX FULLSCREEN STYLES
+//         ...(isFullscreen
+//           ? {
+//               position: "fixed",
+//               top: 0,
+//               left: 0,
+//               right: 0,
+//               bottom: 0,
+//               width: "100vw",
+//               height: "100vh",
+//               zIndex: 1299, // Safely below standard MUI dropdowns (1300), but over everything else
+//               //bgcolor: theme.palette.mode === "dark" ? "#121212" : "#f4f5f9",
+//               p: 2,
+//             }
+//           : {
+//               height: "calc(100vh - 220px)",
+//             }),
+//       }}
+//     >
+//       {/* ================= UPPER BOX ================= */}
+//       <Paper
+//         elevation={0}
+//         sx={{
+//           p: 3,
+//           borderRadius: 2,
+//           boxShadow: "0 5px 10px rgba(0,0,0,0.2)",
+//           border: 1,
+//           borderColor: "divider",
+//           display: "flex",
+//           justifyContent: "space-between",
+//           flexDirection: "row",
+//           flexShrink: 0,
+//         }}
+//       >
+//         <Box display="flex" alignItems="center" gap={2}>
+//           <Box
+//             sx={{
+//               backgroundColor: "primary.main",
+//               borderRadius: "10px",
+//               width: 44,
+//               height: 44,
+//               display: "flex",
+//               alignItems: "center",
+//               justifyContent: "center",
+//             }}
+//           >
+//             <AnalyticsIcon
+//               sx={{ color: "primary.contrastText", fontSize: 24 }}
+//             />
+//           </Box>
+
+//           <Box sx={{ overflow: "hidden" }}>
+//             <Typography
+//               variant="h6"
+//               sx={{ fontWeight: 700, color: "text.primary" }}
+//             >
+//               {activeReport?.displayName || "Financial Analytics"}
+//             </Typography>
+//             <Typography variant="caption" sx={{ color: "text.primary" }}>
+//               Dynamic Drill-Down Matrix
+//             </Typography>
+//           </Box>
+//         </Box>
+
+//         <Box display="flex" alignItems="center" gap={2}>
+//           <FormControl
+//             size="small"
+//             sx={{
+//               minWidth: 400,
+//               maxWidth: 500,
+//               bgcolor: "background.paper",
+//               borderRadius: 1,
+//             }}
+//           >
+//             <InputLabel id="report-source-label" shrink>
+//               Database Report
+//             </InputLabel>
+//             <Select
+//               labelId="report-source-label"
+//               value={selectedReportCode}
+//               label="Database Report"
+//               onChange={(e) => {
+//                 setSelectedReportCode(e.target.value);
+//                 setSelectedViewCode("");
+//               }}
+//               displayEmpty
+//               notched
+//             >
+//               <MenuItem value="" disabled>
+//                 <Typography sx={{ fontSize: "14px" }}>
+//                   {" "}
+//                   Please select a report
+//                 </Typography>
+//               </MenuItem>
+//               {reportsConfig.map((report) => (
+//                 <MenuItem key={report.reportCode} value={report.reportCode}>
+//                   <Typography sx={{ fontSize: "14px" }}>
+//                     {report.displayName}
+//                   </Typography>
+//                 </MenuItem>
+//               ))}
+//             </Select>
+//           </FormControl>
+
+//           <FormControl
+//             size="small"
+//             sx={{
+//               minWidth: 300,
+//               maxWidth: 350,
+//               bgcolor: "background.paper",
+//               borderRadius: 1,
+//             }}
+//           >
+//             <InputLabel id="hierarchy-view-label" shrink>
+//               Hierarchy View
+//             </InputLabel>
+//             <Select
+//               labelId="hierarchy-view-label"
+//               value={selectedViewCode}
+//               label="Hierarchy View"
+//               onChange={(e) => setSelectedViewCode(e.target.value)}
+//               displayEmpty
+//               notched
+//               disabled={!activeReport}
+//             >
+//               <MenuItem value="" disabled>
+//                 <Typography sx={{ fontSize: "14px" }}>
+//                   Please select a view hierarchy
+//                 </Typography>
+//               </MenuItem>
+//               {activeReport?.views?.map((view) => (
+//                 <MenuItem key={view.viewCode} value={view.viewCode}>
+//                   <Typography sx={{ fontSize: "14px" }}>
+//                     {view.displayName}
+//                   </Typography>
+//                 </MenuItem>
+//               ))}
+//             </Select>
+//           </FormControl>
+
+//           <IconButton>
+//             <Tooltip
+//               onClick={toggleFullscreen}
+//               sx={{ cursor: "pointer" }}
+//               title={isFullscreen ? "Exit Full Screen (Esc)" : "Full Screen"}
+//               arrow
+//               placement="bottom"
+//             >
+//               {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
+//             </Tooltip>
+//           </IconButton>
+//         </Box>
+//       </Paper>
+
+//       {/* ================= LOWER BOX ================= */}
+//       <Paper
+//         elevation={0}
+//         sx={{
+//           flexGrow: 1,
+//           display: "flex",
+//           flexDirection: "column",
+//           overflow: "hidden",
+//           borderRadius: 1,
+//           boxShadow: "0 2px 10px rgba(0,0,0,0.03)",
+//           border: 1,
+//           borderColor: "divider",
+//         }}
+//       >
+//         <Box
+//           sx={{
+//             borderBottom: 1,
+//             borderColor: "divider",
+//             px: 2,
+//             py: 2,
+//             minHeight: 44,
+//             display: "flex",
+//             alignItems: "center",
+//             //justifyContent: "space-between",
+//           }}
+//         >
+//           <Box>
+//             {isSetupComplete && (
+//               <Box display="flex" alignItems="center" gap={0.5}>
+//                 <Typography
+//                   variant="body2"
+//                   color="text.secondary"
+//                   sx={{ mr: 1, fontWeight: 500 }}
+//                 >
+//                   Path:
+//                 </Typography>
+//                 {activeHierarchyConfig.hierarchy.map((item, index) => {
+//                   const isActive = index <= maxVisibleLevel;
+//                   return (
+//                     <Box key={index} display="flex" alignItems="center">
+//                       <Box display="flex" alignItems="center" gap={1}>
+//                         <Box
+//                           sx={{
+//                             width: 10,
+//                             height: 10,
+//                             borderRadius: "50%",
+//                             bgcolor: isActive
+//                               ? "primary.main"
+//                               : "background.paper",
+//                             border: "2px solid",
+//                             borderColor: isActive ? "primary.main" : "divider",
+//                           }}
+//                         />
+//                         <Typography
+//                           variant="body2"
+//                           sx={{
+//                             fontWeight: isActive ? 600 : 500,
+//                             color: isActive ? "text.primary" : "text.disabled",
+//                             textTransform: "capitalize",
+//                           }}
+//                         >
+//                           {item.replace("_", " ")}
+//                         </Typography>
+//                       </Box>
+
+//                       {index < activeHierarchyConfig.hierarchy.length - 1 && (
+//                         <Box
+//                           sx={{
+//                             backgroundColor:
+//                               index < maxVisibleLevel
+//                                 ? theme.palette.primary.main
+//                                 : theme.palette.divider,
+//                             width: 24,
+//                             height: 2,
+//                             mx: 1,
+//                             borderRadius: 1,
+//                           }}
+//                         />
+//                       )}
+//                     </Box>
+//                   );
+//                 })}
+//               </Box>
+//             )}
+//           </Box>
+
+//           {/* <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+//             {!isFullscreen ? (
+//               <Box
+//                 sx={{
+//                   display: "flex",
+//                   alignItems: "center",
+//                   justifyContent: "center",
+//                   bgcolor: theme.palette.purple[100],
+//                   borderRadius: 1,
+//                   boxShadow: "0 2px 2px 0 rgba(0, 0, 0, 0.2)",
+//                   pl: 1,
+//                   pr: 1,
+//                   p: 1,
+//                   height: 30,
+//                 }}
+//               >
+//                 <Typography
+//                   variant="caption"
+//                   color="text.secondary"
+//                   fontWeight={200}
+//                   p={1}
+//                 >
+//                   <b>Full screen</b>
+//                   <Box
+//                     component="kbd"
+//                     sx={{
+//                       display: "inline-flex",
+//                       height: 20,
+//                       minWidth: 20,
+//                       alignItems: "center",
+//                       justifyContent: "center",
+//                       borderRadius: "6px",
+//                       border: "1px solid",
+//                       borderColor: theme.palette.grey[400],
+//                       backgroundColor: "background.paper",
+//                       px: 0.75,
+//                       mx: 0.5,
+//                       fontFamily: "monospace",
+//                       fontSize: 13,
+//                       fontWeight: 600,
+//                       boxShadow: "0 1px 0 0 rgba(0,0,0,0.2)",
+//                     }}
+//                   >
+//                     F
+//                   </Box>
+//                 </Typography>
+//                 <Tooltip
+//                   onClick={toggleFullscreen}
+//                   sx={{ cursor: "pointer" }}
+//                   title={
+//                     isFullscreen ? "Exit Full Screen (Esc)" : "Full Screen"
+//                   }
+//                   arrow
+//                   placement="bottom"
+//                 >
+//                   {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
+//                 </Tooltip>
+//                 //    REDUX Full Screen Toggle Button
+//               </Box>
+//             ) : (
+//               <Box
+//                 sx={{
+//                   display: "flex",
+//                   alignItems: "center",
+//                   justifyContent: "center",
+//                   bgcolor: theme.palette.purple[100],
+//                   borderRadius: 1,
+//                   boxShadow: "0 2px 2px 0 rgba(0, 0, 0, 0.2)",
+//                   pl: 1,
+//                   pr: 1,
+//                   p: 1,
+//                   height: 30,
+//                 }}
+//               >
+//                 <Typography
+//                   variant="caption"
+//                   color="text.secondary"
+//                   fontWeight={200}
+//                   p={1}
+//                 >
+//                   <b>Exit full screen</b>
+//                   <Box
+//                     component="kbd"
+//                     sx={{
+//                       display: "inline-flex",
+//                       height: 20,
+//                       minWidth: 20,
+//                       alignItems: "center",
+//                       justifyContent: "center",
+//                       borderRadius: "6px",
+//                       border: "1px solid",
+//                       borderColor: theme.palette.grey[400],
+//                       backgroundColor: "background.paper",
+//                       px: 0.75,
+//                       mx: 0.5,
+//                       fontFamily: "monospace",
+//                       fontSize: 13,
+//                       fontWeight: 600,
+//                       boxShadow: "0 1px 0 0 rgba(0,0,0,0.2)",
+//                     }}
+//                   >
+//                     F
+//                   </Box>
+//                 </Typography>
+//                 <Tooltip
+//                   onClick={toggleFullscreen}
+//                   sx={{ cursor: "pointer" }}
+//                   title={
+//                     isFullscreen ? "Exit Full Screen (Esc)" : "Full Screen"
+//                   }
+//                   arrow
+//                   placement="bottom"
+//                 >
+//                   {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
+//                 </Tooltip>
+//                 //  REDUX Full Screen Toggle Button
+//               </Box>
+//             )}
+//           </Box> */}
+//         </Box>
+
+//         <TableContainer
+//           ref={tableContainerRef}
+//           sx={{
+//             flexGrow: 1,
+//             bgcolor: "background.default",
+//             position: "relative",
+//             overflow: "auto",
+//             willChange: "transform",
+//           }}
+//         >
+//           {!isSetupComplete && (
+//             <Box
+//               sx={{
+//                 position: "absolute",
+//                 top: 0,
+//                 left: 0,
+//                 right: 0,
+//                 bottom: 0,
+//                 display: "flex",
+//                 flexDirection: "column",
+//                 alignItems: "center",
+//                 justifyContent: "center",
+//                 zIndex: 10,
+//               }}
+//             >
+//               <Box>
+//                 <DatasetIcon
+//                   sx={{ fontSize: 64, color: "action.disabled", mb: 1 }}
+//                 />
+//               </Box>
+//               <Typography variant="h6" color="text.secondary">
+//                 No Data to Display
+//               </Typography>
+//               <Typography variant="body2" color="text.disabled">
+//                 Please select both a database report and a hierarchy view above.
+//               </Typography>
+//             </Box>
+//           )}
+
+//           {isInitializing ? (
+//             <Box
+//               sx={{
+//                 height: "100%",
+//                 display: "flex",
+//                 flexDirection: "column",
+//                 alignItems: "center",
+//                 justifyContent: "center",
+//               }}
+//             >
+//               <CircularProgress size={32} color="primary" sx={{ mb: 1 }} />
+//               <Typography variant="body2" color="text.secondary">
+//                 Executing Query ...
+//               </Typography>
+//             </Box>
+//           ) : isSetupComplete ? (
+//             <Table
+//               stickyHeader
+//               size="small"
+//               sx={{ minWidth: 1000, tableLayout: "fixed" }}
+//             >
+//               <TableHead>
+//                 <TableRow>
+//                   {visibleHierarchyLevels.map((levelName, index) => {
+//                     //const colWidth = index === 0 ? 100 : 200;
+//                     return (
+//                       <TableCell
+//                         key={levelName}
+//                         sx={{
+//                           backgroundColor:
+//                             theme.palette.purple?.[100] ||
+//                             theme.palette.primary.light,
+//                           color: "text.primary",
+//                           fontWeight: 700,
+//                           borderRight: 1,
+//                           borderColor: "divider",
+//                           borderBottom: 2,
+//                           py: 1,
+//                           whiteSpace: "nowrap",
+//                           //width: colWidth,
+//                           //minWidth: colWidth,
+//                           //maxWidth: colWidth,
+//                         }}
+//                       >
+//                         {levelName.replace("_", " ").toUpperCase()}
+//                       </TableCell>
+//                     );
+//                   })}
+//                   {activeHierarchyConfig.availableMetrics.map((metric) => (
+//                     <TableCell
+//                       key={metric.logicalName}
+//                       align="right"
+//                       sx={{
+//                         backgroundColor:
+//                           theme.palette.purple?.[200] ||
+//                           theme.palette.primary.light,
+//                         color: "text.primary",
+//                         fontWeight: 700,
+//                         borderRight: 1,
+//                         borderColor: "divider",
+//                         borderBottom: 2,
+//                         py: 1,
+//                         whiteSpace: "nowrap",
+//                         //width: 160,
+//                         //minWidth: 160,
+//                         //maxWidth: 160,
+//                       }}
+//                     >
+//                       {metric.displayName}
+//                     </TableCell>
+//                   ))}
+//                 </TableRow>
+//               </TableHead>
+//               <TableBody>
+//                 {/* Virtualization top spacing */}
+//                 {paddingTop > 0 && (
+//                   <TableRow>
+//                     <TableCell
+//                       colSpan={totalColumnsCount}
+//                       style={{
+//                         height: `${paddingTop}px`,
+//                         padding: 0,
+//                         border: "none",
+//                       }}
+//                     />
+//                   </TableRow>
+//                 )}
+
+//                 {virtualItems.map((virtualRow) => {
+//                   const row = visibleRows[virtualRow.index];
+//                   return (
+//                     <ActualTreeTableRow
+//                       key={row.id}
+//                       node={row}
+//                       index={virtualRow.index}
+//                       isExpanded={expandedIds.has(row.id)}
+//                       isLoading={loadingIds.has(row.id)}
+//                       onToggle={handleToggle}
+//                       maxVisibleLevel={maxVisibleLevel}
+//                       activeMetrics={activeHierarchyConfig.availableMetrics}
+//                       theme={theme}
+//                       ref={virtualizer.measureElement}
+//                       data-index={virtualRow.index}
+//                     />
+//                   );
+//                 })}
+
+//                 {/* Virtualization bottom spacing */}
+//                 {paddingBottom > 0 && (
+//                   <TableRow>
+//                     <TableCell
+//                       colSpan={totalColumnsCount}
+//                       style={{
+//                         height: `${paddingBottom}px`,
+//                         padding: 0,
+//                         border: "none",
+//                       }}
+//                     />
+//                   </TableRow>
+//                 )}
+//               </TableBody>
+//             </Table>
+//           ) : null}
+//         </TableContainer>
+
+//         <Box
+//           sx={{
+//             bgcolor: "background.paper",
+//             borderTop: 1,
+//             borderColor: "divider",
+//             px: 2,
+//             display: "flex",
+//             justifyContent: "flex-end",
+//             alignItems: "center",
+//             minHeight: 40,
+//           }}
+//         >
+//           <Typography
+//             variant="caption"
+//             color="text.secondary"
+//             fontWeight={500}
+//             sx={{ mr: 2 }}
+//           >
+//             Showing {visibleRows.length} rows
+//           </Typography>
+//         </Box>
+//       </Paper>
+//     </Box>
+//   );
+// }
+
+
+
+
+
+import React, {
+  useState,
+  useMemo,
+  useCallback,
+  useEffect,
+  useRef,
+} from "react";
 import { useSelector, useDispatch } from "react-redux";
-import { Box, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography, CircularProgress } from "@mui/material";
+import {
+  Box,
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Typography,
+  CircularProgress,
+  IconButton,
+  Tooltip
+  // TextField
+} from "@mui/material";
 import DatasetIcon from "@mui/icons-material/Dataset";
 import { useTheme } from "@mui/material/styles";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import FullscreenIcon from "@mui/icons-material/Fullscreen";
+import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
 
 // Assuming these paths based on user context
-import { enterComponentFullscreen, exitComponentFullscreen } from "../../store/slices/uiSlice";
+import {
+  enterComponentFullscreen,
+  exitComponentFullscreen,
+} from "../../store/slices/uiSlice";
 import useApi from "../../hooks/useApi";
 import useCustomSnackbar from "../../utils/useCustomSnackbar";
 
@@ -438,28 +1877,40 @@ export default function ReportAnalysisScreen() {
   const showSnackBar = useCustomSnackbar();
 
   const user = useSelector((state) => state.auth.user);
-  const isFullscreen = useSelector((state) => state.ui?.isComponentFullscreen || false);
+  const isFullscreen = useSelector(
+    (state) => state.ui?.isComponentFullscreen || false,
+  );
   const cachedNodes = useSelector((state) => state.analyticsCache?.nodes || {});
 
   const [reportsConfig, setReportsConfig] = useState([]);
   const [selectedReportCode, setSelectedReportCode] = useState("");
   const [selectedViewCode, setSelectedViewCode] = useState("");
+  const [selectedDate, setSelectedDate] = useState(""); 
 
   const [data, setData] = useState([]);
   const [expandedIds, setExpandedIds] = useState(new Map());
   const [loadingIds, setLoadingIds] = useState(new Set());
   const [isInitializing, setIsInitializing] = useState(false);
 
-  const activeReport = useMemo(() => reportsConfig.find((r) => r.reportCode === selectedReportCode) || null, [reportsConfig, selectedReportCode]);
-  const activeView = useMemo(() => activeReport?.views?.find((v) => v.viewCode === selectedViewCode) || null, [activeReport, selectedViewCode]);
+  const activeReport = useMemo(
+    () =>
+      reportsConfig.find((r) => r.reportCode === selectedReportCode) || null,
+    [reportsConfig, selectedReportCode],
+  );
+  const activeView = useMemo(
+    () =>
+      activeReport?.views?.find((v) => v.viewCode === selectedViewCode) || null,
+    [activeReport, selectedViewCode],
+  );
   const activeHierarchyConfig = activeView || DEFAULT_CONFIG;
-  const isSetupComplete = selectedReportCode && selectedViewCode;
+  const isSetupComplete = selectedReportCode && selectedViewCode && selectedDate;
 
   // --- FULLSCREEN LOGIC ---
   const toggleFullscreen = useCallback(() => {
     if (isFullscreen) {
       dispatch(exitComponentFullscreen());
-      if (window.history.state && window.history.state.isFullscreenOverlay) window.history.back();
+      if (window.history.state && window.history.state.isFullscreenOverlay)
+        window.history.back();
     } else {
       dispatch(enterComponentFullscreen());
       showSnackBar("To exit full screen press 'F'", "info");
@@ -468,7 +1919,8 @@ export default function ReportAnalysisScreen() {
   }, [isFullscreen, dispatch, showSnackBar]);
 
   useEffect(() => {
-    const handlePopState = () => isFullscreen && dispatch(exitComponentFullscreen());
+    const handlePopState = () =>
+      isFullscreen && dispatch(exitComponentFullscreen());
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, [isFullscreen, dispatch]);
@@ -477,7 +1929,8 @@ export default function ReportAnalysisScreen() {
     const handleKeyDown = (e) => {
       if (e.key === "f" && isFullscreen) {
         dispatch(exitComponentFullscreen());
-        if (window.history.state && window.history.state.isFullscreenOverlay) window.history.back();
+        if (window.history.state && window.history.state.isFullscreenOverlay)
+          window.history.back();
       } else if (e.key === "f" && !isFullscreen) {
         dispatch(enterComponentFullscreen());
         window.history.pushState({ isFullscreenOverlay: true }, "");
@@ -493,7 +1946,9 @@ export default function ReportAnalysisScreen() {
     const fetchConfig = async () => {
       try {
         const response = await callApi("/AS/analytics/config", {}, "GET");
-        const configData = Array.isArray(response) ? response : response?.data || [];
+        const configData = Array.isArray(response)
+          ? response
+          : response?.data || [];
         setReportsConfig(configData);
       } catch (error) {
         console.error("Failed to fetch analytics configurations", error);
@@ -514,7 +1969,20 @@ export default function ReportAnalysisScreen() {
       setExpandedIds(new Map());
 
       try {
-        const rootData = await fetchInitialData(callApi, showSnackBar, selectedViewCode, activeHierarchyConfig.hierarchy, activeHierarchyConfig.availableMetrics);
+        const rootData = await fetchInitialData(
+          callApi,
+          showSnackBar,
+          selectedViewCode,
+          activeHierarchyConfig.hierarchy,
+          activeHierarchyConfig.availableMetrics,
+          selectedDate
+        );
+
+        // If empty data: show snackbar
+        if (!rootData || rootData.length === 0) {
+          showSnackBar("No data found for the selected date", "warning");
+        }
+
         setData(rootData);
       } catch (error) {
         console.error("Failed to load initial data", error);
@@ -523,61 +1991,115 @@ export default function ReportAnalysisScreen() {
       }
     };
     loadRoot();
-  }, [selectedReportCode, selectedViewCode, activeHierarchyConfig, callApi, showSnackBar, isSetupComplete]);
+  }, [
+    selectedReportCode,
+    selectedViewCode,
+    selectedDate,
+    activeHierarchyConfig,
+    callApi,
+    showSnackBar,
+    isSetupComplete,
+  ]);
 
   const appendChildrenToTree = useCallback((nodes, parentId, newChildren) => {
     return nodes.map((node) => {
       if (node.id === parentId) return { ...node, children: newChildren };
-      if (node.children) return { ...node, children: appendChildrenToTree(node.children, parentId, newChildren) };
+      if (node.children)
+        return {
+          ...node,
+          children: appendChildrenToTree(node.children, parentId, newChildren),
+        };
       return node;
     });
   }, []);
 
-  const handleToggle = useCallback(async (node) => {
-    const isExpanded = expandedIds.has(node.id);
+  const handleToggle = useCallback(
+    async (node) => {
+      const isExpanded = expandedIds.has(node.id);
 
-    if (isExpanded) {
-      setExpandedIds((prev) => {
-        const next = new Map(prev);
-        next.delete(node.id);
-        const removeDescendants = (currentNode) => {
-          if (currentNode.children) {
-            currentNode.children.forEach((child) => { next.delete(child.id); removeDescendants(child); });
-          }
-        };
-        removeDescendants(node);
-        return next;
-      });
-    } else {
-      if (!node.children && node.hasChildren) {
-        const cacheKey = `${selectedViewCode}_${node.id}`;
-        const cachedEntry = cachedNodes[cacheKey];
-        const isCacheValid = cachedEntry && Date.now() - cachedEntry.timestamp < 900000;
+      if (isExpanded) {
+        setExpandedIds((prev) => {
+          const next = new Map(prev);
+          next.delete(node.id);
+          const removeDescendants = (currentNode) => {
+            if (currentNode.children) {
+              currentNode.children.forEach((child) => {
+                next.delete(child.id);
+                removeDescendants(child);
+              });
+            }
+          };
+          removeDescendants(node);
+          return next;
+        });
+      } else {
+        if (!node.children && node.hasChildren) {
+          const cacheKey = `${selectedViewCode}_${node.id}`;
+          const cachedEntry = cachedNodes[cacheKey];
+          const isCacheValid =
+            cachedEntry && Date.now() - cachedEntry.timestamp < 900000;
 
-        if (isCacheValid) {
-          setData((prevData) => appendChildrenToTree(prevData, node.id, cachedEntry.data));
-        } else {
-          setLoadingIds((prev) => new Set(prev).add(node.id));
-          try {
-            const children = await fetchChildrenData(callApi, showSnackBar, node, selectedViewCode, activeHierarchyConfig.hierarchy, activeHierarchyConfig.availableMetrics);
-            setData((prevData) => appendChildrenToTree(prevData, node.id, children));
-            dispatch({ type: "analyticsCache/cacheNode", payload: { key: cacheKey, data: children, timestamp: Date.now() } });
-          } catch (error) {
-            console.error("Failed to fetch children", error);
-          } finally {
-            setLoadingIds((prev) => { const next = new Set(prev); next.delete(node.id); return next; });
+          if (isCacheValid) {
+            setData((prevData) =>
+              appendChildrenToTree(prevData, node.id, cachedEntry.data),
+            );
+          } else {
+            setLoadingIds((prev) => new Set(prev).add(node.id));
+            try {
+              const children = await fetchChildrenData(
+                callApi,
+                showSnackBar,
+                node,
+                selectedViewCode,
+                activeHierarchyConfig.hierarchy,
+                activeHierarchyConfig.availableMetrics,
+                selectedDate
+              );
+              setData((prevData) =>
+                appendChildrenToTree(prevData, node.id, children),
+              );
+              dispatch({
+                type: "analyticsCache/cacheNode",
+                payload: {
+                  key: cacheKey,
+                  data: children,
+                  timestamp: Date.now(),
+                },
+              });
+            } catch (error) {
+              console.error("Failed to fetch children", error);
+            } finally {
+              setLoadingIds((prev) => {
+                const next = new Set(prev);
+                next.delete(node.id);
+                return next;
+              });
+            }
           }
         }
-      }
 
-      setExpandedIds((prev) => {
-        const next = new Map();
-        prev.forEach((level, id) => { if (level < node.level) next.set(id, level); });
-        next.set(node.id, node.level);
-        return next;
-      });
-    }
-  }, [expandedIds, appendChildrenToTree, activeHierarchyConfig, selectedViewCode, callApi, showSnackBar, cachedNodes, dispatch]);
+        setExpandedIds((prev) => {
+          const next = new Map();
+          prev.forEach((level, id) => {
+            if (level < node.level) next.set(id, level);
+          });
+          next.set(node.id, node.level);
+          return next;
+        });
+      }
+    },
+    [
+      expandedIds,
+      appendChildrenToTree,
+      activeHierarchyConfig,
+      selectedViewCode,
+      selectedDate,
+      callApi,
+      showSnackBar,
+      cachedNodes,
+      dispatch,
+    ],
+  );
 
   // --- VIRTUALIZATION ENGINE ---
   const visibleRows = useMemo(() => {
@@ -592,8 +2114,17 @@ export default function ReportAnalysisScreen() {
     return rows;
   }, [data, expandedIds]);
 
-  const maxVisibleLevel = useMemo(() => visibleRows.length === 0 ? 0 : Math.max(...visibleRows.map((row) => row.level)), [visibleRows]);
-  const visibleHierarchyLevels = activeHierarchyConfig.hierarchy.slice(0, maxVisibleLevel + 1);
+  const maxVisibleLevel = useMemo(
+    () =>
+      visibleRows.length === 0
+        ? 0
+        : Math.max(...visibleRows.map((row) => row.level)),
+    [visibleRows],
+  );
+  const visibleHierarchyLevels = activeHierarchyConfig.hierarchy.slice(
+    0,
+    maxVisibleLevel + 1,
+  );
 
   const virtualizer = useVirtualizer({
     count: visibleRows.length,
@@ -603,12 +2134,36 @@ export default function ReportAnalysisScreen() {
   });
 
   const virtualItems = virtualizer.getVirtualItems();
-  const totalColumnsCount = visibleHierarchyLevels.length + activeHierarchyConfig.availableMetrics.length;
+  const totalColumnsCount =
+    visibleHierarchyLevels.length +
+    activeHierarchyConfig.availableMetrics.length;
   const paddingTop = virtualItems.length > 0 ? virtualItems[0].start : 0;
-  const paddingBottom = virtualItems.length > 0 ? virtualizer.getTotalSize() - virtualItems[virtualItems.length - 1].end : 0;
+  const paddingBottom =
+    virtualItems.length > 0
+      ? virtualizer.getTotalSize() - virtualItems[virtualItems.length - 1].end
+      : 0;
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, ...(isFullscreen ? { position: "fixed", top: 0, left: 0, right: 0, bottom: 0, width: "100vw", height: "100vh", zIndex: 1299, p: 2 } : { height: "calc(100vh - 220px)" }) }}>
+    <Box
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 1.5,
+        ...(isFullscreen
+          ? {
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              width: "100vw",
+              height: "100vh",
+              zIndex: 1299,
+              p: 2,
+            }
+          : { height: "calc(100vh - 220px)" }),
+      }}
+    >
       <ReportAnalysisHeader
         activeReport={activeReport}
         reportsConfig={reportsConfig}
@@ -616,48 +2171,181 @@ export default function ReportAnalysisScreen() {
         setSelectedReportCode={setSelectedReportCode}
         selectedViewCode={selectedViewCode}
         setSelectedViewCode={setSelectedViewCode}
-        isFullscreen={isFullscreen}
-        toggleFullscreen={toggleFullscreen}
+        selectedDate={selectedDate}
+        setSelectedDate={setSelectedDate}
+        // isFullscreen={isFullscreen}
+        // toggleFullscreen={toggleFullscreen}
       />
 
-      <Paper elevation={0} sx={{ flexGrow: 1, display: "flex", flexDirection: "column", overflow: "hidden", borderRadius: 1, boxShadow: "0 2px 10px rgba(0,0,0,0.03)", border: 1, borderColor: "divider" }}>
-        <Box sx={{ borderBottom: 1, borderColor: "divider", px: 2, py: 2, minHeight: 44, display: "flex", alignItems: "center" }}>
-          <HierarchyPath activeHierarchyConfig={activeHierarchyConfig} maxVisibleLevel={maxVisibleLevel} isSetupComplete={isSetupComplete} />
+      <Paper
+        elevation={0}
+        sx={{
+          flexGrow: 1,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          borderRadius: 1,
+          boxShadow: "0 2px 10px rgba(0,0,0,0.03)",
+          border: 1,
+          borderColor: "divider",
+        }}
+      >
+        <Box
+          sx={{
+            borderBottom: 1,
+            borderColor: "divider",
+            px: 2,
+            py: 1.5,
+            minHeight: 44,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <Box>
+            <HierarchyPath
+              activeHierarchyConfig={activeHierarchyConfig}
+              maxVisibleLevel={maxVisibleLevel}
+              isSetupComplete={isSetupComplete}
+            />
+          </Box>
+
+          <IconButton onClick={toggleFullscreen}>
+            <Tooltip
+              title={isFullscreen ? "Exit Full Screen (F)" : "Full Screen"}
+              arrow
+              placement="bottom"
+            >
+              {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
+            </Tooltip>
+          </IconButton>
+
+          {/* <TextField
+            type="date"
+            size="small"
+            label="Report Date"
+            InputLabelProps={{ shrink: true }}
+            value={selectedDate}
+            onChange={(e) => setSelectedDate(e.target.value)}
+            sx={{  minWidth: 160 }}
+          /> */}
         </Box>
 
-        <TableContainer ref={tableContainerRef} sx={{ flexGrow: 1, bgcolor: "background.default", position: "relative", overflow: "auto", willChange: "transform" }}>
+        <TableContainer
+          ref={tableContainerRef}
+          sx={{
+            flexGrow: 1,
+            bgcolor: "background.default",
+            position: "relative",
+            overflow: "auto",
+            willChange: "transform",
+          }}
+        >
           {!isSetupComplete && (
-            <Box sx={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 10 }}>
-              <DatasetIcon sx={{ fontSize: 64, color: "action.disabled", mb: 1 }} />
-              <Typography variant="h6" color="text.secondary">No Data to Display</Typography>
-              <Typography variant="body2" color="text.disabled">Please select both a database report and a hierarchy view above.</Typography>
+            <Box
+              sx={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 10,
+              }}
+            >
+              <DatasetIcon
+                sx={{ fontSize: 64, color: "action.disabled", mb: 1 }}
+              />
+              <Typography variant="h6" color="text.secondary">
+                No Data to Display
+              </Typography>
+              <Typography variant="body2" color="text.disabled">
+                Please select both a database report and a hierarchy view above.
+              </Typography>
             </Box>
           )}
 
           {isInitializing ? (
-            <Box sx={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+            <Box
+              sx={{
+                height: "100%",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
               <CircularProgress size={32} color="primary" sx={{ mb: 1 }} />
-              <Typography variant="body2" color="text.secondary">Executing Query ...</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Executing Query ...
+              </Typography>
             </Box>
           ) : isSetupComplete ? (
-            <Table stickyHeader size="small" sx={{ minWidth: 1000, tableLayout: "fixed" }}>
+            <Table
+              stickyHeader
+              size="small"
+              sx={{ minWidth: 1000, tableLayout: "fixed" }}
+            >
               <TableHead>
                 <TableRow>
                   {visibleHierarchyLevels.map((levelName) => (
-                    <TableCell key={levelName} sx={{ backgroundColor: theme.palette.purple?.[100] || theme.palette.primary.light, color: "text.primary", fontWeight: 700, borderRight: 1, borderColor: "divider", borderBottom: 2, py: 1, whiteSpace: "nowrap" }}>
+                    <TableCell
+                      key={levelName}
+                      sx={{
+                        backgroundColor:
+                          theme.palette.purple?.[100] ||
+                          theme.palette.primary.light,
+                        color: "text.primary",
+                        fontWeight: 700,
+                        borderRight: 1,
+                        borderColor: "divider",
+                        borderBottom: 2,
+                        py: 1,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
                       {levelName.replace("_", " ").toUpperCase()}
                     </TableCell>
                   ))}
                   {activeHierarchyConfig.availableMetrics.map((metric) => (
-                    <TableCell key={metric.logicalName} align="right" sx={{ backgroundColor: theme.palette.purple?.[200] || theme.palette.primary.light, color: "text.primary", fontWeight: 700, borderRight: 1, borderColor: "divider", borderBottom: 2, py: 1, whiteSpace: "nowrap" }}>
+                    <TableCell
+                      key={metric.logicalName}
+                      align="right"
+                      sx={{
+                        backgroundColor:
+                          theme.palette.purple?.[200] ||
+                          theme.palette.primary.light,
+                        color: "text.primary",
+                        fontWeight: 700,
+                        borderRight: 1,
+                        borderColor: "divider",
+                        borderBottom: 2,
+                        py: 1,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
                       {metric.displayName}
                     </TableCell>
                   ))}
                 </TableRow>
               </TableHead>
               <TableBody>
-                {paddingTop > 0 && <TableRow><TableCell colSpan={totalColumnsCount} style={{ height: `${paddingTop}px`, padding: 0, border: "none" }} /></TableRow>}
-                
+                {paddingTop > 0 && (
+                  <TableRow>
+                    <TableCell
+                      colSpan={totalColumnsCount}
+                      style={{
+                        height: `${paddingTop}px`,
+                        padding: 0,
+                        border: "none",
+                      }}
+                    />
+                  </TableRow>
+                )}
+
                 {virtualItems.map((virtualRow) => {
                   const row = visibleRows[virtualRow.index];
                   return (
@@ -673,18 +2361,47 @@ export default function ReportAnalysisScreen() {
                       theme={theme}
                       ref={virtualizer.measureElement}
                       data-index={virtualRow.index}
+                      isFullscreen={isFullscreen}
+                      showSnackBar={showSnackBar}
                     />
                   );
                 })}
 
-                {paddingBottom > 0 && <TableRow><TableCell colSpan={totalColumnsCount} style={{ height: `${paddingBottom}px`, padding: 0, border: "none" }} /></TableRow>}
+                {paddingBottom > 0 && (
+                  <TableRow>
+                    <TableCell
+                      colSpan={totalColumnsCount}
+                      style={{
+                        height: `${paddingBottom}px`,
+                        padding: 0,
+                        border: "none",
+                      }}
+                    />
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           ) : null}
         </TableContainer>
 
-        <Box sx={{ bgcolor: "background.paper", borderTop: 1, borderColor: "divider", px: 2, display: "flex", justifyContent: "flex-end", alignItems: "center", minHeight: 40 }}>
-          <Typography variant="caption" color="text.secondary" fontWeight={500} sx={{ mr: 2 }}>
+        <Box
+          sx={{
+            bgcolor: "background.paper",
+            borderTop: 1,
+            borderColor: "divider",
+            px: 2,
+            display: "flex",
+            justifyContent: "flex-end",
+            alignItems: "center",
+            minHeight: 40,
+          }}
+        >
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            fontWeight={500}
+            sx={{ mr: 2 }}
+          >
             Showing {visibleRows.length} rows
           </Typography>
         </Box>
@@ -692,6 +2409,7 @@ export default function ReportAnalysisScreen() {
     </Box>
   );
 }
+
 
 
 
