@@ -1494,3 +1494,477 @@ export default function ReportAnalysisScreen() {
     </Box>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// File: components/FilterDialog.jsx
+
+import React, { useState, useEffect, useMemo } from "react";
+import {
+  Dialog, DialogTitle, DialogContent, DialogActions, Button, IconButton,
+  FormControl, InputLabel, Select, MenuItem, TextField, Autocomplete, Box, Typography, CircularProgress
+} from "@mui/material";
+import CloseIcon from "@mui/icons-material/Close";
+import InfoIcon from "@mui/icons-material/Info";
+import QueryStatsIcon from "@mui/icons-material/QueryStats";
+import { fetchHeads } from "../api/analyticsApi";
+
+export default function FilterDialog({
+  open,
+  onClose,
+  onApply,
+  reportsConfig = [],
+  currentFilters,
+  callApi,
+  user,
+  isApplying // NEW: Passed from parent to track API loading state
+}) {
+  const [reportCode, setReportCode] = useState("");
+  const [viewCode, setViewCode] = useState(""); 
+  const [head, setHead] = useState(null);
+  const [entityCode, setEntityCode] = useState("");
+  const [reportDate, setReportDate] = useState("");
+
+  const [headInputValue, setHeadInputValue] = useState("");
+  const [headOptions, setHeadOptions] = useState([]);
+  const [isHeadsLoading, setIsHeadsLoading] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setReportCode(currentFilters?.reportCode || "");
+      setViewCode(currentFilters?.viewCode || "");
+      setHead(currentFilters?.head || null);
+      setEntityCode(currentFilters?.entityCode || "");
+      setReportDate(currentFilters?.reportDate || "");
+      if (currentFilters?.head) setHeadOptions([currentFilters.head]);
+    }
+  }, [open, currentFilters]);
+
+  const availableViews = useMemo(() => {
+    if (!reportCode) return [];
+    const report = reportsConfig.find((r) => r.reportCode === reportCode);
+    return report?.views || [];
+  }, [reportCode, reportsConfig]);
+
+  const isCircleScope = viewCode.includes("CIRCLE");
+  const isBranchScope = viewCode.includes("BRANCH");
+
+  const entityOptions = useMemo(() => {
+    if (!user) return [];
+    if (isCircleScope) return user.circles || []; 
+    if (isBranchScope) return user.branches || []; 
+    return [];
+  }, [user, isCircleScope, isBranchScope]);
+
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(async () => {
+      if (headInputValue && headInputValue.length >= 2 && reportCode) {
+        setIsHeadsLoading(true);
+        const data = await fetchHeads(callApi, reportCode, headInputValue);
+        setHeadOptions(data);
+        setIsHeadsLoading(false);
+      } else {
+        setHeadOptions(head ? [head] : []);
+      }
+    }, 500);
+    return () => clearTimeout(delayDebounceFn);
+  }, [headInputValue, reportCode, callApi, head]);
+
+  const handleReset = () => {
+    setReportCode("");
+    setViewCode("");
+    setHead(null);
+    setEntityCode("");
+    setReportDate("");
+    setHeadOptions([]);
+  };
+
+  const handleApply = () => {
+    onApply({
+      reportCode,
+      viewCode,
+      head,
+      entityCode: (!isCircleScope && !isBranchScope) ? "" : entityCode,
+      reportDate,
+    });
+    // REMOVED: onClose() - The parent now controls closing based on data fetch success
+  };
+
+  const isApplyEnabled = useMemo(() => {
+    const baseValid = reportCode && viewCode && head?.headCode && reportDate;
+    if (!baseValid) return false;
+    if (isCircleScope || isBranchScope) return !!entityCode;
+    return true;
+  }, [reportCode, viewCode, head, entityCode, reportDate, isCircleScope, isBranchScope]);
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 2 }}>
+        <Typography variant="h6" fontWeight="bold" sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+          <QueryStatsIcon /> Drill Down Filters
+        </Typography>
+        <IconButton onClick={onClose} size="small" disabled={isApplying}>
+          <CloseIcon />
+        </IconButton>
+      </DialogTitle>
+
+      <DialogContent dividers>
+        <Box display="flex" flexDirection="column" gap={3} py={1}>
+          
+          <FormControl size="small" fullWidth>
+            <InputLabel id="dialog-report-label">Select Report *</InputLabel>
+            <Select
+              labelId="dialog-report-label"
+              value={reportCode}
+              label="Select Report *"
+              disabled={isApplying}
+              onChange={(e) => {
+                setReportCode(e.target.value);
+                setViewCode("");
+                setEntityCode("");
+                // NEW: Automatically reset Head Code section when report changes
+                setHead(null);
+                setHeadInputValue("");
+                setHeadOptions([]);
+              }}
+            >
+              {reportsConfig.map((report) => (
+                <MenuItem key={report.reportCode} value={report.reportCode}>
+                  {report.displayName}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          <Autocomplete
+            size="small"
+            options={headOptions}
+            getOptionLabel={(option) => option ? `${option.headCode} - ${option.headName}` : ""}
+            value={head}
+            onChange={(event, newValue) => setHead(newValue)}
+            onInputChange={(event, newInputValue) => setHeadInputValue(newInputValue)}
+            loading={isHeadsLoading}
+            disabled={!reportCode || isApplying}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Search Head Code *"
+                variant="outlined"
+                InputProps={{
+                  ...params.InputProps,
+                  endAdornment: (
+                    <React.Fragment>
+                      {isHeadsLoading ? <CircularProgress color="inherit" size={20} /> : null}
+                      {params.InputProps.endAdornment}
+                    </React.Fragment>
+                  ),
+                }}
+                helperText={
+                  <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                    <InfoIcon sx={{ fontSize: "0.625rem" }} />
+                    <em>Type 2+ characters to search.</em>
+                  </span>
+                }
+              />
+            )}
+          />
+
+          <FormControl size="small" fullWidth disabled={!reportCode || isApplying}>
+            <InputLabel id="dialog-scope-label">Scope *</InputLabel>
+            <Select
+              labelId="dialog-scope-label"
+              value={viewCode}
+              label="Scope *"
+              onChange={(e) => {
+                setViewCode(e.target.value);
+                setEntityCode("");
+              }}
+            >
+              {availableViews.map((view) => (
+                <MenuItem key={view.viewCode} value={view.viewCode}>
+                  {view.displayName}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          {(isCircleScope || isBranchScope) && (
+            <FormControl size="small" fullWidth disabled={isApplying}>
+              <InputLabel id="dialog-entity-label">Select {isCircleScope ? "Circle" : "Branch"} *</InputLabel>
+              <Select
+                labelId="dialog-entity-label"
+                value={entityCode}
+                label={`Select ${isCircleScope ? "Circle" : "Branch"} *`}
+                onChange={(e) => setEntityCode(e.target.value)}
+              >
+                {entityOptions.length === 0 ? (
+                  <MenuItem disabled value="">No entities found in user profile</MenuItem>
+                ) : (
+                  entityOptions.map((entity) => (
+                    <MenuItem key={entity.id || entity.code} value={entity.id || entity.code}>
+                      {entity.name}
+                    </MenuItem>
+                  ))
+                )}
+              </Select>
+            </FormControl>
+          )}
+
+          <TextField
+            type="date"
+            size="small"
+            fullWidth
+            label="Report Date *"
+            InputLabelProps={{ shrink: true }}
+            value={reportDate}
+            onChange={(e) => setReportDate(e.target.value)}
+            disabled={isApplying}
+          />
+        </Box>
+      </DialogContent>
+
+      <DialogActions sx={{ p: 2, px: 3 }}>
+        <Button onClick={handleReset} color="inherit" variant="outlined" disabled={isApplying}>Reset</Button>
+        <Button 
+          onClick={handleApply} 
+          color="primary" 
+          variant="contained" 
+          disabled={!isApplyEnabled || isApplying}
+          startIcon={isApplying ? <CircularProgress size={16} color="inherit" /> : null}
+        >
+          {isApplying ? "Applying..." : "Apply"}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// File: ReportAnalysisScreen.jsx
+
+import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useSelector, useDispatch } from "react-redux";
+import { Box, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography, CircularProgress, IconButton } from "@mui/material";
+import DatasetIcon from "@mui/icons-material/Dataset";
+import { useTheme } from "@mui/material/styles";
+import { useVirtualizer } from "@tanstack/react-virtual";
+
+import { enterComponentFullscreen, exitComponentFullscreen } from "../../store/slices/uiSlice";
+import useApi from "../../hooks/useApi";
+import useCustomSnackbar from "../../utils/useCustomSnackbar";
+
+import ReportAnalysisHeader from "./components/ReportAnalysisHeader";
+import HierarchyPath from "./components/HierarchyPath";
+import ActualTreeTableRow from "./components/ActualTreeTableRow";
+import FilterDialog from "./components/FilterDialog";
+import { fetchInitialData, fetchChildrenData } from "./api/analyticsApi";
+
+import FullscreenIcon from "@mui/icons-material/Fullscreen";
+import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
+
+const DEFAULT_CONFIG = { hierarchy: [], availableMetrics: [] };
+
+export default function ReportAnalysisScreen() {
+  const { callApi } = useApi();
+  const dispatch = useDispatch();
+  const theme = useTheme();
+  const tableContainerRef = useRef(null);
+  const showSnackBar = useCustomSnackbar();
+
+  const user = useSelector((state) => state.auth.user);
+  const isFullscreen = useSelector((state) => state.ui?.isComponentFullscreen || false);
+  const cachedNodes = useSelector((state) => state.analyticsCache?.nodes || {});
+
+  const [reportsConfig, setReportsConfig] = useState([]);
+  const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
+
+  const [appliedFilters, setAppliedFilters] = useState({
+    reportCode: "",
+    viewCode: "",
+    head: null,
+    entityCode: "",
+    reportDate: "",
+  });
+
+  const [data, setData] = useState([]);
+  const [expandedIds, setExpandedIds] = useState(new Map());
+  const [loadingIds, setLoadingIds] = useState(new Set());
+  const [isInitializing, setIsInitializing] = useState(false);
+
+  // --- DERIVED CONFIGURATION DYNAMICS ---
+  const activeReport = useMemo(() => {
+    return reportsConfig.find((r) => r.reportCode === appliedFilters.reportCode) || null;
+  }, [reportsConfig, appliedFilters.reportCode]);
+
+  const activeHierarchyConfig = useMemo(() => {
+    if (!activeReport || !appliedFilters.viewCode) return DEFAULT_CONFIG;
+    return activeReport.views.find((v) => v.viewCode === appliedFilters.viewCode) || DEFAULT_CONFIG;
+  }, [activeReport, appliedFilters.viewCode]);
+
+  const isSetupComplete = !!(
+    appliedFilters.reportCode &&
+    appliedFilters.viewCode &&
+    appliedFilters.head &&
+    appliedFilters.reportDate &&
+    activeHierarchyConfig.hierarchy.length > 0
+  );
+
+  const filtersApplied = !!appliedFilters.reportCode;
+
+  // --- REDUX FULLSCREEN LOGIC ---
+  const toggleFullscreen = useCallback(() => { /* ... Keep exact as previous ... */ }, [isFullscreen, dispatch, showSnackBar]);
+  useEffect(() => { /* ... Keep exact popstate listener ... */ }, [isFullscreen, dispatch]);
+  useEffect(() => { /* ... Keep exact keydown listener ... */ }, [isFullscreen, dispatch]);
+
+  // --- CONFIG FETCHING ---
+  useEffect(() => {
+    const fetchConfig = async () => {
+      try {
+        const response = await callApi("/AS/analytics/config", {}, "GET");
+        setReportsConfig(Array.isArray(response) ? response : response?.data || []);
+      } catch (error) {
+        showSnackBar("Error fetching configuration", "error");
+      }
+    };
+    if (user) fetchConfig();
+  }, [callApi, user, showSnackBar]);
+
+  // --- NEW: DATA FETCHING HANDLER (From Dialog) ---
+  const handleApplyFilters = async (newFilters) => {
+    setIsInitializing(true);
+    
+    try {
+      // Find the specific hierarchy configuration for the selected report & view
+      const targetReport = reportsConfig.find((r) => r.reportCode === newFilters.reportCode);
+      const targetHierarchyConfig = targetReport?.views.find((v) => v.viewCode === newFilters.viewCode) || DEFAULT_CONFIG;
+
+      const rootData = await fetchInitialData(
+        callApi,
+        showSnackBar,
+        newFilters,
+        targetHierarchyConfig.hierarchy,
+        targetHierarchyConfig.availableMetrics
+      );
+
+      // If data is empty, DO NOT apply filters or close dialog. Path naturally stays hidden.
+      if (!rootData || rootData.length === 0) {
+        showSnackBar("No data found for the selected combination", "warning");
+      } else {
+        // Success: Update main view state and close dialog
+        setAppliedFilters(newFilters);
+        setData(rootData);
+        setExpandedIds(new Map());
+        setIsFilterDialogOpen(false);
+      }
+    } catch (error) {
+      console.error("Failed to load initial data", error);
+    } finally {
+      setIsInitializing(false);
+    }
+  };
+
+  // --- NODE EXPANSION LOGIC ---
+  const appendChildrenToTree = useCallback((nodes, parentId, newChildren) => { /* Keep same */ }, []);
+  const handleToggle = useCallback(async (node) => { /* Keep same caching and fetchChildrenData logic */ }, [expandedIds, appendChildrenToTree, activeHierarchyConfig, appliedFilters, callApi, showSnackBar, cachedNodes, dispatch]);
+
+  // --- VIRTUALIZATION ENGINE ---
+  const visibleRows = useMemo(() => { /* Keep same */ }, [data, expandedIds]);
+  const maxVisibleLevel = useMemo(() => { /* Keep same */ }, [visibleRows]);
+  const visibleHierarchyLevels = activeHierarchyConfig.hierarchy.slice(0, maxVisibleLevel + 1);
+  const virtualizer = useVirtualizer({ /* Keep same */ });
+  const virtualItems = virtualizer.getVirtualItems();
+  const totalColumnsCount = visibleHierarchyLevels.length + activeHierarchyConfig.availableMetrics.length;
+  const paddingTop = virtualItems.length > 0 ? virtualItems[0].start : 0;
+  const paddingBottom = virtualItems.length > 0 ? virtualizer.getTotalSize() - virtualItems[virtualItems.length - 1].end : 0;
+
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, ...(isFullscreen ? { position: "fixed", top: 0, left: 0, right: 0, bottom: 0, width: "100vw", height: "100vh", zIndex: 1299, p: 2 } : { height: "calc(100vh - 220px)" }) }}>
+      
+      <ReportAnalysisHeader
+        activeReport={activeReport}
+        isFullscreen={isFullscreen}
+        toggleFullscreen={toggleFullscreen}
+        onOpenFilter={() => setIsFilterDialogOpen(true)}
+        filtersApplied={filtersApplied}
+      />
+
+      <FilterDialog
+        open={isFilterDialogOpen}
+        onClose={() => setIsFilterDialogOpen(false)}
+        onApply={handleApplyFilters} // NEW: Pass the async handler
+        reportsConfig={reportsConfig}
+        currentFilters={appliedFilters}
+        callApi={callApi} 
+        user={user}
+        isApplying={isInitializing} // NEW: Pass loading state
+      />
+
+      <Paper elevation={0} sx={{ flexGrow: 1, display: "flex", flexDirection: "column", overflow: "hidden", borderRadius: 1, boxShadow: "0 2px 10px rgba(0,0,0,0.03)", border: 1, borderColor: "divider" }}>
+        
+        <Box sx={{ borderBottom: 1, borderColor: "divider", px: 2, py: 1.5, minHeight: 44, display: "flex", alignItems: "center" }}>
+          <HierarchyPath activeHierarchyConfig={activeHierarchyConfig} maxVisibleLevel={maxVisibleLevel} isSetupComplete={isSetupComplete} />
+        </Box>
+
+        <TableContainer ref={tableContainerRef} sx={{ flexGrow: 1, bgcolor: "background.default", position: "relative", overflow: "auto", willChange: "transform" }}>
+          
+          {/* Default Placeholder when isSetupComplete is False */}
+          {!isSetupComplete && (
+            <Box sx={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 10 }}>
+              <DatasetIcon sx={{ fontSize: 64, color: "action.disabled", mb: 1 }} />
+              <Typography variant="h6" color="text.secondary">No Data to Display</Typography>
+              <Typography variant="body2" color="text.disabled">Click the filter icon to select a report combination and scope.</Typography>
+            </Box>
+          )}
+
+          {isSetupComplete && data.length > 0 ? (
+            <Table stickyHeader size="small" sx={{ minWidth: 1000, tableLayout: "fixed" }}>
+              {/* ... KEEP EXISTING TABLE RENDERER ... */}
+            </Table>
+          ) : null}
+        </TableContainer>
+
+        {/* Footer Area */}
+        <Box sx={{ bgcolor: "background.paper", borderTop: 1, borderColor: "divider", px: 2, py: 1, display: "flex", justifyContent: "space-between", alignItems: "center", minHeight: 40 }}>
+          <Typography variant="caption" color="text.secondary" fontWeight={500}>
+            Showing {visibleRows.length} rows
+          </Typography>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <IconButton onClick={toggleFullscreen} size="small" sx={{ border: "1px solid", borderColor: "divider", mr: 0.5 }}>
+              {isFullscreen ? <FullscreenExitIcon fontSize="small" /> : <FullscreenIcon fontSize="small" />}
+            </IconButton>
+            <Typography variant="caption" color="text.secondary" sx={{ userSelect: "none" }}>
+              {isFullscreen ? "Exit Full Screen" : "Press F to Full Screen"}
+            </Typography>
+          </Box>
+        </Box>
+      </Paper>
+    </Box>
+  );
+}
+
