@@ -53,3 +53,37 @@ const handleApply = () => {
 
 
 
+  // --- DATA FETCHING (Triggered from Dialog Apply) ---
+  const handleApplyFilters = async (newFilters) => {
+    setIsInitializing(true);
+    
+    try {
+      // Find the specific hierarchy configuration for the selected report & view
+      const targetReport = reportsConfig.find((r) => r.reportCode === newFilters.reportCode);
+      const targetHierarchyConfig = targetReport?.views.find((v) => v.viewCode === newFilters.viewCode) || DEFAULT_CONFIG;
+
+      const rootData = await fetchInitialData(
+        callApi,
+        showSnackBar,
+        newFilters,
+        targetHierarchyConfig.hierarchy,
+        targetHierarchyConfig.availableMetrics
+      );
+
+      // If data is empty, DO NOT apply filters or close dialog. Path naturally stays hidden.
+      if (!rootData || rootData.length === 0) {
+        showSnackBar("No data found for the selected combination", "warning");
+      } else {
+        // Success: Update main view state, inject data, and close dialog
+        setAppliedFilters(newFilters);
+        setData(rootData);
+        setExpandedIds(new Map());
+        setIsFilterDialogOpen(false); 
+      }
+    } catch (error) {
+      console.error("Failed to load initial data", error);
+      showSnackBar("Error fetching data", "error");
+    } finally {
+      setIsInitializing(false);
+    }
+  };
