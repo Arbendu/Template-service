@@ -1973,31 +1973,3 @@ export default function ReportAnalysisScreen() {
 
 
 
-
-  // --- DERIVED CONFIGURATION DYNAMICS ---
-  const activeReport = useMemo(() => {
-    return reportsConfig.find((r) => r.reportCode === appliedFilters.reportCode) || null;
-  }, [reportsConfig, appliedFilters.reportCode]);
-
-  // SAFELY resolve hierarchy and guarantee arrays exist even if backend data is missing them
-  const activeHierarchyConfig = useMemo(() => {
-    if (!activeReport || !appliedFilters.viewCode) return DEFAULT_CONFIG;
-    
-    const foundView = activeReport.views?.find((v) => v.viewCode === appliedFilters.viewCode);
-    
-    return {
-      hierarchy: foundView?.hierarchy || [],
-      availableMetrics: foundView?.availableMetrics || []
-    };
-  }, [activeReport, appliedFilters.viewCode]);
-
-  // Use optional chaining (?.) to prevent crashes if head or hierarchy is missing
-  const isSetupComplete = !!(
-    appliedFilters.reportCode &&
-    appliedFilters.viewCode &&
-    appliedFilters.head?.headCode &&
-    appliedFilters.reportDate &&
-    activeHierarchyConfig?.hierarchy?.length > 0
-  );
-
-  const filtersApplied = !!appliedFilters.reportCode;
