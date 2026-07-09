@@ -1794,3 +1794,83 @@ export default analyticsCacheSlice.reducer;
         ]
     }
 ]
+
+
+
+
+
+
+// ***************************************** Updated Scenario ************************************ //
+
+Step 2: The Autocomplete "Code" API
+When the user selects a report (e.g., YSA) and starts typing a Head Code (e.g., "100"), call this
+API to get suggestions.
+● Endpoint: analytics/heads/search?reportName=ysa_report&search=100
+● Headers: Authorization: Bearer <JWT_TOKEN>
+Response Example:
+[
+{
+"headCode": "1001",
+"headName": "Bank Charges"
+},
+{
+"headCode": "1002",
+"headName": "Interest on Loans"
+}
+]
+
+
+
+
+
+Scenario A: Bank Level Scope Selected
+Because the Bank hierarchy is ["Geography", "Circle", "Cgl", ...], you ask for Geography.
+{
+"viewCode": "PNL_BANK",
+"dimensions": ["Geography"],
+"metrics": ["TotalAmount"],
+"filters": [
+{ "logicalField": "ReportDate", "operator": "EQUALS", "value":
+"2026-03-31" },
+{ "logicalField": "ReportType", "operator": "EQUALS", "value":
+"pnl_report" },
+{ "logicalField": "HeadCode", "operator": "EQUALS", "value":
+"1001" }
+]
+}
+Scenario B: Circle Level Scope Selected (User typed "Kolkata")
+Because the Circle hierarchy is ["Cgl", "Product", "Branch"], you ask for Cgl. Notice how Circle is
+now passed as a filter!
+{
+"viewCode": "PNL_CIRCLE",
+"dimensions": ["Cgl"],
+"metrics": ["TotalAmount"],
+"filters": [
+{ "logicalField": "ReportDate", "operator": "EQUALS", "value":
+"2026-03-31" },
+{ "logicalField": "ReportType", "operator": "EQUALS", "value":
+"pnl_report" },
+{ "logicalField": "HeadCode", "operator": "EQUALS", "value":
+"1001" },
+{ "logicalField": "Circle", "operator": "EQUALS", "value":
+"Kolkata" }
+]
+}
+Scenario C: Branch Level Scope Selected (User typed "01111")
+Because the Branch hierarchy is ["Cgl", "Product"], you ask for Cgl. Notice how Branch is
+passed as a filter.
+{
+"viewCode": "PNL_BRANCH",
+"dimensions": ["Cgl"],
+"metrics": ["TotalAmount"],
+"filters": [
+{ "logicalField": "ReportDate", "operator": "EQUALS", "value":
+"2026-03-31" },
+{ "logicalField": "ReportType", "operator": "EQUALS", "value":
+"pnl_report" },
+{ "logicalField": "HeadCode", "operator": "EQUALS", "value":
+"1001" },
+{ "logicalField": "Branch", "operator": "EQUALS", "value": "01111"
+}
+]
+}
