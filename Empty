@@ -1,1 +1,490 @@
+// ****************************************** FilterDialog.jsx ******************************************** //
 
+import React, { useState, useEffect, useMemo } from "react";
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  IconButton,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  TextField,
+  Autocomplete,
+  Box,
+  Typography,
+} from "@mui/material";
+import CloseIcon from "@mui/icons-material/Close";
+
+export default function FilterDialog({
+  open,
+  onClose,
+  onApply,
+  reportsConfig = [],
+  currentFilters,
+}) {
+  // Local state for the dialog form
+  const [reportCode, setReportCode] = useState("");
+  const [head, setHead] = useState(null);
+  const [scope, setScope] = useState("");
+  const [entityCode, setEntityCode] = useState(""); // For specific Circle/Branch
+  const [reportDate, setReportDate] = useState("");
+
+  // Placeholder state for Autocomplete & Entity Dropdown options (To be connected to your APIs)
+  const [headOptions, setHeadOptions] = useState([]);
+  const [entityOptions, setEntityOptions] = useState([]);
+
+  // Sync local state with currently applied filters when dialog opens
+  useEffect(() => {
+    if (open) {
+      setReportCode(currentFilters?.reportCode || "");
+      setHead(currentFilters?.head || null);
+      setScope(currentFilters?.scope || "");
+      setEntityCode(currentFilters?.entityCode || "");
+      setReportDate(currentFilters?.reportDate || "");
+    }
+  }, [open, currentFilters]);
+
+  const handleReset = () => {
+    setReportCode("");
+    setHead(null);
+    setScope("");
+    setEntityCode("");
+    setReportDate("");
+  };
+
+  const handleApply = () => {
+    onApply({
+      reportCode,
+      head,
+      scope,
+      entityCode: scope === "BANK" ? "" : entityCode,
+      reportDate,
+    });
+    onClose();
+  };
+
+  // Validation: Check if all mandatory fields are filled
+  const isApplyEnabled = useMemo(() => {
+    const baseValid = reportCode && head && scope && reportDate;
+    if (!baseValid) return false;
+    if (scope === "CIRCLE" || scope === "BRANCH") {
+      return !!entityCode;
+    }
+    return true; // BANK scope doesn't need entityCode
+  }, [reportCode, head, scope, entityCode, reportDate]);
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <Typography variant="h6" fontWeight="bold">
+          Report Filters
+        </Typography>
+        <IconButton onClick={onClose} size="small">
+          <CloseIcon />
+        </IconButton>
+      </DialogTitle>
+
+      <DialogContent dividers>
+        <Box display="flex" flexDirection="column" gap={3} py={1}>
+          
+          {/* 1. Report Name */}
+          <FormControl size="small" fullWidth>
+            <InputLabel id="dialog-report-label">Database Report *</InputLabel>
+            <Select
+              labelId="dialog-report-label"
+              value={reportCode}
+              label="Database Report *"
+              onChange={(e) => setReportCode(e.target.value)}
+            >
+              {reportsConfig.map((report) => (
+                <MenuItem key={report.reportCode} value={report.reportCode}>
+                  {report.displayName}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          {/* 2. Head / Head Code (Autocomplete) */}
+          <Autocomplete
+            size="small"
+            options={headOptions}
+            getOptionLabel={(option) => option?.name || ""}
+            value={head}
+            onChange={(event, newValue) => setHead(newValue)}
+            onInputChange={(event, newInputValue) => {
+              // TODO: Trigger your backend API search here based on newInputValue
+              // setHeadOptions(response.data);
+            }}
+            renderInput={(params) => (
+              <TextField {...params} label="Search Head / Head Code *" variant="outlined" />
+            )}
+          />
+
+          {/* 3. Scope */}
+          <FormControl size="small" fullWidth>
+            <InputLabel id="dialog-scope-label">Scope *</InputLabel>
+            <Select
+              labelId="dialog-scope-label"
+              value={scope}
+              label="Scope *"
+              onChange={(e) => {
+                setScope(e.target.value);
+                setEntityCode(""); // Reset entity when scope changes
+              }}
+            >
+              <MenuItem value="BANK">BANK</MenuItem>
+              <MenuItem value="CIRCLE">CIRCLE</MenuItem>
+              <MenuItem value="BRANCH">BRANCH</MenuItem>
+            </Select>
+          </FormControl>
+
+          {/* Conditional Dropdown for Circle/Branch */}
+          {(scope === "CIRCLE" || scope === "BRANCH") && (
+            <FormControl size="small" fullWidth>
+              <InputLabel id="dialog-entity-label">
+                Select {scope === "CIRCLE" ? "Circle" : "Branch"} *
+              </InputLabel>
+              <Select
+                labelId="dialog-entity-label"
+                value={entityCode}
+                label={`Select ${scope === "CIRCLE" ? "Circle" : "Branch"} *`}
+                onChange={(e) => setEntityCode(e.target.value)}
+              >
+                {/* TODO: Populate dynamically based on user Role/Scope API */}
+                {entityOptions.map((entity) => (
+                  <MenuItem key={entity.id} value={entity.id}>
+                    {entity.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          )}
+
+          {/* 4. Date */}
+          <TextField
+            type="date"
+            size="small"
+            fullWidth
+            label="Report Date *"
+            InputLabelProps={{ shrink: true }}
+            value={reportDate}
+            onChange={(e) => setReportDate(e.target.value)}
+          />
+        </Box>
+      </DialogContent>
+
+      <DialogActions sx={{ p: 2, px: 3 }}>
+        <Button onClick={handleReset} color="inherit" variant="outlined">
+          Reset
+        </Button>
+        <Button
+          onClick={handleApply}
+          color="primary"
+          variant="contained"
+          disabled={!isApplyEnabled}
+        >
+          Apply
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+// ******************************************** ReportAnalysisHeader *********************************************** //
+import React from "react";
+import { Box, Paper, Typography, IconButton, Tooltip } from "@mui/material";
+import AnalyticsIcon from "@mui/icons-material/Analytics";
+import FilterAltIcon from "@mui/icons-material/FilterAlt";
+import FullscreenIcon from "@mui/icons-material/Fullscreen";
+import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
+
+export default function ReportAnalysisHeader({
+  activeReport,
+  isFullscreen,
+  toggleFullscreen,
+  onOpenFilter,
+}) {
+  return (
+    <Paper
+      elevation={0}
+      sx={{
+        p: 3,
+        borderRadius: 2,
+        boxShadow: "0 5px 10px rgba(0,0,0,0.2)",
+        border: 1,
+        borderColor: "divider",
+        display: "flex",
+        justifyContent: "space-between",
+        flexDirection: "row",
+        flexShrink: 0,
+      }}
+    >
+      <Box display="flex" alignItems="center" gap={2}>
+        <Box sx={{ backgroundColor: "primary.main", borderRadius: "10px", width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <AnalyticsIcon sx={{ color: "primary.contrastText", fontSize: 24 }} />
+        </Box>
+        <Box sx={{ overflow: "hidden" }}>
+          <Typography variant="h6" sx={{ fontWeight: 700, color: "text.primary" }}>
+            {activeReport?.displayName || "Financial Analytics"}
+          </Typography>
+          <Typography variant="caption" sx={{ color: "text.primary" }}>
+            Dynamic Drill-Down Matrix
+          </Typography>
+        </Box>
+      </Box>
+
+      <Box display="flex" alignItems="center" gap={1}>
+        <Tooltip title="Filter Reports" arrow placement="bottom">
+          <IconButton onClick={onOpenFilter} color="primary" sx={{ border: "1px solid", borderColor: "divider" }}>
+            <FilterAltIcon />
+          </IconButton>
+        </Tooltip>
+
+        <Tooltip title={isFullscreen ? "Exit Full Screen (Esc)" : "Full Screen"} arrow placement="bottom">
+          <IconButton onClick={toggleFullscreen} sx={{ border: "1px solid", borderColor: "divider" }}>
+            {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
+          </IconButton>
+        </Tooltip>
+      </Box>
+    </Paper>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+// ********************************* Update ActualTreeTableRow ************************************** //
+
+// Remove 'isFullscreen' from destructured props
+// ...
+      
+      {/* UPDATE: Removed isFullscreen condition. Button shows anytime an active Headcode is expanded */}
+      {isExpanded && !isLoading && node.level === 1 && node.children && (
+        <Tooltip title="Copy all GLCODEs" placement="top" arrow>
+          <IconButton
+            size="small"
+            onClick={(e) => {
+              e.stopPropagation();
+              const headcodeRow = `${node.name}\t${node.TotalAmount || ""}`;
+              const childrenRows = node.children
+                .map((child) => `${child.name}\t${child.TotalAmount || ""}`)
+                .join("\n");
+              
+              const combinedData = `${headcodeRow}\n${childrenRows}`;
+
+              navigator.clipboard.writeText(combinedData)
+                .then(() => console.log("Copied"))
+                .catch((err) => console.error("Failed to copy", err));
+            }}
+            sx={{ ml: 1, padding: "2px" }}
+          >
+            <ContentCopyIcon sx={{ fontSize: 16, color: "text.secondary" }} />
+          </IconButton>
+        </Tooltip>
+      )}
+
+// ... [At the bottom of the file in React.memo comparison] ...
+  (prevProps, nextProps) => {
+    return (
+      prevProps.isExpanded === nextProps.isExpanded &&
+      prevProps.isLoading === nextProps.isLoading &&
+      prevProps.node.id === nextProps.node.id &&
+      prevProps.maxVisibleLevel === nextProps.maxVisibleLevel &&
+      prevProps.index === nextProps.index &&
+      prevProps.theme === nextProps.theme
+      // REMOVED: prevProps.isFullscreen === nextProps.isFullscreen
+    );
+  }
+
+
+
+
+
+
+
+
+
+
+
+// *********************************** ReportAnalysisScreen ****************************************** //
+
+
+import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useSelector, useDispatch } from "react-redux";
+import { Box, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography, CircularProgress } from "@mui/material";
+import DatasetIcon from "@mui/icons-material/Dataset";
+import { useTheme } from "@mui/material/styles";
+import { useVirtualizer } from "@tanstack/react-virtual";
+
+// Application Imports
+import { enterComponentFullscreen, exitComponentFullscreen } from "../../store/slices/uiSlice";
+import useApi from "../../hooks/useApi";
+import useCustomSnackbar from "../../utils/useCustomSnackbar";
+
+// Component Imports
+import ReportAnalysisHeader from "./components/ReportAnalysisHeader";
+import HierarchyPath from "./components/HierarchyPath";
+import ActualTreeTableRow from "./components/ActualTreeTableRow";
+import FilterDialog from "./components/FilterDialog"; // <--- Import Dialog
+import { fetchInitialData, fetchChildrenData } from "./api/analyticsApi";
+import { DEFAULT_CONFIG } from "./utils/analyticsConstants";
+
+export default function ReportAnalysisScreen() {
+  const { callApi } = useApi();
+  const dispatch = useDispatch();
+  const theme = useTheme();
+  const tableContainerRef = useRef(null);
+  const showSnackBar = useCustomSnackbar();
+
+  const user = useSelector((state) => state.auth.user);
+  const isFullscreen = useSelector((state) => state.ui?.isComponentFullscreen || false);
+  const cachedNodes = useSelector((state) => state.analyticsCache?.nodes || {});
+
+  const [reportsConfig, setReportsConfig] = useState([]);
+  
+  // Dialog State
+  const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
+  
+  // Master Filter State (Applied Filters)
+  const [appliedFilters, setAppliedFilters] = useState({
+    reportCode: "",
+    head: null,
+    scope: "",
+    entityCode: "",
+    reportDate: "",
+  });
+
+  const [data, setData] = useState([]);
+  const [expandedIds, setExpandedIds] = useState(new Map());
+  const [loadingIds, setLoadingIds] = useState(new Set());
+  const [isInitializing, setIsInitializing] = useState(false);
+
+  // Derived Values
+  const activeReport = useMemo(() => 
+    reportsConfig.find((r) => r.reportCode === appliedFilters.reportCode) || null, 
+  [reportsConfig, appliedFilters.reportCode]);
+  
+  const activeHierarchyConfig = DEFAULT_CONFIG; // TODO: Replace with dynamic hierarchy derived from Scope when API is ready
+
+  const isSetupComplete = !!(appliedFilters.reportCode && appliedFilters.head && appliedFilters.scope && appliedFilters.reportDate);
+
+  // --- FULLSCREEN LOGIC ---
+  const toggleFullscreen = useCallback(() => { /* ... Keep exactly as before ... */ }, [isFullscreen, dispatch, showSnackBar]);
+  useEffect(() => { /* ... popstate listener ... */ }, [isFullscreen, dispatch]);
+  useEffect(() => { /* ... keydown listener ... */ }, [isFullscreen, dispatch, showSnackBar]);
+
+  // --- CONFIG FETCHING ---
+  useEffect(() => {
+    const fetchConfig = async () => {
+      try {
+        const response = await callApi("/AS/analytics/config", {}, "GET");
+        setReportsConfig(Array.isArray(response) ? response : response?.data || []);
+      } catch (error) {
+        showSnackBar("Error fetching config", "error");
+      }
+    };
+    if (user) fetchConfig();
+  }, [callApi, user, showSnackBar]);
+
+  // --- DATA FETCHING (Root Level) ---
+  useEffect(() => {
+    const loadRoot = async () => {
+      if (!isSetupComplete) {
+        setData([]);
+        return;
+      }
+      setIsInitializing(true);
+      setData([]);
+      setExpandedIds(new Map());
+
+      try {
+        // TODO: Update fetchInitialData payload to use `appliedFilters` instead of viewCode
+        const rootData = await fetchInitialData(
+          callApi, 
+          showSnackBar, 
+          appliedFilters, // Passed whole object for your new API payload
+          activeHierarchyConfig.hierarchy, 
+          activeHierarchyConfig.availableMetrics
+        );
+        if (!rootData || rootData.length === 0) showSnackBar("No data found", "warning");
+        setData(rootData);
+      } catch (error) {
+        console.error("Failed to load initial data", error);
+      } finally {
+        setIsInitializing(false);
+      }
+    };
+    loadRoot();
+  }, [appliedFilters, activeHierarchyConfig, callApi, showSnackBar, isSetupComplete]);
+
+  // --- NODE TOGGLE LOGIC ---
+  const appendChildrenToTree = useCallback((nodes, parentId, newChildren) => { /* ... Keep as before ... */ }, []);
+  const handleToggle = useCallback(async (node) => {
+    // ... Keep exact logic, but pass appliedFilters to fetchChildrenData instead of viewCode/selectedDate
+  }, [expandedIds, appendChildrenToTree, activeHierarchyConfig, appliedFilters, callApi, showSnackBar, cachedNodes, dispatch]);
+
+  // --- VIRTUALIZATION ENGINE ---
+  // ... Keep visibleRows, maxVisibleLevel, virtualizer configuration ...
+
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, ...(isFullscreen ? { position: "fixed", top: 0, left: 0, right: 0, bottom: 0, width: "100vw", height: "100vh", zIndex: 1299, p: 2 } : { height: "calc(100vh - 220px)" }) }}>
+      
+      {/* HEADER */}
+      <ReportAnalysisHeader
+        activeReport={activeReport}
+        isFullscreen={isFullscreen}
+        toggleFullscreen={toggleFullscreen}
+        onOpenFilter={() => setIsFilterDialogOpen(true)}
+      />
+
+      {/* FILTER DIALOG */}
+      <FilterDialog
+        open={isFilterDialogOpen}
+        onClose={() => setIsFilterDialogOpen(false)}
+        onApply={(newFilters) => setAppliedFilters(newFilters)}
+        reportsConfig={reportsConfig}
+        currentFilters={appliedFilters}
+      />
+
+      <Paper elevation={0} sx={{ flexGrow: 1, display: "flex", flexDirection: "column", overflow: "hidden", borderRadius: 1, border: 1, borderColor: "divider" }}>
+        
+        {/* PATH BOX (Date picker removed, Path remains) */}
+        <Box sx={{ borderBottom: 1, borderColor: "divider", px: 2, py: 1.5, minHeight: 44, display: "flex", alignItems: "center" }}>
+          <HierarchyPath activeHierarchyConfig={activeHierarchyConfig} maxVisibleLevel={0 /* maxVisibleLevel */} isSetupComplete={isSetupComplete} />
+        </Box>
+
+        {/* TABLE RENDERER */}
+        <TableContainer ref={tableContainerRef} sx={{ flexGrow: 1, bgcolor: "background.default", position: "relative", overflow: "auto" }}>
+          {!isSetupComplete && (
+            <Box sx={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 10 }}>
+              <DatasetIcon sx={{ fontSize: 64, color: "action.disabled", mb: 1 }} />
+              <Typography variant="h6" color="text.secondary">No Data to Display</Typography>
+              <Typography variant="body2" color="text.disabled">Click the filter icon to apply scope and date.</Typography>
+            </Box>
+          )}
+
+          {/* ... Table logic remains unchanged ... */}
+        </TableContainer>
+      </Paper>
+    </Box>
+  );
+}
