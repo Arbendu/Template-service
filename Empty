@@ -1,4 +1,347 @@
-// ****************************************** FilterDialog.jsx ******************************************** //
+// ******************************************* AnalyticsApi *************************************** //
+
+export const fetchAnalyticsData = async (callApi, showSnackBar, payload) => {
+  try {
+    const responseData = await callApi(
+      "/AS/analytics/drill-down",
+      payload,
+      "POST",
+    );
+    console.log("Drill-down payload: ", payload);
+    
+    return responseData?.data || [];
+  } catch (error) {
+    console.error("Error fetching analytics data:", error);
+    showSnackBar("Error: " + error.title, "error");
+  }
+};
+
+export const fetchInitialData = async (
+  callApi,
+  showSnackBar,
+  viewCode,
+  hierarchy,
+  metrics,
+  reportDate
+) => {
+  const rootDimension = hierarchy[0];
+  const payload = {
+    viewCode: viewCode,
+    reportDate: reportDate,
+    dimensions: [rootDimension],
+    metrics: metrics.map((m) => m.logicalName),
+    filters: [],
+  };
+  const apiData = await fetchAnalyticsData(callApi, showSnackBar, payload);
+
+  return (apiData || []).map((row) => ({
+    ...row,
+    level: 0,
+    nodeFilters: [],
+  }));
+};
+
+export const fetchChildrenData = async (
+  callApi,
+  showSnackBar,
+  parentNode,
+  viewCode,
+  hierarchy,
+  metrics,
+  reportDate
+) => {
+  const childLevel = parentNode.level + 1;
+  const nextDimension = hierarchy[childLevel];
+
+  const currentFilters = [
+    ...(parentNode.nodeFilters || []),
+    {
+      logicalField: hierarchy[parentNode.level],
+      operator: "EQUALS",
+      value: parentNode.name,
+    },
+  ];
+
+  const payload = {
+    viewCode: viewCode,
+    reportDate: reportDate,
+    dimensions: [nextDimension],
+    metrics: metrics.map((m) => m.logicalName),
+    filters: currentFilters,
+  };
+  const apiData = await fetchAnalyticsData(callApi, showSnackBar, payload);
+
+  return (apiData || []).map((row) => ({
+    ...row,
+    level: childLevel,
+    nodeFilters: currentFilters,
+  }));
+};
+
+
+
+
+
+// ************************************************* components/ActualTreeTableRow ************************************************ //
+
+import React, { memo, forwardRef } from "react";
+import { TableRow, TableCell, CircularProgress } from "@mui/material";
+import { formatCurrency } from "../utils/analyticsConstants";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
+import { IconButton, Tooltip } from "@mui/material";
+
+const ActualTreeTableRow = memo(
+  forwardRef(
+    (
+      {
+        node,
+        isExpanded,
+        isLoading,
+        onToggle,
+        maxVisibleLevel,
+        index,
+        activeMetrics,
+        theme,
+        isFullscreen,
+        showSnackBar,
+        ...props
+      },
+      ref,
+    ) => {
+      const isRoot = node.level === 0;
+
+      return (
+        <TableRow
+          ref={ref}
+          hover
+          style={{
+            backgroundColor: isExpanded
+              ? theme.palette.purple?.[100] || "inherit"
+              : "inherit",
+            borderLeft: isExpanded
+              ? `4px solid ${theme.palette.primary.main}`
+              : "4px solid transparent",
+            height: "40px",
+            transition:
+              "background-color 0.2s ease-in-out, border-color 0.2s ease-in-out",
+          }}
+          {...props}
+        >
+          {Array.from({ length: maxVisibleLevel + 1 }).map((_, colIndex) => {
+            if (colIndex === node.level) {
+              return (
+                <TableCell
+                  key={colIndex}
+                  style={{
+                    borderRight: `1px solid ${theme.palette.divider}`,
+                    borderBottom: `1px solid ${theme.palette.divider}`,
+                    //minWidth: "260px",
+                    whiteSpace: "nowrap",
+                    padding: "4px 4px",
+                    verticalAlign: "middle",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      // paddingLeft: `${node.level * 10 + 8}px`,
+                      paddingLeft: 4,
+                      paddingRight: "16px",
+                      width: "100%",
+                      boxSizing: "border-box",
+                    }}
+                  >
+                    {node.hasChildren ? (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onToggle(node);
+                        }}
+                        disabled={isLoading}
+                        style={{
+                          marginRight: "8px",
+                          padding: 0,
+                          width: "20px",
+                          height: "20px",
+                          border: `1px solid ${isExpanded ? theme.palette.primary.main : theme.palette.divider}`,
+                          borderRadius: "50%",
+                          backgroundColor: "transparent",
+                          cursor: isLoading ? "wait" : "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          color: isExpanded
+                            ? theme.palette.primary.main
+                            : "inherit",
+                          fontSize: "14px",
+                          lineHeight: 1,
+                          transition: "all 0.15s ease",
+                        }}
+                        onMouseOver={(e) =>
+                          (e.currentTarget.style.transform = "scale(1.15)")
+                        }
+                        onMouseOut={(e) =>
+                          (e.currentTarget.style.transform = "scale(1)")
+                        }
+                      >
+                        {isLoading ? (
+                          <CircularProgress
+                            size={12}
+                            color={isExpanded ? "primary.dark" : "inherit"}
+                          />
+                        ) : isExpanded ? (
+                          "-"
+                        ) : (
+                          "+"
+                        )}
+                      </button>
+                    ) : (
+                      <div style={{ width: "28px" }} />
+                    )}
+                    <span
+                      style={{
+                        fontWeight: isExpanded ? 700 : isRoot ? 600 : 400,
+                        color: isExpanded
+                          ? theme.palette.primary.main
+                          : "inherit",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        fontSize: "0.875rem",
+                        fontFamily:
+                          theme.typography.fontFamily ||
+                          "Roboto, Helvetica, Arial, sans-serif",
+                      }}
+                    >
+                      {node.name}
+                    </span>
+
+                    {/* Checks if it's fullscreen, expanded, data is loaded, and targets HeadCode (level 1) */}
+                    {
+                      isExpanded &&
+                      !isLoading &&
+                      node.level === 1 &&
+                      node.children && (
+                        <Tooltip title="Copy all GLCODEs" placement="top" arrow>
+                          <IconButton
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation(); // Prevents row toggle when clicking the copy button
+
+                              // 1. Format the parent (Headcode) row
+                              // We use node.name and node.TotalAmount for the parent
+                              const headcodeRow = `${node.name}\t${node.TotalAmount || ""}`;
+
+                              // 2. Format the children (GLCODEs) rows
+                              const childrenRows = node.children
+                                .map(
+                                  (child) =>
+                                    `${child.name}\t${child.TotalAmount || ""}`,
+                                )
+                                .join("\n");
+
+                              // 3. Combine them with a newline (\n) in between
+                              const combinedData = `${headcodeRow}\n${childrenRows}`;
+
+                              console.log("Copied Data:\n", combinedData);
+
+                              // 4. Send the whole block to the clipboard
+                              navigator.clipboard
+                                .writeText(combinedData)
+                                .then(() => {
+                                  showSnackBar(
+                                    "Text copied successfully",
+                                    "success",
+                                  );
+                                })
+                                .catch((err) => {
+                                  console.error("Failed to copy text: ", err);
+                                  showSnackBar("Failed to copy text", "error");
+                                });
+                            }}
+                            sx={{ ml: 2, padding: "2px" }}
+                          >
+                            <ContentCopyIcon
+                              sx={{ fontSize: 16, color: "text.secondary" }}
+                            />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                  </div>
+                </TableCell>
+              );
+            }
+            return (
+              <TableCell
+                key={colIndex}
+                style={{
+                  borderRight: `1px solid ${theme.palette.divider}`,
+                  borderBottom: `1px solid ${theme.palette.divider}`,
+                  whiteSpace: "nowrap",
+                  padding: 0,
+                }}
+              />
+            );
+          })}
+
+          {activeMetrics.map((metric) => {
+            const value = node[metric.logicalName];
+            return (
+              <TableCell
+                key={metric.logicalName}
+                align="right"
+                style={{
+                  borderRight: `1px solid ${theme.palette.divider}`,
+                  borderBottom: `1px solid ${theme.palette.divider}`,
+                  // width: "160px",
+                  // minWidth: "160px",
+                  // maxWidth: "160px",
+                  //padding: "8px 16px",
+                  color:
+                    value < 0
+                      ? theme.palette.error.main
+                      : theme.palette.success.main,
+                  fontWeight: 500,
+                  whiteSpace: "nowrap",
+                  verticalAlign: "middle",
+                  fontSize: "0.875rem",
+                  fontFamily:
+                    theme.typography.fontFamily ||
+                    "Roboto, Helvetica, Arial, sans-serif",
+                }}
+              >
+                {formatCurrency(value)}
+              </TableCell>
+            );
+          })}
+        </TableRow>
+      );
+    },
+  ),
+  (prevProps, nextProps) => {
+    return (
+      prevProps.isExpanded === nextProps.isExpanded &&
+      prevProps.isLoading === nextProps.isLoading &&
+      prevProps.node.id === nextProps.node.id &&
+      prevProps.maxVisibleLevel === nextProps.maxVisibleLevel &&
+      prevProps.index === nextProps.index &&
+      prevProps.theme === nextProps.theme 
+      // prevProps.isFullscreen === nextProps.isFullscreen
+    );
+  },
+);
+
+ActualTreeTableRow.displayName = "ActualTreeTableRow";
+export default ActualTreeTableRow;
+
+
+
+
+
+
+
+// ********************************************** FilterDialog ********************************************* //
 
 import React, { useState, useEffect, useMemo } from "react";
 import {
@@ -16,8 +359,12 @@ import {
   Autocomplete,
   Box,
   Typography,
+  FormHelperText,
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
+import StarIcon from "@mui/icons-material/Star";
+import InfoIcon from "@mui/icons-material/Info";
+import QueryStatsIcon from "@mui/icons-material/QueryStats";
 
 export default function FilterDialog({
   open,
@@ -79,10 +426,27 @@ export default function FilterDialog({
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <Typography variant="h6" fontWeight="bold">
-          Report Filters
+      <DialogTitle
+        sx={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 2, // Adds spacing between the icon/text group and the close button
+        }}
+      >
+        <Typography
+          variant="h6"
+          fontWeight="bold"
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            gap: 2, // Adds spacing between the icon and the text
+          }}
+        >
+          <QueryStatsIcon />
+          Drill Down Filters
         </Typography>
+
         <IconButton onClick={onClose} size="small">
           <CloseIcon />
         </IconButton>
@@ -90,14 +454,15 @@ export default function FilterDialog({
 
       <DialogContent dividers>
         <Box display="flex" flexDirection="column" gap={3} py={1}>
-          
           {/* 1. Report Name */}
           <FormControl size="small" fullWidth>
-            <InputLabel id="dialog-report-label">Database Report *</InputLabel>
+            <InputLabel id="dialog-report-label" size="small">
+              Select Report
+            </InputLabel>
             <Select
               labelId="dialog-report-label"
               value={reportCode}
-              label="Database Report *"
+              label="Select Report"
               onChange={(e) => setReportCode(e.target.value)}
             >
               {reportsConfig.map((report) => (
@@ -106,6 +471,19 @@ export default function FilterDialog({
                 </MenuItem>
               ))}
             </Select>
+            <FormHelperText
+              id="report-helper-text"
+              sx={{
+                fontStyle: "italic",
+                fontSize: "0.62rem",
+                display: "flex",
+                alignItems: "center",
+                gap: "4px", // Spacing between icon and text
+              }}
+            >
+              <InfoIcon sx={{ fontSize: "0.625rem" }} />
+              Choose a report to begin detailed analysis
+            </FormHelperText>
           </FormControl>
 
           {/* 2. Head / Head Code (Autocomplete) */}
@@ -120,17 +498,43 @@ export default function FilterDialog({
               // setHeadOptions(response.data);
             }}
             renderInput={(params) => (
-              <TextField {...params} label="Search Head / Head Code *" variant="outlined" />
+              <TextField
+                {...params}
+                label="Search Head Code"
+                variant="outlined"
+                helperText={
+                  <span
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "4px",
+                    }}
+                  >
+                    <InfoIcon sx={{ fontSize: "0.625rem" }} />
+                    <em>
+                      Type 2 or more characters to search heads or head codes.
+                    </em>
+                  </span>
+                }
+                // Apply styles to the helper text via FormHelperText props if needed,
+                // but inline styling or sx on the component inside helperText works best for custom layouts
+                FormHelperTextProps={{
+                  sx: {
+                    fontSize: "0.62rem", // Smaller size
+                    // marginLeft: 0, // Reset default margin if needed
+                  },
+                }}
+              />
             )}
           />
 
           {/* 3. Scope */}
           <FormControl size="small" fullWidth>
-            <InputLabel id="dialog-scope-label">Scope *</InputLabel>
+            <InputLabel id="dialog-scope-label">Scope</InputLabel>
             <Select
               labelId="dialog-scope-label"
               value={scope}
-              label="Scope *"
+              //   label="Select Scope"
               onChange={(e) => {
                 setScope(e.target.value);
                 setEntityCode(""); // Reset entity when scope changes
@@ -140,6 +544,19 @@ export default function FilterDialog({
               <MenuItem value="CIRCLE">CIRCLE</MenuItem>
               <MenuItem value="BRANCH">BRANCH</MenuItem>
             </Select>
+            <FormHelperText
+              id="report-helper-text"
+              sx={{
+                fontStyle: "italic",
+                fontSize: "0.62rem",
+                display: "flex",
+                alignItems: "center",
+                gap: "4px", // Spacing between icon and text
+              }}
+            >
+              <InfoIcon sx={{ fontSize: "0.625rem" }} />
+              Options are limited to your authorized organizational scope
+            </FormHelperText>
           </FormControl>
 
           {/* Conditional Dropdown for Circle/Branch */}
@@ -173,6 +590,26 @@ export default function FilterDialog({
             InputLabelProps={{ shrink: true }}
             value={reportDate}
             onChange={(e) => setReportDate(e.target.value)}
+            helperText={
+              <span
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "4px",
+                }}
+              >
+                <InfoIcon sx={{ fontSize: "0.625rem" }} />
+                <em>Type or select a date to view the data</em>
+              </span>
+            }
+            // Apply styles to the helper text via FormHelperText props if needed,
+            // but inline styling or sx on the component inside helperText works best for custom layouts
+            FormHelperTextProps={{
+              sx: {
+                fontSize: "0.62rem", // Smaller size
+                // marginLeft: 0, // Reset default margin if needed
+              },
+            }}
           />
         </Box>
       </DialogContent>
@@ -200,14 +637,165 @@ export default function FilterDialog({
 
 
 
+// ********************************************* HierarchyPath ********************************************* //
+
+import React from "react";
+import { Box, Typography } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
+
+export default function HierarchyPath({
+  activeHierarchyConfig,
+  maxVisibleLevel,
+  isSetupComplete,
+}) {
+  const theme = useTheme();
+  if (!isSetupComplete) return null;
+
+  return (
+    <Box display="flex" alignItems="center" gap={0.5}>
+      <Typography
+        variant="body2"
+        color="text.secondary"
+        sx={{ mr: 1, fontWeight: 500 }}
+      >
+        Path:
+      </Typography>
+      {activeHierarchyConfig.hierarchy.map((item, index) => {
+        const isActive = index <= maxVisibleLevel;
+        return (
+          <Box key={index} display="flex" alignItems="center">
+            <Box display="flex" alignItems="center" gap={1}>
+              <Box
+                sx={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: "50%",
+                  bgcolor: isActive ? "primary.main" : "background.paper",
+                  border: "2px solid",
+                  borderColor: isActive ? "primary.main" : "divider",
+                }}
+              />
+              <Typography
+                variant="body2"
+                sx={{
+                  fontWeight: isActive ? 600 : 500,
+                  color: isActive ? "text.primary" : "text.disabled",
+                  textTransform: "capitalize",
+                }}
+              >
+                {item.replace("_", " ")}
+              </Typography>
+            </Box>
+            {index < activeHierarchyConfig.hierarchy.length - 1 && (
+              <Box
+                sx={{
+                  backgroundColor:
+                    index < maxVisibleLevel
+                      ? theme.palette.primary.main
+                      : theme.palette.divider,
+                  width: 24,
+                  height: 2,
+                  mx: 1,
+                  borderRadius: 1,
+                }}
+              />
+            )}
+          </Box>
+        );
+      })}
+    </Box>
+  );
+}
 
 
 
-// ******************************************** ReportAnalysisHeader *********************************************** //
+
+
+
+// **************************************** InstructionalTooltip ************************************ //
+
+import { styled, keyframes } from "@mui/material/styles";
+import TuneIcon from "@mui/icons-material/Tune";
+import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
+import Box from "@mui/material/Box";
+import Typography from "@mui/material/Typography";
+
+// 1. Define the Pulse Animation
+const pulse = keyframes`
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(25, 118, 210, 0.7); }
+  70% { transform: scale(1.05); box-shadow: 0 0 0 6px rgba(25, 118, 210, 0); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(25, 118, 210, 0); }
+`;
+
+// 3. Custom Tooltip with Bold Text
+const InstructionalTooltip = ({ children, title }) => (
+  <Tooltip
+    title={
+      <Box sx={{ py: 0.5 }}>
+        <Typography variant="subtitle2" fontWeight="bold" color="primary.main">
+          {title}
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          Select criteria to generate the drill-down report.
+        </Typography>
+      </Box>
+    }
+    arrow
+    placement="bottom-end"
+    componentsProps={{
+      tooltip: {
+        sx: {
+          bgcolor: "background.paper",
+          color: "text.primary",
+          border: "1px solid",
+          borderColor: "divider",
+          boxShadow: 3,
+          maxWidth: 220,
+        },
+      },
+      arrow: {
+        sx: {
+          color: "background.paper",
+          "&::before": { border: "1px solid", borderColor: "divider" },
+        },
+      },
+    }}
+  >
+    {children}
+  </Tooltip>
+);
+
+
+
+
+
+// ************************************** PulsingFilterButton **************************************** //
+
+// 2. Create a Styled IconButton with Pulse
+const PulsingFilterButton = styled(IconButton)(({ theme }) => ({
+  border: `2px solid ${theme.palette.primary.main}`, // Thicker border for prominence
+  backgroundColor: theme.palette.primary.light, // Light background to stand out
+  color: theme.palette.primary.contrastText,
+  marginRight: theme.spacing(1),
+  "&:hover": {
+    border: `2px solid ${theme.palette.primary.dark}`,
+    backgroundColor: theme.palette.primary.main,
+  },
+  // Apply the animation
+  animation: `${pulse} 2s infinite`,
+}));
+
+
+
+
+
+// ********************************************** ReportAnalysisHeader ************************************* //
+
 import React from "react";
 import { Box, Paper, Typography, IconButton, Tooltip } from "@mui/material";
 import AnalyticsIcon from "@mui/icons-material/Analytics";
-import FilterAltIcon from "@mui/icons-material/FilterAlt";
+import TuneIcon from "@mui/icons-material/Tune";
 import FullscreenIcon from "@mui/icons-material/Fullscreen";
 import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
 
@@ -216,6 +804,7 @@ export default function ReportAnalysisHeader({
   isFullscreen,
   toggleFullscreen,
   onOpenFilter,
+  filtersApplied,
 }) {
   return (
     <Paper
@@ -233,11 +822,24 @@ export default function ReportAnalysisHeader({
       }}
     >
       <Box display="flex" alignItems="center" gap={2}>
-        <Box sx={{ backgroundColor: "primary.main", borderRadius: "10px", width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <Box
+          sx={{
+            backgroundColor: "primary.main",
+            borderRadius: "10px",
+            width: 44,
+            height: 44,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
           <AnalyticsIcon sx={{ color: "primary.contrastText", fontSize: 24 }} />
         </Box>
         <Box sx={{ overflow: "hidden" }}>
-          <Typography variant="h6" sx={{ fontWeight: 700, color: "text.primary" }}>
+          <Typography
+            variant="h6"
+            sx={{ fontWeight: 700, color: "text.primary" }}
+          >
             {activeReport?.displayName || "Financial Analytics"}
           </Typography>
           <Typography variant="caption" sx={{ color: "text.primary" }}>
@@ -246,18 +848,73 @@ export default function ReportAnalysisHeader({
         </Box>
       </Box>
 
-      <Box display="flex" alignItems="center" gap={1}>
+      {/* <Box display="flex" alignItems="center" gap={1}>
         <Tooltip title="Filter Reports" arrow placement="bottom">
-          <IconButton onClick={onOpenFilter} color="primary" sx={{ border: "1px solid", borderColor: "divider" }}>
-            <FilterAltIcon />
+          <IconButton
+            onClick={onOpenFilter}
+            color="primary"
+            sx={{ border: "1px solid", borderColor: "divider" }}
+          >
+            <TuneIcon />
           </IconButton>
+        </Tooltip>
+      </Box> */}
+
+      <Box
+        display="flex"
+        alignItems="center"
+        gap={1.5}
+        sx={{
+          p: 1,
+          bgcolor: "action.hover", // Light background to group the elements
+          borderRadius: 1,
+          border: "1px dashed",
+          borderColor: filtersApplied ? "divider" : "primary.main", // Dashed border highlights importance
+        }}
+      >
+        {/* Button with Badge */}
+        <Tooltip
+          title="Select criteria to generate the report"
+          arrow
+          placement="bottom"
+        >
+          
+            <IconButton
+              onClick={onOpenFilter}
+              color="primary" // Makes the icon blue/prominent
+              size="medium"
+              sx={{
+                border: "1px solid",
+                borderColor: "divider",
+                bgcolor: "background.paper",
+                boxShadow: 1,
+                "&:hover": {
+                  bgcolor: "primary.main",
+                  color: "primary.contrastText",
+                  boxShadow: 2,
+                },
+              }}
+            >
+              <TuneIcon />
+            </IconButton>
+          
         </Tooltip>
 
-        <Tooltip title={isFullscreen ? "Exit Full Screen (Esc)" : "Full Screen"} arrow placement="bottom">
-          <IconButton onClick={toggleFullscreen} sx={{ border: "1px solid", borderColor: "divider" }}>
-            {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
-          </IconButton>
-        </Tooltip>
+        {/* Instructional Text */}
+        <Box sx={{ display: "flex", flexDirection: "column" }}>
+          <Typography
+            variant="body2"
+            fontWeight="bold"
+            color={filtersApplied ? "text.secondary" : "primary.main"}
+          >
+            {filtersApplied ? "Filters Applied" : "Set Filters to Start"}
+          </Typography>
+          {!filtersApplied && (
+            <Typography variant="caption" color="text.secondary">
+              Required to view report
+            </Typography>
+          )}
+        </Box>
       </Box>
     </Paper>
   );
@@ -266,69 +923,29 @@ export default function ReportAnalysisHeader({
 
 
 
+// ************************************* analyticsContants ********************************** //
+
+export const formatCurrency = (value) => {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "INR",
+  }).format(value || 0);
+};
+
+export const DEFAULT_CONFIG = { hierarchy: [], availableMetrics: [] };
 
 
 
 
+// ************************************ ReportAnalysisScreen ************************************ //
 
-
-// ********************************* Update ActualTreeTableRow ************************************** //
-
-// Remove 'isFullscreen' from destructured props
-// ...
-      
-      {/* UPDATE: Removed isFullscreen condition. Button shows anytime an active Headcode is expanded */}
-      {isExpanded && !isLoading && node.level === 1 && node.children && (
-        <Tooltip title="Copy all GLCODEs" placement="top" arrow>
-          <IconButton
-            size="small"
-            onClick={(e) => {
-              e.stopPropagation();
-              const headcodeRow = `${node.name}\t${node.TotalAmount || ""}`;
-              const childrenRows = node.children
-                .map((child) => `${child.name}\t${child.TotalAmount || ""}`)
-                .join("\n");
-              
-              const combinedData = `${headcodeRow}\n${childrenRows}`;
-
-              navigator.clipboard.writeText(combinedData)
-                .then(() => console.log("Copied"))
-                .catch((err) => console.error("Failed to copy", err));
-            }}
-            sx={{ ml: 1, padding: "2px" }}
-          >
-            <ContentCopyIcon sx={{ fontSize: 16, color: "text.secondary" }} />
-          </IconButton>
-        </Tooltip>
-      )}
-
-// ... [At the bottom of the file in React.memo comparison] ...
-  (prevProps, nextProps) => {
-    return (
-      prevProps.isExpanded === nextProps.isExpanded &&
-      prevProps.isLoading === nextProps.isLoading &&
-      prevProps.node.id === nextProps.node.id &&
-      prevProps.maxVisibleLevel === nextProps.maxVisibleLevel &&
-      prevProps.index === nextProps.index &&
-      prevProps.theme === nextProps.theme
-      // REMOVED: prevProps.isFullscreen === nextProps.isFullscreen
-    );
-  }
-
-
-
-
-
-
-
-
-
-
-
-// *********************************** ReportAnalysisScreen ****************************************** //
-
-
-import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import React, {
+  useState,
+  useMemo,
+  useCallback,
+  useEffect,
+  useRef,
+} from "react";
 import { useSelector, useDispatch } from "react-redux";
 import {
   Box,
@@ -341,6 +958,8 @@ import {
   TableRow,
   Typography,
   CircularProgress,
+  Tooltip,
+  IconButton,
 } from "@mui/material";
 import DatasetIcon from "@mui/icons-material/Dataset";
 import { useTheme } from "@mui/material/styles";
@@ -365,6 +984,10 @@ import FilterDialog from "./components/FilterDialog";
 import { fetchInitialData, fetchChildrenData } from "./api/analyticsApi";
 import { DEFAULT_CONFIG } from "./utils/analyticsConstants";
 
+import TuneIcon from "@mui/icons-material/Tune";
+import FullscreenIcon from "@mui/icons-material/Fullscreen";
+import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
+
 export default function ReportAnalysisScreen() {
   const { callApi } = useApi();
   const dispatch = useDispatch();
@@ -373,17 +996,17 @@ export default function ReportAnalysisScreen() {
   const showSnackBar = useCustomSnackbar();
 
   const user = useSelector((state) => state.auth.user);
-  
+
   // Fullscreen state managed strictly via Redux UI Slice
   const isFullscreen = useSelector(
-    (state) => state.ui?.isComponentFullscreen || false
+    (state) => state.ui?.isComponentFullscreen || false,
   );
   const cachedNodes = useSelector((state) => state.analyticsCache?.nodes || {});
 
   // --- STATE ---
   const [reportsConfig, setReportsConfig] = useState([]);
   const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
-  
+
   // Master Filter State (Applied Filters via Dialog)
   const [appliedFilters, setAppliedFilters] = useState({
     reportCode: "",
@@ -397,14 +1020,18 @@ export default function ReportAnalysisScreen() {
   const [expandedIds, setExpandedIds] = useState(new Map());
   const [loadingIds, setLoadingIds] = useState(new Set());
   const [isInitializing, setIsInitializing] = useState(false);
+  const [filtersApplied, setFiltersApplied] = React.useState(false);
 
   // --- DERIVED VALUES ---
   const activeReport = useMemo(() => {
-    return reportsConfig.find((r) => r.reportCode === appliedFilters.reportCode) || null;
+    return (
+      reportsConfig.find((r) => r.reportCode === appliedFilters.reportCode) ||
+      null
+    );
   }, [reportsConfig, appliedFilters.reportCode]);
 
   // Fallback to DEFAULT_CONFIG until the dynamic Scope-based hierarchy API is fully implemented
-  const activeHierarchyConfig = DEFAULT_CONFIG; 
+  const activeHierarchyConfig = DEFAULT_CONFIG;
 
   const isSetupComplete = !!(
     appliedFilters.reportCode &&
@@ -460,7 +1087,9 @@ export default function ReportAnalysisScreen() {
     const fetchConfig = async () => {
       try {
         const response = await callApi("/AS/analytics/config", {}, "GET");
-        const configData = Array.isArray(response) ? response : response?.data || [];
+        const configData = Array.isArray(response)
+          ? response
+          : response?.data || [];
         setReportsConfig(configData);
       } catch (error) {
         console.error("Failed to fetch analytics configurations", error);
@@ -487,13 +1116,13 @@ export default function ReportAnalysisScreen() {
           showSnackBar,
           appliedFilters, // Replaced selectedViewCode with the entire filters object
           activeHierarchyConfig.hierarchy,
-          activeHierarchyConfig.availableMetrics
+          activeHierarchyConfig.availableMetrics,
         );
-        
+
         if (!rootData || rootData.length === 0) {
           showSnackBar("No data found for the selected combination", "warning");
         }
-        
+
         setData(rootData || []);
       } catch (error) {
         console.error("Failed to load initial data", error);
@@ -502,7 +1131,13 @@ export default function ReportAnalysisScreen() {
       }
     };
     loadRoot();
-  }, [appliedFilters, activeHierarchyConfig, callApi, showSnackBar, isSetupComplete]);
+  }, [
+    appliedFilters,
+    activeHierarchyConfig,
+    callApi,
+    showSnackBar,
+    isSetupComplete,
+  ]);
 
   // --- NODE EXPANSION LOGIC ---
   const appendChildrenToTree = useCallback((nodes, parentId, newChildren) => {
@@ -545,11 +1180,12 @@ export default function ReportAnalysisScreen() {
           // Utilizing scope and date in the cache key to prevent data crossover
           const cacheKey = `${appliedFilters.scope}_${node.id}_${appliedFilters.reportDate}`;
           const cachedEntry = cachedNodes[cacheKey];
-          const isCacheValid = cachedEntry && Date.now() - cachedEntry.timestamp < 900000;
+          const isCacheValid =
+            cachedEntry && Date.now() - cachedEntry.timestamp < 900000;
 
           if (isCacheValid) {
             setData((prevData) =>
-              appendChildrenToTree(prevData, node.id, cachedEntry.data)
+              appendChildrenToTree(prevData, node.id, cachedEntry.data),
             );
           } else {
             setLoadingIds((prev) => new Set(prev).add(node.id));
@@ -560,14 +1196,18 @@ export default function ReportAnalysisScreen() {
                 node,
                 appliedFilters, // Replaced selectedViewCode with the entire filters object
                 activeHierarchyConfig.hierarchy,
-                activeHierarchyConfig.availableMetrics
+                activeHierarchyConfig.availableMetrics,
               );
               setData((prevData) =>
-                appendChildrenToTree(prevData, node.id, children)
+                appendChildrenToTree(prevData, node.id, children),
               );
               dispatch({
                 type: "analyticsCache/cacheNode",
-                payload: { key: cacheKey, data: children, timestamp: Date.now() },
+                payload: {
+                  key: cacheKey,
+                  data: children,
+                  timestamp: Date.now(),
+                },
               });
             } catch (error) {
               console.error("Failed to fetch children", error);
@@ -603,7 +1243,7 @@ export default function ReportAnalysisScreen() {
       showSnackBar,
       cachedNodes,
       dispatch,
-    ]
+    ],
   );
 
   // --- VIRTUALIZATION ENGINE ---
@@ -626,7 +1266,7 @@ export default function ReportAnalysisScreen() {
 
   const visibleHierarchyLevels = activeHierarchyConfig.hierarchy.slice(
     0,
-    maxVisibleLevel + 1
+    maxVisibleLevel + 1,
   );
 
   const virtualizer = useVirtualizer({
@@ -638,7 +1278,8 @@ export default function ReportAnalysisScreen() {
 
   const virtualItems = virtualizer.getVirtualItems();
   const totalColumnsCount =
-    visibleHierarchyLevels.length + activeHierarchyConfig.availableMetrics.length;
+    visibleHierarchyLevels.length +
+    activeHierarchyConfig.availableMetrics.length;
   const paddingTop = virtualItems.length > 0 ? virtualItems[0].start : 0;
   const paddingBottom =
     virtualItems.length > 0
@@ -660,7 +1301,7 @@ export default function ReportAnalysisScreen() {
               bottom: 0,
               width: "100vw",
               height: "100vh",
-              zIndex: 1299, 
+              zIndex: 1299,
               p: 2,
             }
           : {
@@ -674,6 +1315,7 @@ export default function ReportAnalysisScreen() {
         isFullscreen={isFullscreen}
         toggleFullscreen={toggleFullscreen}
         onOpenFilter={() => setIsFilterDialogOpen(true)}
+        filtersApplied={filtersApplied}
       />
 
       {/* ================= FILTER DIALOG ================= */}
@@ -742,7 +1384,9 @@ export default function ReportAnalysisScreen() {
                 zIndex: 10,
               }}
             >
-              <DatasetIcon sx={{ fontSize: 64, color: "action.disabled", mb: 1 }} />
+              <DatasetIcon
+                sx={{ fontSize: 64, color: "action.disabled", mb: 1 }}
+              />
               <Typography variant="h6" color="text.secondary">
                 No Data to Display
               </Typography>
@@ -768,14 +1412,20 @@ export default function ReportAnalysisScreen() {
               </Typography>
             </Box>
           ) : isSetupComplete && data.length > 0 ? (
-            <Table stickyHeader size="small" sx={{ minWidth: 1000, tableLayout: "fixed" }}>
+            <Table
+              stickyHeader
+              size="small"
+              sx={{ minWidth: 1000, tableLayout: "fixed" }}
+            >
               <TableHead>
                 <TableRow>
                   {visibleHierarchyLevels.map((levelName) => (
                     <TableCell
                       key={levelName}
                       sx={{
-                        backgroundColor: theme.palette.purple?.[100] || theme.palette.primary.light,
+                        backgroundColor:
+                          theme.palette.purple?.[100] ||
+                          theme.palette.primary.light,
                         color: "text.primary",
                         fontWeight: 700,
                         borderRight: 1,
@@ -793,7 +1443,9 @@ export default function ReportAnalysisScreen() {
                       key={metric.logicalName}
                       align="right"
                       sx={{
-                        backgroundColor: theme.palette.purple?.[200] || theme.palette.primary.light,
+                        backgroundColor:
+                          theme.palette.purple?.[200] ||
+                          theme.palette.primary.light,
                         color: "text.primary",
                         fontWeight: 700,
                         borderRight: 1,
@@ -866,18 +1518,279 @@ export default function ReportAnalysisScreen() {
             borderTop: 1,
             borderColor: "divider",
             px: 2,
+            py: 1, // Added vertical padding for better spacing
             display: "flex",
-            justifyContent: "flex-end",
+            justifyContent: "space-between",
             alignItems: "center",
             minHeight: 40,
           }}
         >
-          <Typography variant="caption" color="text.secondary" fontWeight={500} sx={{ mr: 2 }}>
+          {/* Left Side: Row Count */}
+          <Typography variant="caption" color="text.secondary" fontWeight={500}>
             Showing {visibleRows.length} rows
           </Typography>
+
+          {/* Right Side: Fullscreen Control */}
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            {/* <Tooltip
+              title={isFullscreen ? "Exit Full Screen (F)" : "Full Screen"}
+              arrow
+              placement="top"
+            > */}
+            <IconButton
+              onClick={toggleFullscreen}
+              size="small" // Ensures small icon size
+              sx={{
+                border: "1px solid",
+                borderColor: "divider",
+                mr: 0.5, // Small gap between button and text
+              }}
+            >
+              {isFullscreen ? (
+                <FullscreenExitIcon fontSize="small" />
+              ) : (
+                <FullscreenIcon fontSize="small" />
+              )}
+            </IconButton>
+            {/* </Tooltip> */}
+
+            {/* Text Label */}
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ userSelect: "none" }} // Prevents text highlighting on click
+            >
+              {isFullscreen ? "Exit Full Screen" : "Press F to Full Screen"}
+            </Typography>
+          </Box>
         </Box>
       </Paper>
     </Box>
   );
 }
 
+
+
+
+
+
+// ********************************************* analyticsCacheSlice ************************************ //
+
+import { createSlice } from "@reduxjs/toolkit";
+
+const analyticsCacheSlice = createSlice({
+  name: "analyticsCache",
+  initialState: {
+    nodes: {}, // Structure: { [cacheKey]: { data: [], timestamp: 123456789 } }
+  },
+  reducers: {
+    cacheNode: (state, action) => {
+      const { key, data, timestamp } = action.payload;
+      state.nodes[key] = { data, timestamp };
+    },
+    // Optional: Call this on user logout or when manually refreshing reports
+    clearCache: (state) => {
+      state.nodes = {};
+    },
+  },
+});
+
+export const { cacheNode, clearCache } = analyticsCacheSlice.actions;
+export default analyticsCacheSlice.reducer;
+
+
+
+
+// *********************************** /analytics/config response ************************************************** //
+
+[
+    {
+        "reportCode": "YSA",
+        "displayName": "Yearly Statement Of Abstract",
+        "views": [
+            {
+                "viewCode": "YSA_BANK",
+                "displayName": "YSA_BANK",
+                "hierarchy": [
+                    "Geography",
+                    "Circle",
+                    "Cgl",
+                    "Product",
+                    "Branch",
+                    "ReportDate",
+                    "CompCode",
+                    "HeadCode"
+                ],
+                "availableMetrics": [
+                    {
+                        "logicalName": "TotalAmount",
+                        "displayName": "Amount"
+                    }
+                ]
+            },
+            {
+                "viewCode": "YSA_CIRCLE",
+                "displayName": "YSA_CIRCLE",
+                "hierarchy": [
+                    "Cgl",
+                    "Product",
+                    "Branch",
+                    "Circle",
+                    "ReportDate",
+                    "CompCode",
+                    "HeadCode"
+                ],
+                "availableMetrics": [
+                    {
+                        "logicalName": "TotalAmount",
+                        "displayName": "Amount"
+                    }
+                ]
+            },
+            {
+                "viewCode": "YSA_BRANCH",
+                "displayName": "YSA_BRANCH",
+                "hierarchy": [
+                    "Cgl",
+                    "Product",
+                    "Branch",
+                    "ReportDate",
+                    "CompCode",
+                    "HeadCode"
+                ],
+                "availableMetrics": [
+                    {
+                        "logicalName": "TotalAmount",
+                        "displayName": "Amount"
+                    }
+                ]
+            }
+        ]
+    },
+    {
+        "reportCode": "PNL",
+        "displayName": "Profit & Loss Analysis",
+        "views": [
+            {
+                "viewCode": "PNL_BANK",
+                "displayName": "PNL_BANK",
+                "hierarchy": [
+                    "Geography",
+                    "Circle",
+                    "Cgl",
+                    "Product",
+                    "Branch",
+                    "ReportDate",
+                    "CompCode",
+                    "HeadCode"
+                ],
+                "availableMetrics": [
+                    {
+                        "logicalName": "TotalAmount",
+                        "displayName": "Amount"
+                    }
+                ]
+            },
+            {
+                "viewCode": "PNL_CIRCLE",
+                "displayName": "PNL_CIRCLE",
+                "hierarchy": [
+                    "Cgl",
+                    "Product",
+                    "Branch",
+                    "Circle",
+                    "ReportDate",
+                    "CompCode",
+                    "HeadCode"
+                ],
+                "availableMetrics": [
+                    {
+                        "logicalName": "TotalAmount",
+                        "displayName": "Amount"
+                    }
+                ]
+            },
+            {
+                "viewCode": "PNL_BRANCH",
+                "displayName": "PNL_BRANCH",
+                "hierarchy": [
+                    "Cgl",
+                    "Product",
+                    "Branch",
+                    "ReportDate",
+                    "CompCode",
+                    "HeadCode"
+                ],
+                "availableMetrics": [
+                    {
+                        "logicalName": "TotalAmount",
+                        "displayName": "Amount"
+                    }
+                ]
+            }
+        ]
+    },
+    {
+        "reportCode": "NWSA",
+        "displayName": "NWSA Report",
+        "views": [
+            {
+                "viewCode": "NWSA_BANK",
+                "displayName": "NWSA_BANK",
+                "hierarchy": [
+                    "Geography",
+                    "Circle",
+                    "Cgl",
+                    "Product",
+                    "Branch",
+                    "ReportDate",
+                    "CompCode",
+                    "HeadCode"
+                ],
+                "availableMetrics": [
+                    {
+                        "logicalName": "TotalAmount",
+                        "displayName": "Amount"
+                    }
+                ]
+            },
+            {
+                "viewCode": "NWSA_BRANCH",
+                "displayName": "NWSA_BRANCH",
+                "hierarchy": [
+                    "Cgl",
+                    "Product",
+                    "Branch",
+                    "ReportDate",
+                    "CompCode",
+                    "HeadCode"
+                ],
+                "availableMetrics": [
+                    {
+                        "logicalName": "TotalAmount",
+                        "displayName": "Amount"
+                    }
+                ]
+            },
+            {
+                "viewCode": "NWSA_CIRCLE",
+                "displayName": "NWSA_CIRCLE",
+                "hierarchy": [
+                    "Cgl",
+                    "Product",
+                    "Branch",
+                    "Circle",
+                    "ReportDate",
+                    "CompCode",
+                    "HeadCode"
+                ],
+                "availableMetrics": [
+                    {
+                        "logicalName": "TotalAmount",
+                        "displayName": "Amount"
+                    }
+                ]
+            }
+        ]
+    }
+]
