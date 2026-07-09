@@ -1768,14 +1768,35 @@ export default function FilterDialog({
 
 // File: ReportAnalysisScreen.jsx
 
-import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import React, {
+  useState,
+  useMemo,
+  useCallback,
+  useEffect,
+  useRef,
+} from "react";
 import { useSelector, useDispatch } from "react-redux";
-import { Box, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography, CircularProgress, IconButton } from "@mui/material";
+import {
+  Box,
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Typography,
+  CircularProgress,
+  IconButton,
+} from "@mui/material";
 import DatasetIcon from "@mui/icons-material/Dataset";
 import { useTheme } from "@mui/material/styles";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
-import { enterComponentFullscreen, exitComponentFullscreen } from "../../store/slices/uiSlice";
+import {
+  enterComponentFullscreen,
+  exitComponentFullscreen,
+} from "../../store/slices/uiSlice";
 import useApi from "../../hooks/useApi";
 import useCustomSnackbar from "../../utils/useCustomSnackbar";
 
@@ -1798,15 +1819,18 @@ export default function ReportAnalysisScreen() {
   const showSnackBar = useCustomSnackbar();
 
   const user = useSelector((state) => state.auth.user);
-  const isFullscreen = useSelector((state) => state.ui?.isComponentFullscreen || false);
+  const isFullscreen = useSelector(
+    (state) => state.ui?.isComponentFullscreen || false,
+  );
   const cachedNodes = useSelector((state) => state.analyticsCache?.nodes || {});
 
   const [reportsConfig, setReportsConfig] = useState([]);
   const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
 
+  // Master Filter State
   const [appliedFilters, setAppliedFilters] = useState({
     reportCode: "",
-    viewCode: "",
+    viewCode: "", // Drives both Scope and Hierarchy
     head: null,
     entityCode: "",
     reportDate: "",
@@ -1819,12 +1843,19 @@ export default function ReportAnalysisScreen() {
 
   // --- DERIVED CONFIGURATION DYNAMICS ---
   const activeReport = useMemo(() => {
-    return reportsConfig.find((r) => r.reportCode === appliedFilters.reportCode) || null;
+    return (
+      reportsConfig.find((r) => r.reportCode === appliedFilters.reportCode) ||
+      null
+    );
   }, [reportsConfig, appliedFilters.reportCode]);
 
+  // Dynamically resolve hierarchy based on the exact selected viewCode
   const activeHierarchyConfig = useMemo(() => {
     if (!activeReport || !appliedFilters.viewCode) return DEFAULT_CONFIG;
-    return activeReport.views.find((v) => v.viewCode === appliedFilters.viewCode) || DEFAULT_CONFIG;
+    return (
+      activeReport.views.find((v) => v.viewCode === appliedFilters.viewCode) ||
+      DEFAULT_CONFIG
+    );
   }, [activeReport, appliedFilters.viewCode]);
 
   const isSetupComplete = !!(
@@ -1838,16 +1869,48 @@ export default function ReportAnalysisScreen() {
   const filtersApplied = !!appliedFilters.reportCode;
 
   // --- REDUX FULLSCREEN LOGIC ---
-  const toggleFullscreen = useCallback(() => { /* ... Keep exact as previous ... */ }, [isFullscreen, dispatch, showSnackBar]);
-  useEffect(() => { /* ... Keep exact popstate listener ... */ }, [isFullscreen, dispatch]);
-  useEffect(() => { /* ... Keep exact keydown listener ... */ }, [isFullscreen, dispatch]);
+  const toggleFullscreen = useCallback(() => {
+    if (isFullscreen) {
+      dispatch(exitComponentFullscreen());
+      if (window.history.state?.isFullscreenOverlay) window.history.back();
+    } else {
+      dispatch(enterComponentFullscreen());
+      showSnackBar("To exit full screen press 'F' or 'Esc'", "info");
+      window.history.pushState({ isFullscreenOverlay: true }, "");
+    }
+  }, [isFullscreen, dispatch, showSnackBar]);
+
+  useEffect(() => {
+    const handlePopState = () =>
+      isFullscreen && dispatch(exitComponentFullscreen());
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [isFullscreen, dispatch]);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "f") {
+        if (isFullscreen) {
+          dispatch(exitComponentFullscreen());
+          if (window.history.state?.isFullscreenOverlay) window.history.back();
+        } else {
+          dispatch(enterComponentFullscreen());
+          window.history.pushState({ isFullscreenOverlay: true }, "");
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isFullscreen, dispatch]);
 
   // --- CONFIG FETCHING ---
   useEffect(() => {
     const fetchConfig = async () => {
       try {
         const response = await callApi("/AS/analytics/config", {}, "GET");
-        setReportsConfig(Array.isArray(response) ? response : response?.data || []);
+        setReportsConfig(
+          Array.isArray(response) ? response : response?.data || [],
+        );
       } catch (error) {
         showSnackBar("Error fetching configuration", "error");
       }
@@ -1855,57 +1918,205 @@ export default function ReportAnalysisScreen() {
     if (user) fetchConfig();
   }, [callApi, user, showSnackBar]);
 
-  // --- NEW: DATA FETCHING HANDLER (From Dialog) ---
-  const handleApplyFilters = async (newFilters) => {
-    setIsInitializing(true);
-    
-    try {
-      // Find the specific hierarchy configuration for the selected report & view
-      const targetReport = reportsConfig.find((r) => r.reportCode === newFilters.reportCode);
-      const targetHierarchyConfig = targetReport?.views.find((v) => v.viewCode === newFilters.viewCode) || DEFAULT_CONFIG;
-
-      const rootData = await fetchInitialData(
-        callApi,
-        showSnackBar,
-        newFilters,
-        targetHierarchyConfig.hierarchy,
-        targetHierarchyConfig.availableMetrics
-      );
-
-      // If data is empty, DO NOT apply filters or close dialog. Path naturally stays hidden.
-      if (!rootData || rootData.length === 0) {
-        showSnackBar("No data found for the selected combination", "warning");
-      } else {
-        // Success: Update main view state and close dialog
-        setAppliedFilters(newFilters);
-        setData(rootData);
-        setExpandedIds(new Map());
-        setIsFilterDialogOpen(false);
+  // --- DATA FETCHING (Root Level) ---
+  useEffect(() => {
+    const loadRoot = async () => {
+      if (!isSetupComplete) {
+        setData([]);
+        return;
       }
-    } catch (error) {
-      console.error("Failed to load initial data", error);
-    } finally {
-      setIsInitializing(false);
-    }
-  };
+      setIsInitializing(true);
+      setData([]);
+      setExpandedIds(new Map());
+
+      try {
+        const rootData = await fetchInitialData(
+          callApi,
+          showSnackBar,
+          appliedFilters,
+          activeHierarchyConfig.hierarchy,
+          activeHierarchyConfig.availableMetrics,
+        );
+
+        if (!rootData || rootData.length === 0)
+          showSnackBar("No data found for the selected combination", "warning");
+        setData(rootData || []);
+      } catch (error) {
+        console.error("Failed to load initial data", error);
+      } finally {
+        setIsInitializing(false);
+      }
+    };
+    loadRoot();
+  }, [
+    appliedFilters,
+    activeHierarchyConfig,
+    callApi,
+    showSnackBar,
+    isSetupComplete,
+  ]);
 
   // --- NODE EXPANSION LOGIC ---
-  const appendChildrenToTree = useCallback((nodes, parentId, newChildren) => { /* Keep same */ }, []);
-  const handleToggle = useCallback(async (node) => { /* Keep same caching and fetchChildrenData logic */ }, [expandedIds, appendChildrenToTree, activeHierarchyConfig, appliedFilters, callApi, showSnackBar, cachedNodes, dispatch]);
+  const appendChildrenToTree = useCallback((nodes, parentId, newChildren) => {
+    return nodes.map((node) => {
+      if (node.id === parentId) return { ...node, children: newChildren };
+      if (node.children)
+        return {
+          ...node,
+          children: appendChildrenToTree(node.children, parentId, newChildren),
+        };
+      return node;
+    });
+  }, []);
+
+  const handleToggle = useCallback(
+    async (node) => {
+      const isExpanded = expandedIds.has(node.id);
+
+      if (isExpanded) {
+        setExpandedIds((prev) => {
+          const next = new Map(prev);
+          next.delete(node.id);
+          const removeDescendants = (currentNode) => {
+            if (currentNode.children) {
+              currentNode.children.forEach((child) => {
+                next.delete(child.id);
+                removeDescendants(child);
+              });
+            }
+          };
+          removeDescendants(node);
+          return next;
+        });
+      } else {
+        if (!node.children && node.hasChildren) {
+          const filterHash = `${appliedFilters.viewCode}_${appliedFilters.entityCode}_${appliedFilters.head.headCode}_${appliedFilters.reportDate}`;
+          const cacheKey = `${filterHash}_${node.id}`;
+          const cachedEntry = cachedNodes[cacheKey];
+          const isCacheValid =
+            cachedEntry && Date.now() - cachedEntry.timestamp < 900000;
+
+          if (isCacheValid) {
+            setData((prevData) =>
+              appendChildrenToTree(prevData, node.id, cachedEntry.data),
+            );
+          } else {
+            setLoadingIds((prev) => new Set(prev).add(node.id));
+            try {
+              const children = await fetchChildrenData(
+                callApi,
+                showSnackBar,
+                node,
+                appliedFilters,
+                activeHierarchyConfig.hierarchy,
+                activeHierarchyConfig.availableMetrics,
+              );
+              setData((prevData) =>
+                appendChildrenToTree(prevData, node.id, children),
+              );
+              dispatch({
+                type: "analyticsCache/cacheNode",
+                payload: {
+                  key: cacheKey,
+                  data: children,
+                  timestamp: Date.now(),
+                },
+              });
+            } catch (error) {
+              console.error("Failed to fetch children", error);
+            } finally {
+              setLoadingIds((prev) => {
+                const next = new Set(prev);
+                next.delete(node.id);
+                return next;
+              });
+            }
+          }
+        }
+
+        setExpandedIds((prev) => {
+          const next = new Map();
+          prev.forEach((level, id) => {
+            if (level < node.level) next.set(id, level);
+          });
+          next.set(node.id, node.level);
+          return next;
+        });
+      }
+    },
+    [
+      expandedIds,
+      appendChildrenToTree,
+      activeHierarchyConfig,
+      appliedFilters,
+      callApi,
+      showSnackBar,
+      cachedNodes,
+      dispatch,
+    ],
+  );
 
   // --- VIRTUALIZATION ENGINE ---
-  const visibleRows = useMemo(() => { /* Keep same */ }, [data, expandedIds]);
-  const maxVisibleLevel = useMemo(() => { /* Keep same */ }, [visibleRows]);
-  const visibleHierarchyLevels = activeHierarchyConfig.hierarchy.slice(0, maxVisibleLevel + 1);
-  const virtualizer = useVirtualizer({ /* Keep same */ });
+  const visibleRows = useMemo(() => {
+    const rows = [];
+    const traverse = (nodes) => {
+      for (const node of nodes) {
+        rows.push(node);
+        if (expandedIds.has(node.id) && node.children) traverse(node.children);
+      }
+    };
+    traverse(data);
+    return rows;
+  }, [data, expandedIds]);
+
+  const maxVisibleLevel = useMemo(() => {
+    if (visibleRows.length === 0) return 0;
+    return Math.max(...visibleRows.map((row) => row.level));
+  }, [visibleRows]);
+
+  const visibleHierarchyLevels = activeHierarchyConfig.hierarchy.slice(
+    0,
+    maxVisibleLevel + 1,
+  );
+
+  const virtualizer = useVirtualizer({
+    count: visibleRows.length,
+    getScrollElement: () => tableContainerRef.current,
+    estimateSize: () => 40,
+    overscan: 5,
+  });
+
   const virtualItems = virtualizer.getVirtualItems();
-  const totalColumnsCount = visibleHierarchyLevels.length + activeHierarchyConfig.availableMetrics.length;
+  const totalColumnsCount =
+    visibleHierarchyLevels.length +
+    activeHierarchyConfig.availableMetrics.length;
   const paddingTop = virtualItems.length > 0 ? virtualItems[0].start : 0;
-  const paddingBottom = virtualItems.length > 0 ? virtualizer.getTotalSize() - virtualItems[virtualItems.length - 1].end : 0;
+  const paddingBottom =
+    virtualItems.length > 0
+      ? virtualizer.getTotalSize() - virtualItems[virtualItems.length - 1].end
+      : 0;
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, ...(isFullscreen ? { position: "fixed", top: 0, left: 0, right: 0, bottom: 0, width: "100vw", height: "100vh", zIndex: 1299, p: 2 } : { height: "calc(100vh - 220px)" }) }}>
-      
+    <Box
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 1.5,
+        ...(isFullscreen
+          ? {
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              width: "100vw",
+              height: "100vh",
+              zIndex: 1299,
+              p: 2,
+            }
+          : { height: "calc(100vh - 220px)" }),
+      }}
+    >
       <ReportAnalysisHeader
         activeReport={activeReport}
         isFullscreen={isFullscreen}
@@ -1917,48 +2128,230 @@ export default function ReportAnalysisScreen() {
       <FilterDialog
         open={isFilterDialogOpen}
         onClose={() => setIsFilterDialogOpen(false)}
-        onApply={handleApplyFilters} // NEW: Pass the async handler
+        onApply={(newFilters) => setAppliedFilters(newFilters)}
         reportsConfig={reportsConfig}
         currentFilters={appliedFilters}
-        callApi={callApi} 
-        user={user}
-        isApplying={isInitializing} // NEW: Pass loading state
+        callApi={callApi}
+        user={user} // Passes Redux authorized entities downward
       />
 
-      <Paper elevation={0} sx={{ flexGrow: 1, display: "flex", flexDirection: "column", overflow: "hidden", borderRadius: 1, boxShadow: "0 2px 10px rgba(0,0,0,0.03)", border: 1, borderColor: "divider" }}>
-        
-        <Box sx={{ borderBottom: 1, borderColor: "divider", px: 2, py: 1.5, minHeight: 44, display: "flex", alignItems: "center" }}>
-          <HierarchyPath activeHierarchyConfig={activeHierarchyConfig} maxVisibleLevel={maxVisibleLevel} isSetupComplete={isSetupComplete} />
+      <Paper
+        elevation={0}
+        sx={{
+          flexGrow: 1,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          borderRadius: 1,
+          boxShadow: "0 2px 10px rgba(0,0,0,0.03)",
+          border: 1,
+          borderColor: "divider",
+        }}
+      >
+        <Box
+          sx={{
+            borderBottom: 1,
+            borderColor: "divider",
+            px: 2,
+            py: 1.5,
+            minHeight: 44,
+            display: "flex",
+            alignItems: "center",
+          }}
+        >
+          <HierarchyPath
+            activeHierarchyConfig={activeHierarchyConfig}
+            maxVisibleLevel={maxVisibleLevel}
+            isSetupComplete={isSetupComplete}
+          />
         </Box>
 
-        <TableContainer ref={tableContainerRef} sx={{ flexGrow: 1, bgcolor: "background.default", position: "relative", overflow: "auto", willChange: "transform" }}>
-          
-          {/* Default Placeholder when isSetupComplete is False */}
+        <TableContainer
+          ref={tableContainerRef}
+          sx={{
+            flexGrow: 1,
+            bgcolor: "background.default",
+            position: "relative",
+            overflow: "auto",
+            willChange: "transform",
+          }}
+        >
           {!isSetupComplete && (
-            <Box sx={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 10 }}>
-              <DatasetIcon sx={{ fontSize: 64, color: "action.disabled", mb: 1 }} />
-              <Typography variant="h6" color="text.secondary">No Data to Display</Typography>
-              <Typography variant="body2" color="text.disabled">Click the filter icon to select a report combination and scope.</Typography>
+            <Box
+              sx={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 10,
+              }}
+            >
+              <DatasetIcon
+                sx={{ fontSize: 64, color: "action.disabled", mb: 1 }}
+              />
+              <Typography variant="h6" color="text.secondary">
+                No Data to Display
+              </Typography>
+              <Typography variant="body2" color="text.disabled">
+                Click the filter icon to select a report combination and scope.
+              </Typography>
             </Box>
           )}
 
-          {isSetupComplete && data.length > 0 ? (
-            <Table stickyHeader size="small" sx={{ minWidth: 1000, tableLayout: "fixed" }}>
-              {/* ... KEEP EXISTING TABLE RENDERER ... */}
+          {isInitializing ? (
+            <Box
+              sx={{
+                height: "100%",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <CircularProgress size={32} color="primary" sx={{ mb: 1 }} />
+              <Typography variant="body2" color="text.secondary">
+                Executing Query ...
+              </Typography>
+            </Box>
+          ) : isSetupComplete && data.length > 0 ? (
+            <Table
+              stickyHeader
+              size="small"
+              sx={{ minWidth: 1000, tableLayout: "fixed" }}
+            >
+              <TableHead>
+                <TableRow>
+                  {visibleHierarchyLevels.map((levelName) => (
+                    <TableCell
+                      key={levelName}
+                      sx={{
+                        backgroundColor:
+                          theme.palette.purple?.[100] ||
+                          theme.palette.primary.light,
+                        color: "text.primary",
+                        fontWeight: 700,
+                        borderRight: 1,
+                        borderColor: "divider",
+                        borderBottom: 2,
+                        py: 1,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {levelName.replace("_", " ").toUpperCase()}
+                    </TableCell>
+                  ))}
+                  {activeHierarchyConfig.availableMetrics.map((metric) => (
+                    <TableCell
+                      key={metric.logicalName}
+                      align="right"
+                      sx={{
+                        backgroundColor:
+                          theme.palette.purple?.[200] ||
+                          theme.palette.primary.light,
+                        color: "text.primary",
+                        fontWeight: 700,
+                        borderRight: 1,
+                        borderColor: "divider",
+                        borderBottom: 2,
+                        py: 1,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {metric.displayName}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {paddingTop > 0 && (
+                  <TableRow>
+                    <TableCell
+                      colSpan={totalColumnsCount}
+                      style={{
+                        height: `${paddingTop}px`,
+                        padding: 0,
+                        border: "none",
+                      }}
+                    />
+                  </TableRow>
+                )}
+
+                {virtualItems.map((virtualRow) => {
+                  const row = visibleRows[virtualRow.index];
+                  return (
+                    <ActualTreeTableRow
+                      key={row.id}
+                      node={row}
+                      index={virtualRow.index}
+                      isExpanded={expandedIds.has(row.id)}
+                      isLoading={loadingIds.has(row.id)}
+                      onToggle={handleToggle}
+                      maxVisibleLevel={maxVisibleLevel}
+                      activeMetrics={activeHierarchyConfig.availableMetrics}
+                      theme={theme}
+                      ref={virtualizer.measureElement}
+                      data-index={virtualRow.index}
+                      showSnackBar={showSnackBar}
+                    />
+                  );
+                })}
+
+                {paddingBottom > 0 && (
+                  <TableRow>
+                    <TableCell
+                      col
+                      colSpan={totalColumnsCount}
+                      style={{
+                        height: `${paddingBottom}px`,
+                        padding: 0,
+                        border: "none",
+                      }}
+                    />
+                  </TableRow>
+                )}
+              </TableBody>
             </Table>
           ) : null}
         </TableContainer>
 
-        {/* Footer Area */}
-        <Box sx={{ bgcolor: "background.paper", borderTop: 1, borderColor: "divider", px: 2, py: 1, display: "flex", justifyContent: "space-between", alignItems: "center", minHeight: 40 }}>
+        <Box
+          sx={{
+            bgcolor: "background.paper",
+            borderTop: 1,
+            borderColor: "divider",
+            px: 2,
+            py: 1,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            minHeight: 40,
+          }}
+        >
           <Typography variant="caption" color="text.secondary" fontWeight={500}>
             Showing {visibleRows.length} rows
           </Typography>
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            <IconButton onClick={toggleFullscreen} size="small" sx={{ border: "1px solid", borderColor: "divider", mr: 0.5 }}>
-              {isFullscreen ? <FullscreenExitIcon fontSize="small" /> : <FullscreenIcon fontSize="small" />}
+            <IconButton
+              onClick={toggleFullscreen}
+              size="small"
+              sx={{ border: "1px solid", borderColor: "divider", mr: 0.5 }}
+            >
+              {isFullscreen ? (
+                <FullscreenExitIcon fontSize="small" />
+              ) : (
+                <FullscreenIcon fontSize="small" />
+              )}
             </IconButton>
-            <Typography variant="caption" color="text.secondary" sx={{ userSelect: "none" }}>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ userSelect: "none" }}
+            >
               {isFullscreen ? "Exit Full Screen" : "Press F to Full Screen"}
             </Typography>
           </Box>
@@ -1967,6 +2360,7 @@ export default function ReportAnalysisScreen() {
     </Box>
   );
 }
+
 
 
 
