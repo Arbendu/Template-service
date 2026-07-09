@@ -1,0 +1,94 @@
+// File: components/FilterDialog.jsx
+// Locate the <Select> component for "Select Report" (Around line 118)
+
+<Select
+  labelId="dialog-report-label"
+  value={reportCode}
+  label="Select Report *"
+  disabled={isApplying}
+  onChange={(e) => {
+    setReportCode(e.target.value);
+    setViewCode("");
+    setEntityCode("");
+    
+    // --> ADD THESE 3 LINES: Automatically reset Head Code when report changes
+    setHead(null);
+    setHeadInputValue("");
+    setHeadOptions([]);
+  }}
+>
+
+
+
+
+
+
+
+
+
+
+// File: components/FilterDialog.jsx
+// Locate the handleApply function (Around line 85)
+
+const handleApply = () => {
+  onApply({
+    reportCode,
+    viewCode,
+    head,
+    entityCode: (!isCircleScope && !isBranchScope) ? "" : entityCode,
+    reportDate,
+  });
+  
+  // --> REMOVE or COMMENT OUT this line:
+  // onClose(); 
+};
+
+
+
+
+
+
+
+
+
+// File: ReportAnalysisScreen.jsx
+// Locate the handleApplyFilters function
+
+const handleApplyFilters = async (newFilters) => {
+  setIsInitializing(true);
+  
+  try {
+    const targetReport = reportsConfig.find((r) => r.reportCode === newFilters.reportCode);
+    const targetHierarchyConfig = targetReport?.views.find((v) => v.viewCode === newFilters.viewCode) || DEFAULT_CONFIG;
+
+    const rootData = await fetchInitialData(
+      callApi,
+      showSnackBar,
+      newFilters,
+      targetHierarchyConfig.hierarchy,
+      targetHierarchyConfig.availableMetrics
+    );
+
+    // --> ADD THIS IF/ELSE CONDITION
+    if (!rootData || rootData.length === 0) {
+      // SCENARIO 1: No Data Found
+      // Show snackbar, but DO NOT update appliedFilters or close dialog.
+      // Because appliedFilters is not updated, the Path remains hidden.
+      showSnackBar("No data found for the selected combination", "warning");
+    } else {
+      // SCENARIO 2: Data Found
+      // Update state to show the Path, inject the data, and close the dialog box.
+      setAppliedFilters(newFilters);
+      setData(rootData);
+      setExpandedIds(new Map());
+      setIsFilterDialogOpen(false); 
+    }
+    
+  } catch (error) {
+    console.error("Failed to load initial data", error);
+    showSnackBar("Error fetching data", "error");
+  } finally {
+    setIsInitializing(false);
+  }
+};
+
