@@ -1,1 +1,98 @@
 
+// Add Button to your @mui/material imports at the top
+import {
+  Box,
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Typography,
+  CircularProgress,
+  IconButton,
+  Button, // <--- Make sure Button is imported
+} from "@mui/material";
+
+// Add this icon import near your other MUI icons (TuneIcon, etc.)
+import FilterAltOutlinedIcon from "@mui/icons-material/FilterAltOutlined";
+
+
+
+
+
+
+
+        <TableContainer
+          ref={tableContainerRef}
+          sx={{
+            flexGrow: 1,
+            bgcolor: "background.default",
+            position: "relative",
+            overflow: "auto",
+            willChange: "transform",
+          }}
+        >
+          {/* --- REPLACE THE OLD !isSetupComplete BLOCK WITH THIS --- */}
+          {!isSetupComplete && (
+            <Box
+              sx={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 10,
+                p: 3,
+                textAlign: "center"
+              }}
+            >
+              {/* Funnel Icon Box */}
+              <Box
+                sx={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: 4,
+                  bgcolor: "action.hover", // Light gray/blue background
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  mb: 2,
+                }}
+              >
+                <FilterAltOutlinedIcon sx={{ fontSize: 32, color: "text.secondary" }} />
+              </Box>
+
+              {/* Text Elements */}
+              <Typography variant="h6" sx={{ color: "primary.main", fontWeight: "bold", mb: 1 }}>
+                No Data to Display
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 350, mb: 3 }}>
+                Configure the database report, head, hierarchy and report date to render the drill-down matrix.
+              </Typography>
+
+              {/* Action Button */}
+              <Button
+                variant="outlined"
+                color="primary"
+                startIcon={<TuneIcon />}
+                onClick={() => setIsFilterDialogOpen(true)}
+                sx={{ 
+                  borderRadius: 6, // Makes it pill-shaped
+                  textTransform: "none", 
+                  fontWeight: 600,
+                  px: 3
+                }}
+              >
+                Open filter dialog
+              </Button>
+            </Box>
+          )}
+          {/* --- END OF REPLACEMENT --- */}
+
+          {isInitializing ? (
