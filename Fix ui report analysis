@@ -1,22 +1,411 @@
+{
+    "success": true,
+    "message": "Operation completed successfully.",
+    "data": [
+        {
+            "name": "KURSEONG                      ",
+            "code": "00123"
+        },
+        {
+            "name": "MUNGER BAZAAR                 ",
+            "code": "01230"
+        },
+        {
+            "name": "MOTIHARI BAZAAR               ",
+            "code": "01231"
+        },
+        {
+            "name": "SUTAPATTI (MUZAFFARPUR)       ",
+            "code": "01232"
+        },
+        {
+            "name": "JUDGES COURT ROAD  PATNA      ",
+            "code": "01233"
+        },
+        {
+            "name": "HAJIGANJ(PATNA CITY)          ",
+            "code": "01234"
+        },
+        {
+            "name": "PHUSRO BAZAAR                 ",
+            "code": "01235"
+        },
+        {
+            "name": "PURNEA BAZAR                  ",
+            "code": "01236"
+        },
+        {
+            "name": "UPPER BAZAR (RANCHI)          ",
+            "code": "01237"
+        },
+        {
+            "name": "SIWAN BAZAR                   ",
+            "code": "01238"
+        },
+        {
+            "name": "BANSPHATAK (VARANASI)         ",
+            "code": "01239"
+        },
+        {
+            "name": "NARANPURA (AHMEDABAD)         ",
+            "code": "01123"
+        },
+        {
+            "name": "SARUPATHAR                    ",
+            "code": "02123"
+        },
+        {
+            "name": "HALALPUR                      ",
+            "code": "03123"
+        },
+        {
+            "name": "SPL P.B.B SAHAPURA BHOPAL     ",
+            "code": "04123"
+        },
+        {
+            "name": "RBO UJJAIN                    ",
+            "code": "05123"
+        },
+        {
+            "name": "BHATAKUMURADA                 ",
+            "code": "06123"
+        },
+        {
+            "name": "GRAIN MARKET (KARNAL)         ",
+            "code": "09123"
+        },
+        {
+            "name": "PATHARKATTI                   ",
+            "code": "08123"
+        },
+        {
+            "name": "DINJAN                        ",
+            "code": "07123"
+        },
+        {
+            "name": "BARKHERA                      ",
+            "code": "12332"
+        },
+        {
+            "name": "LALAURIKHERA                  ",
+            "code": "12333"
+        },
+        {
+            "name": "SIDHAULI                      ",
+            "code": "12334"
+        },
+        {
+            "name": "KHUDAGUNJ                     ",
+            "code": "12335"
+        },
+        {
+            "name": "KERUGANJ                      ",
+            "code": "12336"
+        },
+        {
+            "name": "KULPI                         ",
+            "code": "12337"
+        },
+        {
+            "name": "SONPETH                       ",
+            "code": "12338"
+        },
+        {
+            "name": "DHAMUA BRANCH                 ",
+            "code": "12339"
+        },
+        {
+            "name": "SAHARARHAT                    ",
+            "code": "12340"
+        },
+        {
+            "name": "NARENDRAPUR                   ",
+            "code": "12341"
+        },
+        {
+            "name": "SUBHASHGRAM                   ",
+            "code": "12342"
+        },
+        {
+            "name": "USTHI                         ",
+            "code": "12343"
+        },
+        {
+            "name": "PATHAR PRATIMA                ",
+            "code": "12344"
+        },
+        {
+            "name": "MOLLARGATE                    ",
+            "code": "12346"
+        },
+        {
+            "name": "SARSUNA                       ",
+            "code": "12347"
+        },
+        {
+            "name": "RABINDRANAGAR                 ",
+            "code": "12348"
+        },
+        {
+            "name": "SME(NORTH KOLKATA) CHIRIAMORE ",
+            "code": "12349"
+        },
+        {
+            "name": "CHAK-ISLAMPUR                 ",
+            "code": "12351"
+        },
+        {
+            "name": "JALANGI                       ",
+            "code": "12352"
+        },
+        {
+            "name": "SAGARPARA                     ",
+            "code": "12353"
+        },
+        {
+            "name": "SEIKHPARA                     ",
+            "code": "12354"
+        },
+        {
+            "name": "OMARPUR                       ",
+            "code": "12355"
+        },
+        {
+            "name": "JUNGLIGHAT                    ",
+            "code": "12356"
+        },
+        {
+            "name": "HADDO                         ",
+            "code": "12357"
+        },
+        {
+            "name": "HAVELOCK                      ",
+            "code": "12358"
+        },
+        {
+            "name": "WIMBERLYGUNJ                  ",
+            "code": "12359"
+        },
+        {
+            "name": "CF BLOCK, SALT LAKE           ",
+            "code": "12360"
+        },
+        {
+            "name": "SALT LAKE SECTOR2             ",
+            "code": "12361"
+        },
+        {
+            "name": "SECTOR-5 SALT LAKE            ",
+            "code": "12363"
+        },
+        {
+            "name": "RAHARA STATION ROAD           ",
+            "code": "12364"
+        },
+        {
+            "name": "OSMANPUR (BATTALA)            ",
+            "code": "12365"
+        },
+        {
+            "name": "BHALUKA BRANCH                ",
+            "code": "12366"
+        },
+        {
+            "name": "SIMURALI                      ",
+            "code": "12367"
+        },
+        {
+            "name": "BISHNUPUR                     ",
+            "code": "12368"
+        },
+        {
+            "name": "SUTRAGARH                     ",
+            "code": "12369"
+        },
+        {
+            "name": "PAYRADANGA, BENGAL            ",
+            "code": "12370"
+        },
+        {
+            "name": "JAGULI                        ",
+            "code": "12371"
+        },
+        {
+            "name": "NAGARUKHRA                    ",
+            "code": "12372"
+        },
+        {
+            "name": "DUM DUM ROAD                  ",
+            "code": "12373"
+        },
+        {
+            "name": "CHAMPADALI MORE               ",
+            "code": "12375"
+        },
+        {
+            "name": "HATIARA                       ",
+            "code": "12376"
+        },
+        {
+            "name": "MOTILAL COLONY                ",
+            "code": "12377"
+        },
+        {
+            "name": "DAKSHINPURA(BAGUIATI)         ",
+            "code": "12378"
+        },
+        {
+            "name": "NARAYANPUR                    ",
+            "code": "12379"
+        },
+        {
+            "name": "HAROA                         ",
+            "code": "12380"
+        },
+        {
+            "name": "KHOLAPOTA                     ",
+            "code": "12381"
+        },
+        {
+            "name": "KATIAHAT                      ",
+            "code": "12382"
+        },
+        {
+            "name": "BANKRA-BIRATI                 ",
+            "code": "12383"
+        },
+        {
+            "name": "RAJARHAT TOWNSHIP             ",
+            "code": "12384"
+        },
+        {
+            "name": "HATGOBINDAPUR                 ",
+            "code": "12385"
+        },
+        {
+            "name": "BALGONA                       ",
+            "code": "12386"
+        },
+        {
+            "name": "Aalapur                       ",
+            "code": "11230"
+        },
+        {
+            "name": "MASKANWA BAZAR                ",
+            "code": "11231"
+        },
+        {
+            "name": "TARABGANJ                     ",
+            "code": "11232"
+        },
+        {
+            "name": "BASKHARI                      ",
+            "code": "11233"
+        },
+        {
+            "name": "MILKIPUR                      ",
+            "code": "11234"
+        },
+        {
+            "name": "WAZIRGANJ                     ",
+            "code": "11235"
+        },
+        {
+            "name": "ITIYATHOK                     ",
+            "code": "11236"
+        },
+        {
+            "name": "DHANEPUR                      ",
+            "code": "11237"
+        },
+        {
+            "name": "RAJGARH                       ",
+            "code": "11238"
+        },
+        {
+            "name": "PADRI                         ",
+            "code": "11239"
+        },
+        {
+            "name": "SATGACHIA                     ",
+            "code": "12387"
+        },
+        {
+            "name": "NUTANHAT                      ",
+            "code": "12388"
+        },
+        {
+            "name": "BANAGRAM                      ",
+            "code": "12389"
+        },
+        {
+            "name": "RAJGRAM                       ",
+            "code": "12390"
+        },
+        {
+            "name": "SRINIKETAN                    ",
+            "code": "12391"
+        },
+        {
+            "name": "SURI TOWN                     ",
+            "code": "12392"
+        },
+        {
+            "name": "JAYRAMBATI                    ",
+            "code": "12393"
+        },
+        {
+            "name": "BALARAMPUR                    ",
+            "code": "12394"
+        },
+        {
+            "name": "RASULPUR                      ",
+            "code": "12395"
+        },
+        {
+            "name": "RANIBANDH                     ",
+            "code": "12396"
+        },
+        {
+            "name": "TALDANGRA                     ",
+            "code": "12397"
+        },
+        {
+            "name": "ANARA                         ",
+            "code": "12398"
+        },
+        {
+            "name": "PANAGARH BAZAR                ",
+            "code": "12399"
+        },
+        {
+            "name": "MINI SECTT.D C COMPLEX MUKTSAR",
+            "code": "10123"
+        },
+        {
+            "name": "PULIVENDULA TOWN              ",
+            "code": "11123"
+        },
+        {
+            "name": "DUDDHI (DISTT SONEBHADRA)     ",
+            "code": "12300"
+        },
+        {
+            "name": "GHORAWAL                      ",
+            "code": "12301"
+        },
+        {
+            "name": "SAKALDIHA                     ",
+            "code": "12302"
+        },
+        {
+            "name": "KACHHAWA                      ",
+            "code": "12303"
+        }
+    ],
+    "timestamp": "2026-07-10T06:55:01.132169900Z"
+}
 
-// Add Button to your @mui/material imports at the top
-import {
-  Box,
-  Paper,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Typography,
-  CircularProgress,
-  IconButton,
-  Button, // <--- Make sure Button is imported
-} from "@mui/material";
-
-// Add this icon import near your other MUI icons (TuneIcon, etc.)
-import FilterAltOutlinedIcon from "@mui/icons-material/FilterAltOutlined";
 
 
 
@@ -24,75 +413,4 @@ import FilterAltOutlinedIcon from "@mui/icons-material/FilterAltOutlined";
 
 
 
-        <TableContainer
-          ref={tableContainerRef}
-          sx={{
-            flexGrow: 1,
-            bgcolor: "background.default",
-            position: "relative",
-            overflow: "auto",
-            willChange: "transform",
-          }}
-        >
-          {/* --- REPLACE THE OLD !isSetupComplete BLOCK WITH THIS --- */}
-          {!isSetupComplete && (
-            <Box
-              sx={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                zIndex: 10,
-                p: 3,
-                textAlign: "center"
-              }}
-            >
-              {/* Funnel Icon Box */}
-              <Box
-                sx={{
-                  width: 64,
-                  height: 64,
-                  borderRadius: 4,
-                  bgcolor: "action.hover", // Light gray/blue background
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  mb: 2,
-                }}
-              >
-                <FilterAltOutlinedIcon sx={{ fontSize: 32, color: "text.secondary" }} />
-              </Box>
-
-              {/* Text Elements */}
-              <Typography variant="h6" sx={{ color: "primary.main", fontWeight: "bold", mb: 1 }}>
-                No Data to Display
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 350, mb: 3 }}>
-                Configure the database report, head, hierarchy and report date to render the drill-down matrix.
-              </Typography>
-
-              {/* Action Button */}
-              <Button
-                variant="outlined"
-                color="primary"
-                startIcon={<TuneIcon />}
-                onClick={() => setIsFilterDialogOpen(true)}
-                sx={{ 
-                  borderRadius: 6, // Makes it pill-shaped
-                  textTransform: "none", 
-                  fontWeight: 600,
-                  px: 3
-                }}
-              >
-                Open filter dialog
-              </Button>
-            </Box>
-          )}
-          {/* --- END OF REPLACEMENT --- */}
-
-          {isInitializing ? (
+/common-master/branches-code-name-only?q=123&circleCode=
