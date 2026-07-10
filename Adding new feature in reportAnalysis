@@ -2367,3 +2367,48 @@ export default function ReportAnalysisScreen() {
 
 
 
+
+
+
+
+
+
+
+
+
+// File: api/analyticsApi.js
+
+// 1. ADD THIS HELPER FUNCTION right above buildBaseFilters
+const formatDateToDDMMYYYY = (dateString) => {
+  if (!dateString) return "";
+  const [year, month, day] = dateString.split("-");
+  return `${day}-${month}-${year}`;
+};
+
+// 2. UPDATE buildBaseFilters to use the helper
+const buildBaseFilters = (appliedFilters) => {
+  // Convert YYYY-MM-DD to DD-MM-YYYY
+  const formattedDate = formatDateToDDMMYYYY(appliedFilters.reportDate);
+
+  const filters = [
+    // Use formattedDate here instead of appliedFilters.reportDate directly
+    { logicalField: "ReportDate", operator: "EQUALS", value: formattedDate },
+    { logicalField: "HeadCode", operator: "EQUALS", value: appliedFilters.head?.headCode },
+  ];
+
+  // Inject Circle or Branch filter if an entity is selected and the view requires it
+  if (appliedFilters.entityCode) {
+    const isCircleScope = appliedFilters.viewCode.includes("CIRCLE");
+    const isBranchScope = appliedFilters.viewCode.includes("BRANCH");
+    
+    if (isCircleScope) {
+      filters.push({ logicalField: "Circle", operator: "EQUALS", value: appliedFilters.entityCode });
+    } else if (isBranchScope) {
+      filters.push({ logicalField: "Branch", operator: "EQUALS", value: appliedFilters.entityCode });
+    }
+  }
+
+  return filters;
+};
+
+
