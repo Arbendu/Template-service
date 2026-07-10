@@ -68,7 +68,7 @@ const buildBaseFilters = (appliedFilters) => {
       });
     } else if (isBranchScope) {
       filters.push({
-        logicalField: "Branch",
+        logicalField: "BranchCode",
         operator: "EQUALS",
         value: appliedFilters.entityCode,
       });
@@ -438,15 +438,31 @@ export default function FilterDialog({
   user,
   isApplying,
 }) {
+  // --- USER AUTH MAPPING ---
+  // Verify these keys match exactly what your Redis auth object returns
+  const isAdmin = user?.role === 10 || user?.roleName === "ADMIN";
+  const userCircleCode = user?.circleCode;
+  const userCircleName = user?.circleName;
+  const userBranchCode = user?.branch;
+  const userBranchName = user?.branchName;
+
   const [reportCode, setReportCode] = useState("");
-  const [viewCode, setViewCode] = useState(""); // Replaces "scope" state
+  const [viewCode, setViewCode] = useState("");
   const [head, setHead] = useState(null);
-  const [entityCode, setEntityCode] = useState("");
   const [reportDate, setReportDate] = useState("");
+
+  // Entity (Circle/Branch) State mapping
+  const [entity, setEntity] = useState(null); // Stores the selected object { code, name }
+  const [entityInputValue, setEntityInputValue] = useState("");
+  const [entityOptions, setEntityOptions] = useState([]);
+  const [isEntityLoading, setIsEntityLoading] = useState(false);
 
   const [headInputValue, setHeadInputValue] = useState("");
   const [headOptions, setHeadOptions] = useState([]);
   const [isHeadsLoading, setIsHeadsLoading] = useState(false);
+
+  const isCircleScope = viewCode.includes("CIRCLE");
+  const isBranchScope = viewCode.includes("BRANCH");
 
   // Sync state when dialog opens
   useEffect(() => {
@@ -454,8 +470,18 @@ export default function FilterDialog({
       setReportCode(currentFilters?.reportCode || "");
       setViewCode(currentFilters?.viewCode || "");
       setHead(currentFilters?.head || null);
-      setEntityCode(currentFilters?.entityCode || "");
       setReportDate(currentFilters?.reportDate || "");
+
+      // Restore entity state if it exists
+      if (currentFilters?.entityCode && currentFilters?.entityName) {
+        setEntity({
+          code: currentFilters.entityCode,
+          name: currentFilters.entityName,
+        });
+      } else {
+        setEntity(null);
+      }
+
       if (currentFilters?.head) setHeadOptions([currentFilters.head]);
     }
   }, [open, currentFilters]);
@@ -467,19 +493,89 @@ export default function FilterDialog({
     return report?.views || [];
   }, [reportCode, reportsConfig]);
 
-  // Determine if we need to show the Entity Dropdown based on the selected view
-  const isCircleScope = viewCode.includes("CIRCLE");
-  const isBranchScope = viewCode.includes("BRANCH");
+  // --- ENTITY FETCHING & AUTO-FILL LOGIC ---
+  useEffect(() => {
+    // 1. If not admin, auto-select their default entity and lock it
+    if (!isAdmin) {
+      if (isCircleScope && userCircleCode) {
+        setEntity({
+          code: userCircleCode,
+          name: userCircleName || userCircleCode,
+        });
+      } else if (isBranchScope && userBranchCode) {
+        setEntity({
+          code: userBranchCode,
+          name: userBranchName || userBranchCode,
+        });
+      } else {
+        setEntity(null);
+      }
+      return; // Exit early so non-admins don't fetch data
+    }
 
-  // Dynamically load Entities from User Profile instead of an API
-  const entityOptions = useMemo(() => {
-    if (!user) return [];
-    if (isCircleScope) return user.circles || []; // Fallback array if undefined
-    if (isBranchScope) return user.branches || [];
-    return [];
-  }, [user, isCircleScope, isBranchScope]);
+    // 2. If Admin, fetch data dynamically on input change
+    const delayDebounceFn = setTimeout(async () => {
+      if (entityInputValue && entityInputValue.length >= 2) {
+        setIsEntityLoading(true);
+        try {
+          let response;
+          let mappedData = [];
 
-  // Debounced API call for Head Code Autocomplete
+          if (isCircleScope) {
+            // Assuming the circle search API endpoint
+            response = await callApi(
+              `/CM/common-master/circle-codes`,
+              {},
+              "GET",
+            );
+            console.log("Circle code: ", response);
+            
+            const data = response?.data || [];
+            // Map Circle response to a standard { code, name } format
+            mappedData = data.map((c) => ({
+              code: c.circleCode,
+              name: c.circleName,
+            }));
+          } else if (isBranchScope) {
+            // Branch API endpoint as requested
+            response = await callApi(
+              `/CM/common-master/branches-code-name-only?q=${entityInputValue}&circleCode=`,
+              {},
+              "GET",
+            );
+            console.log("Branch code: ", response);
+            const data = response?.data || [];
+            // Branch response is already in { code, name } format, but we ensure mapping
+            mappedData = data.map((b) => ({ code: b.code, name: b.name }));
+          }
+
+          setEntityOptions(mappedData);
+        } catch (error) {
+          console.error("Error fetching entities:", error);
+          setEntityOptions([]);
+        } finally {
+          setIsEntityLoading(false);
+        }
+      } else {
+        setEntityOptions(entity ? [entity] : []);
+      }
+    }, 500);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [
+    entityInputValue,
+    isCircleScope,
+    isBranchScope,
+    isAdmin,
+    callApi,
+    entity,
+    userCircleCode,
+    userCircleName,
+    userBranchCode,
+    userBranchName,
+  ]);
+
+  // --- HEAD CODE FETCHING LOGIC ---
   useEffect(() => {
     const delayDebounceFn = setTimeout(async () => {
       if (headInputValue && headInputValue.length >= 2 && reportCode) {
@@ -498,9 +594,10 @@ export default function FilterDialog({
     setReportCode("");
     setViewCode("");
     setHead(null);
-    setEntityCode("");
+    setEntity(null);
     setReportDate("");
     setHeadOptions([]);
+    setEntityOptions([]);
   };
 
   const handleApply = () => {
@@ -508,22 +605,22 @@ export default function FilterDialog({
       reportCode,
       viewCode,
       head,
-      entityCode: !isCircleScope && !isBranchScope ? "" : entityCode,
+      entityCode: entity?.code || "",
+      entityName: entity?.name || "", // Saving name for restoring filter state cleanly
       reportDate,
     });
-    //onClose();
   };
 
   const isApplyEnabled = useMemo(() => {
     const baseValid = reportCode && viewCode && head?.headCode && reportDate;
     if (!baseValid) return false;
-    if (isCircleScope || isBranchScope) return !!entityCode;
+    if (isCircleScope || isBranchScope) return !!entity?.code;
     return true;
   }, [
     reportCode,
     viewCode,
     head,
-    entityCode,
+    entity,
     reportDate,
     isCircleScope,
     isBranchScope,
@@ -546,23 +643,25 @@ export default function FilterDialog({
         >
           <QueryStatsIcon /> Drill Down Filters
         </Typography>
-        <IconButton onClick={onClose} size="small">
+        <IconButton onClick={onClose} size="small" disabled={isApplying}>
           <CloseIcon />
         </IconButton>
       </DialogTitle>
 
       <DialogContent dividers>
         <Box display="flex" flexDirection="column" gap={3} py={1}>
+          {/* Report Code Selection */}
           <FormControl size="small" fullWidth>
             <InputLabel id="dialog-report-label">Select Report</InputLabel>
             <Select
               labelId="dialog-report-label"
               value={reportCode}
               label="Select Report"
+              disabled={isApplying}
               onChange={(e) => {
                 setReportCode(e.target.value);
                 setViewCode("");
-                setEntityCode("");
+                setEntity(null);
                 setHead(null);
                 setHeadInputValue("");
                 setHeadOptions([]);
@@ -590,6 +689,7 @@ export default function FilterDialog({
             </FormHelperText>
           </FormControl>
 
+          {/* Head Code Autocomplete */}
           <Autocomplete
             size="small"
             options={headOptions}
@@ -602,7 +702,7 @@ export default function FilterDialog({
               setHeadInputValue(newInputValue)
             }
             loading={isHeadsLoading}
-            disabled={!reportCode}
+            disabled={!reportCode || isApplying}
             renderInput={(params) => (
               <TextField
                 {...params}
@@ -635,7 +735,12 @@ export default function FilterDialog({
             )}
           />
 
-          <FormControl size="small" fullWidth disabled={!reportCode}>
+          {/* Scope Selection */}
+          <FormControl
+            size="small"
+            fullWidth
+            disabled={!reportCode || isApplying}
+          >
             <InputLabel id="dialog-scope-label">Scope</InputLabel>
             <Select
               labelId="dialog-scope-label"
@@ -643,7 +748,7 @@ export default function FilterDialog({
               label="Scope"
               onChange={(e) => {
                 setViewCode(e.target.value);
-                setEntityCode("");
+                setEntity(null); // Clear entity when switching scope
               }}
             >
               {availableViews.map((view) => (
@@ -668,35 +773,61 @@ export default function FilterDialog({
             </FormHelperText>
           </FormControl>
 
+          {/* Conditional Autocomplete for Circle/Branch */}
           {(isCircleScope || isBranchScope) && (
-            <FormControl size="small" fullWidth>
-              <InputLabel id="dialog-entity-label">
-                Select {isCircleScope ? "Circle" : "Branch"} *
-              </InputLabel>
-              <Select
-                labelId="dialog-entity-label"
-                value={entityCode}
-                label={`Select ${isCircleScope ? "Circle" : "Branch"} *`}
-                onChange={(e) => setEntityCode(e.target.value)}
-              >
-                {entityOptions.length === 0 ? (
-                  <MenuItem disabled value="">
-                    No entities found in user profile
-                  </MenuItem>
-                ) : (
-                  entityOptions.map((entity) => (
-                    <MenuItem
-                      key={entity.id || entity.code}
-                      value={entity.id || entity.code}
+            <Autocomplete
+              size="small"
+              options={entityOptions}
+              // Uses standardized { code, name } structure from our mapper
+              getOptionLabel={(option) =>
+                option ? `${option.code} - ${option.name}` : ""
+              }
+              value={entity}
+              onChange={(event, newValue) => setEntity(newValue)}
+              onInputChange={(event, newInputValue) =>
+                setEntityInputValue(newInputValue)
+              }
+              loading={isEntityLoading}
+              // Disable if API is applying OR if user is not an admin
+              disabled={!isAdmin || isApplying}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label={`Search ${isCircleScope ? "Circle" : "Branch"}`}
+                  variant="outlined"
+                  InputProps={{
+                    ...params.InputProps,
+                    endAdornment: (
+                      <React.Fragment>
+                        {isEntityLoading ? (
+                          <CircularProgress color="inherit" size={20} />
+                        ) : null}
+                        {params.InputProps.endAdornment}
+                      </React.Fragment>
+                    ),
+                  }}
+                  helperText={
+                    <span
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "4px",
+                      }}
                     >
-                      {entity.name}
-                    </MenuItem>
-                  ))
-                )}
-              </Select>
-            </FormControl>
+                      <InfoIcon sx={{ fontSize: "0.625rem" }} />
+                      <em>
+                        {isAdmin
+                          ? "Select a circle to filter the dashboard data."
+                          : "Locked to your authorized profile."}
+                      </em>
+                    </span>
+                  }
+                />
+              )}
+            />
           )}
 
+          {/* Report Date */}
           <TextField
             type="date"
             size="small"
@@ -705,26 +836,33 @@ export default function FilterDialog({
             InputLabelProps={{ shrink: true }}
             value={reportDate}
             onChange={(e) => setReportDate(e.target.value)}
+            disabled={isApplying}
           />
         </Box>
       </DialogContent>
 
       <DialogActions sx={{ p: 2, px: 3 }}>
-        <Button onClick={handleReset} color="inherit" variant="outlined">
+        <Button
+          onClick={handleReset}
+          color="inherit"
+          variant="outlined"
+          disabled={isApplying}
+        >
           Reset
         </Button>
         <Button
           onClick={handleApply}
           color="primary"
           variant="contained"
-          disabled={!isApplyEnabled}
+          disabled={!isApplyEnabled || isApplying}
         >
-          Apply
+          {isApplying ? "Applying..." : "Apply"}
         </Button>
       </DialogActions>
     </Dialog>
   );
 }
+
 
 
 
@@ -963,9 +1101,9 @@ export default function ReportAnalysisHeader({
         gap={1.5}
         sx={{
           p: 1,
-          bgcolor: "action.hover", // Light background to group the elements
+          //bgcolor: "action.hover", // Light background to group the elements
           borderRadius: 1,
-          border: "1px dashed",
+          //border: "1px dashed",
           borderColor: filtersApplied ? "divider" : "primary.main", // Dashed border highlights importance
         }}
       >
@@ -996,6 +1134,7 @@ export default function ReportAnalysisHeader({
         </Tooltip>
 
         {/* Instructional Text */}
+        
         <Box sx={{ display: "flex", flexDirection: "column" }}>
           <Typography
             variant="body2"
@@ -1019,6 +1158,7 @@ export default function ReportAnalysisHeader({
 
 
 
+
 // ************************************* analyticsContants ********************************** //
 
 export const formatCurrency = (value) => {
@@ -1034,7 +1174,6 @@ export const DEFAULT_CONFIG = { hierarchy: [], availableMetrics: [] };
 
 
 // ************************************ ReportAnalysisScreen ************************************ //
-
 import React, {
   useState,
   useMemo,
@@ -1055,7 +1194,10 @@ import {
   Typography,
   CircularProgress,
   IconButton,
+  Button
 } from "@mui/material";
+import TuneIcon from "@mui/icons-material/Tune";
+import FilterAltOutlinedIcon from "@mui/icons-material/FilterAltOutlined";
 import DatasetIcon from "@mui/icons-material/Dataset";
 import { useTheme } from "@mui/material/styles";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -1448,7 +1590,7 @@ export default function ReportAnalysisScreen() {
             willChange: "transform",
           }}
         >
-          {!isSetupComplete && (
+          {/* {!isSetupComplete && (
             <Box
               sx={{
                 position: "absolute",
@@ -1472,6 +1614,74 @@ export default function ReportAnalysisScreen() {
               <Typography variant="body2" color="text.disabled">
                 Click the filter icon to select a report combination and scope.
               </Typography>
+            </Box>
+          )} */}
+          {!isSetupComplete && (
+            <Box
+              sx={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 10,
+                p: 3,
+                textAlign: "center",
+              }}
+            >
+              {/* Funnel Icon Box */}
+              <Box
+                sx={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: 4,
+                  bgcolor: "action.hover", // Light gray/blue background
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  mb: 2,
+                }}
+              >
+                <FilterAltOutlinedIcon
+                  sx={{ fontSize: 32, color: "text.secondary" }}
+                />
+              </Box>
+
+              {/* Text Elements */}
+              <Typography
+                variant="h6"
+                sx={{ color: "primary.main", fontWeight: "bold", mb: 1 }}
+              >
+                No Data to Display
+              </Typography>
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ maxWidth: 350, mb: 3 }}
+              >
+                Configure the database report, head, hierarchy and report date
+                to render the drill-down matrix.
+              </Typography>
+
+              {/* Action Button */}
+              <Button
+                variant="outlined"
+                color="primary"
+                startIcon={<TuneIcon />}
+                onClick={() => setIsFilterDialogOpen(true)}
+                sx={{
+                  borderRadius: 6, // Makes it pill-shaped
+                  textTransform: "none",
+                  fontWeight: 600,
+                  px: 3,
+                }}
+              >
+                Open filter dialog
+              </Button>
             </Box>
           )}
 
@@ -1632,6 +1842,8 @@ export default function ReportAnalysisScreen() {
     </Box>
   );
 }
+
+
 
 
 
