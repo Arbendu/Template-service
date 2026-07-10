@@ -1,94 +1,98 @@
-// **************************************************************************** ReportAnalysisScreen ****************************************************************************** //
+// ******************************************* AnalyticsApi *************************************** //
 
-import React, {
-  useState,
-  useMemo,
-  useCallback,
-  useEffect,
-  memo,
-  forwardRef,
-  useRef,
-} from "react";
-import { useSelector, useDispatch } from "react-redux";
-import {
-  Box,
-  Paper,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Typography,
-  CircularProgress,
-  MenuItem,
-  Select,
-  FormControl,
-  InputLabel,
-  IconButton,
-  Tooltip,
-  Button,
-} from "@mui/material";
-import AnalyticsIcon from "@mui/icons-material/Analytics";
-import DatasetIcon from "@mui/icons-material/Dataset";
-import FullscreenIcon from "@mui/icons-material/Fullscreen";
-import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
-import { useTheme } from "@mui/material/styles";
-import { useVirtualizer } from "@tanstack/react-virtual";
-
-// --- REDUX UI ACTIONS ---
-// Update this path if your uiSlice is located somewhere else in your project
-import {
-  enterComponentFullscreen,
-  exitComponentFullscreen,
-} from "../../store/slices/uiSlice";
-
-// Assume these are available in your project structure
-import useApi from "../../hooks/useApi";
-import useCustomSnackbar from "../../utils/useCustomSnackbar";
-// --- CONFIGURATION & CONSTANTS ---
-const formatCurrency = (value) => {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "INR",
-  }).format(value || 0);
-};
-
-const DEFAULT_CONFIG = { hierarchy: [], availableMetrics: [] };
-
-// --- ACTUAL API LOGIC ---
-const fetchAnalyticsData = async (callApi, showSnackBar, payload) => {
-  console.log("payload:", payload);
-
+export const fetchAnalyticsData = async (callApi, showSnackBar, payload) => {
   try {
+    console.log("Drill-down payload: ", payload);
     const responseData = await callApi(
       "/AS/analytics/drill-down",
       payload,
       "POST",
     );
-    console.log("Response data : ", responseData);
-
+    
     return responseData?.data || [];
   } catch (error) {
     console.error("Error fetching analytics data:", error);
-    showSnackBar("Error: " + error.title, "error");
+    showSnackBar("Error: " + error?.title || "Failed to fetch data", "error");
   }
 };
 
-const fetchInitialData = async (
+// Autocomplete API for Heads
+export const fetchHeads = async (callApi, reportName, search) => {
+  if (!search || search.length < 2) return [];
+  try {
+    const response = await callApi(
+      `/AS/analytics/heads/search?reportName=${reportName}&search=${search}`,
+      {},
+      "GET",
+    );
+    return Array.isArray(response) ? response : response?.data || [];
+  } catch (error) {
+    console.error("Error fetching heads:", error);
+    return [];
+  }
+};
+
+const formatDateToDDMMYYYY = (dateString) => {
+  if (!dateString) return "";
+  const [year, month, day] = dateString.split("-");
+  return `${day}-${month}-${year}`;
+};
+
+// Base payload filter builder
+const buildBaseFilters = (appliedFilters) => {
+
+  const formattedDate = formatDateToDDMMYYYY(appliedFilters.reportDate);
+  const filters = [
+    {
+      logicalField: "ReportDate",
+      operator: "EQUALS",
+      value: formattedDate,
+    },
+    {
+      logicalField: "HeadCode",
+      operator: "EQUALS",
+      value: appliedFilters.head?.headCode,
+    },
+  ];
+
+  // Inject Circle or Branch filter if an entity is selected and the view requires it
+  if (appliedFilters.entityCode) {
+    const isCircleScope = appliedFilters.viewCode.includes("CIRCLE");
+    const isBranchScope = appliedFilters.viewCode.includes("BRANCH");
+
+    if (isCircleScope) {
+      filters.push({
+        logicalField: "Circle",
+        operator: "EQUALS",
+        value: appliedFilters.entityCode,
+      });
+    } else if (isBranchScope) {
+      filters.push({
+        logicalField: "Branch",
+        operator: "EQUALS",
+        value: appliedFilters.entityCode,
+      });
+    }
+  }
+
+  return filters;
+};
+
+export const fetchInitialData = async (
   callApi,
   showSnackBar,
-  viewCode,
+  appliedFilters,
   hierarchy,
   metrics,
 ) => {
   const rootDimension = hierarchy[0];
   const payload = {
-    viewCode: viewCode,
+    viewCode: appliedFilters.viewCode,
     dimensions: [rootDimension],
     metrics: metrics.map((m) => m.logicalName),
-    filters: [],
+    filters: buildBaseFilters(appliedFilters),
   };
+
   const apiData = await fetchAnalyticsData(callApi, showSnackBar, payload);
 
   return (apiData || []).map((row) => ({
@@ -98,11 +102,11 @@ const fetchInitialData = async (
   }));
 };
 
-const fetchChildrenData = async (
+export const fetchChildrenData = async (
   callApi,
   showSnackBar,
   parentNode,
-  viewCode,
+  appliedFilters,
   hierarchy,
   metrics,
 ) => {
@@ -117,12 +121,14 @@ const fetchChildrenData = async (
       value: parentNode.name,
     },
   ];
+
   const payload = {
-    viewCode: viewCode,
+    viewCode: appliedFilters.viewCode,
     dimensions: [nextDimension],
     metrics: metrics.map((m) => m.logicalName),
-    filters: currentFilters,
+    filters: [...buildBaseFilters(appliedFilters), ...currentFilters],
   };
+
   const apiData = await fetchAnalyticsData(callApi, showSnackBar, payload);
 
   return (apiData || []).map((row) => ({
@@ -132,7 +138,17 @@ const fetchChildrenData = async (
   }));
 };
 
-// --- COMPONENTS ---
+
+
+
+
+// ************************************************* components/ActualTreeTableRow ************************************************ //
+
+import React, { memo, forwardRef } from "react";
+import { TableRow, TableCell, CircularProgress } from "@mui/material";
+import { formatCurrency } from "../utils/analyticsConstants";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
+import { IconButton, Tooltip } from "@mui/material";
 
 const ActualTreeTableRow = memo(
   forwardRef(
@@ -145,7 +161,9 @@ const ActualTreeTableRow = memo(
         maxVisibleLevel,
         index,
         activeMetrics,
-        theme, // dynamically passed to avoid hook bottleneck in virtualized rows
+        theme,
+        isFullscreen,
+        showSnackBar,
         ...props
       },
       ref,
@@ -156,9 +174,10 @@ const ActualTreeTableRow = memo(
         <TableRow
           ref={ref}
           hover
-          // RAW INLINE STYLES: Bypasses Emotion CSS-in-JS lag and uses exact Theme colors
           style={{
-            backgroundColor: isExpanded ? theme.palette.purple[100] : "inherit",
+            backgroundColor: isExpanded
+              ? theme.palette.purple?.[100] || "inherit"
+              : "inherit",
             borderLeft: isExpanded
               ? `4px solid ${theme.palette.primary.main}`
               : "4px solid transparent",
@@ -168,10 +187,7 @@ const ActualTreeTableRow = memo(
           }}
           {...props}
         >
-          {/* Hierarchy Depth Columns */}
           {Array.from({ length: maxVisibleLevel + 1 }).map((_, colIndex) => {
-            //const colWidth = colIndex === 0 ? 280 : 200;
-
             if (colIndex === node.level) {
               return (
                 <TableCell
@@ -179,11 +195,9 @@ const ActualTreeTableRow = memo(
                   style={{
                     borderRight: `1px solid ${theme.palette.divider}`,
                     borderBottom: `1px solid ${theme.palette.divider}`,
-                    minWidth: "260px",
+                    //minWidth: "260px",
                     whiteSpace: "nowrap",
-                    // width: colWidth,
-                    // maxWidth: colWidth,
-                    padding: "4px 8px",
+                    padding: "4px 4px",
                     verticalAlign: "middle",
                   }}
                 >
@@ -191,8 +205,9 @@ const ActualTreeTableRow = memo(
                     style={{
                       display: "flex",
                       alignItems: "center",
-                      paddingLeft: `${node.level * 20 + 8}px`,
-                      paddingRight: "12px",
+                      // paddingLeft: `${node.level * 10 + 8}px`,
+                      paddingLeft: 4,
+                      paddingRight: "16px",
                       width: "100%",
                       boxSizing: "border-box",
                     }}
@@ -261,6 +276,58 @@ const ActualTreeTableRow = memo(
                     >
                       {node.name}
                     </span>
+
+                    {/* Checks if it's fullscreen, expanded, data is loaded, and targets HeadCode (level 1) */}
+                    {
+                      isExpanded &&
+                      !isLoading &&
+                      node.level === 1 &&
+                      node.children && (
+                        <Tooltip title="Copy all GLCODEs" placement="top" arrow>
+                          <IconButton
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation(); // Prevents row toggle when clicking the copy button
+
+                              // 1. Format the parent (Headcode) row
+                              // We use node.name and node.TotalAmount for the parent
+                              const headcodeRow = `${node.name}\t${node.TotalAmount || ""}`;
+
+                              // 2. Format the children (GLCODEs) rows
+                              const childrenRows = node.children
+                                .map(
+                                  (child) =>
+                                    `${child.name}\t${child.TotalAmount || ""}`,
+                                )
+                                .join("\n");
+
+                              // 3. Combine them with a newline (\n) in between
+                              const combinedData = `${headcodeRow}\n${childrenRows}`;
+
+                              console.log("Copied Data:\n", combinedData);
+
+                              // 4. Send the whole block to the clipboard
+                              navigator.clipboard
+                                .writeText(combinedData)
+                                .then(() => {
+                                  showSnackBar(
+                                    "Text copied successfully",
+                                    "success",
+                                  );
+                                })
+                                .catch((err) => {
+                                  console.error("Failed to copy text: ", err);
+                                  showSnackBar("Failed to copy text", "error");
+                                });
+                            }}
+                            sx={{ ml: 2, padding: "2px" }}
+                          >
+                            <ContentCopyIcon
+                              sx={{ fontSize: 16, color: "text.secondary" }}
+                            />
+                          </IconButton>
+                        </Tooltip>
+                      )}
                   </div>
                 </TableCell>
               );
@@ -272,16 +339,12 @@ const ActualTreeTableRow = memo(
                   borderRight: `1px solid ${theme.palette.divider}`,
                   borderBottom: `1px solid ${theme.palette.divider}`,
                   whiteSpace: "nowrap",
-                  // width: colWidth,
-                  // minWidth: colWidth,
-                  // maxWidth: colWidth,
                   padding: 0,
                 }}
               />
             );
           })}
 
-          {/* Dynamic Metrics Columns */}
           {activeMetrics.map((metric) => {
             const value = node[metric.logicalName];
             return (
@@ -291,10 +354,10 @@ const ActualTreeTableRow = memo(
                 style={{
                   borderRight: `1px solid ${theme.palette.divider}`,
                   borderBottom: `1px solid ${theme.palette.divider}`,
-                  width: "160px",
-                  minWidth: "160px",
-                  maxWidth: "160px",
-                  padding: "8px 16px",
+                  // width: "160px",
+                  // minWidth: "160px",
+                  // maxWidth: "160px",
+                  //padding: "8px 16px",
                   color:
                     value < 0
                       ? theme.palette.error.main
@@ -323,154 +386,848 @@ const ActualTreeTableRow = memo(
       prevProps.node.id === nextProps.node.id &&
       prevProps.maxVisibleLevel === nextProps.maxVisibleLevel &&
       prevProps.index === nextProps.index &&
-      prevProps.theme === nextProps.theme
+      prevProps.theme === nextProps.theme 
+      // prevProps.isFullscreen === nextProps.isFullscreen
     );
   },
 );
+
 ActualTreeTableRow.displayName = "ActualTreeTableRow";
+export default ActualTreeTableRow;
+
+
+
+
+
+
+
+
+// ********************************************** FilterDialog ********************************************* //
+
+import React, { useState, useEffect, useMemo } from "react";
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  IconButton,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  TextField,
+  Autocomplete,
+  Box,
+  Typography,
+  CircularProgress,
+  FormHelperText,
+} from "@mui/material";
+import CloseIcon from "@mui/icons-material/Close";
+import InfoIcon from "@mui/icons-material/Info";
+import QueryStatsIcon from "@mui/icons-material/QueryStats";
+import { fetchHeads } from "../api/analyticsApi";
+
+export default function FilterDialog({
+  open,
+  onClose,
+  onApply,
+  reportsConfig = [],
+  currentFilters,
+  callApi,
+  user,
+  isApplying,
+}) {
+  const [reportCode, setReportCode] = useState("");
+  const [viewCode, setViewCode] = useState(""); // Replaces "scope" state
+  const [head, setHead] = useState(null);
+  const [entityCode, setEntityCode] = useState("");
+  const [reportDate, setReportDate] = useState("");
+
+  const [headInputValue, setHeadInputValue] = useState("");
+  const [headOptions, setHeadOptions] = useState([]);
+  const [isHeadsLoading, setIsHeadsLoading] = useState(false);
+
+  // Sync state when dialog opens
+  useEffect(() => {
+    if (open) {
+      setReportCode(currentFilters?.reportCode || "");
+      setViewCode(currentFilters?.viewCode || "");
+      setHead(currentFilters?.head || null);
+      setEntityCode(currentFilters?.entityCode || "");
+      setReportDate(currentFilters?.reportDate || "");
+      if (currentFilters?.head) setHeadOptions([currentFilters.head]);
+    }
+  }, [open, currentFilters]);
+
+  // Derived available Scopes directly from Config Views
+  const availableViews = useMemo(() => {
+    if (!reportCode) return [];
+    const report = reportsConfig.find((r) => r.reportCode === reportCode);
+    return report?.views || [];
+  }, [reportCode, reportsConfig]);
+
+  // Determine if we need to show the Entity Dropdown based on the selected view
+  const isCircleScope = viewCode.includes("CIRCLE");
+  const isBranchScope = viewCode.includes("BRANCH");
+
+  // Dynamically load Entities from User Profile instead of an API
+  const entityOptions = useMemo(() => {
+    if (!user) return [];
+    if (isCircleScope) return user.circles || []; // Fallback array if undefined
+    if (isBranchScope) return user.branches || [];
+    return [];
+  }, [user, isCircleScope, isBranchScope]);
+
+  // Debounced API call for Head Code Autocomplete
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(async () => {
+      if (headInputValue && headInputValue.length >= 2 && reportCode) {
+        setIsHeadsLoading(true);
+        const data = await fetchHeads(callApi, reportCode, headInputValue);
+        setHeadOptions(data);
+        setIsHeadsLoading(false);
+      } else {
+        setHeadOptions(head ? [head] : []);
+      }
+    }, 500);
+    return () => clearTimeout(delayDebounceFn);
+  }, [headInputValue, reportCode, callApi, head]);
+
+  const handleReset = () => {
+    setReportCode("");
+    setViewCode("");
+    setHead(null);
+    setEntityCode("");
+    setReportDate("");
+    setHeadOptions([]);
+  };
+
+  const handleApply = () => {
+    onApply({
+      reportCode,
+      viewCode,
+      head,
+      entityCode: !isCircleScope && !isBranchScope ? "" : entityCode,
+      reportDate,
+    });
+    //onClose();
+  };
+
+  const isApplyEnabled = useMemo(() => {
+    const baseValid = reportCode && viewCode && head?.headCode && reportDate;
+    if (!baseValid) return false;
+    if (isCircleScope || isBranchScope) return !!entityCode;
+    return true;
+  }, [
+    reportCode,
+    viewCode,
+    head,
+    entityCode,
+    reportDate,
+    isCircleScope,
+    isBranchScope,
+  ]);
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle
+        sx={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 2,
+        }}
+      >
+        <Typography
+          variant="h6"
+          fontWeight="bold"
+          sx={{ display: "flex", alignItems: "center", gap: 2 }}
+        >
+          <QueryStatsIcon /> Drill Down Filters
+        </Typography>
+        <IconButton onClick={onClose} size="small">
+          <CloseIcon />
+        </IconButton>
+      </DialogTitle>
+
+      <DialogContent dividers>
+        <Box display="flex" flexDirection="column" gap={3} py={1}>
+          <FormControl size="small" fullWidth>
+            <InputLabel id="dialog-report-label">Select Report</InputLabel>
+            <Select
+              labelId="dialog-report-label"
+              value={reportCode}
+              label="Select Report"
+              onChange={(e) => {
+                setReportCode(e.target.value);
+                setViewCode("");
+                setEntityCode("");
+                setHead(null);
+                setHeadInputValue("");
+                setHeadOptions([]);
+              }}
+            >
+              {reportsConfig.map((report) => (
+                <MenuItem key={report.reportCode} value={report.reportCode}>
+                  {report.displayName}
+                </MenuItem>
+              ))}
+            </Select>
+            <FormHelperText
+              id="scope-helper-text"
+              sx={{
+                fontStyle: "italic",
+                fontSize: "0.75rem",
+                display: "flex",
+                alignItems: "center",
+                gap: "4px",
+                lineHeight: 1.5,
+              }}
+            >
+              <InfoIcon sx={{ fontSize: "0.625rem" }} />
+              Please select a report to initiate drill-down analysis.
+            </FormHelperText>
+          </FormControl>
+
+          <Autocomplete
+            size="small"
+            options={headOptions}
+            getOptionLabel={(option) =>
+              option ? `${option.headCode} - ${option.headName}` : ""
+            }
+            value={head}
+            onChange={(event, newValue) => setHead(newValue)}
+            onInputChange={(event, newInputValue) =>
+              setHeadInputValue(newInputValue)
+            }
+            loading={isHeadsLoading}
+            disabled={!reportCode}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Search Head Code"
+                variant="outlined"
+                InputProps={{
+                  ...params.InputProps,
+                  endAdornment: (
+                    <React.Fragment>
+                      {isHeadsLoading ? (
+                        <CircularProgress color="inherit" size={20} />
+                      ) : null}
+                      {params.InputProps.endAdornment}
+                    </React.Fragment>
+                  ),
+                }}
+                helperText={
+                  <span
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "4px",
+                    }}
+                  >
+                    <InfoIcon sx={{ fontSize: "0.625rem" }} />
+                    <em>Type 2+ characters to search.</em>
+                  </span>
+                }
+              />
+            )}
+          />
+
+          <FormControl size="small" fullWidth disabled={!reportCode}>
+            <InputLabel id="dialog-scope-label">Scope</InputLabel>
+            <Select
+              labelId="dialog-scope-label"
+              value={viewCode}
+              label="Scope"
+              onChange={(e) => {
+                setViewCode(e.target.value);
+                setEntityCode("");
+              }}
+            >
+              {availableViews.map((view) => (
+                <MenuItem key={view.viewCode} value={view.viewCode}>
+                  {view.displayName}
+                </MenuItem>
+              ))}
+            </Select>
+            <FormHelperText
+              id="scope-helper-text"
+              sx={{
+                fontStyle: "italic",
+                fontSize: "0.75rem",
+                display: "flex",
+                alignItems: "center",
+                gap: "4px",
+                lineHeight: 1.5,
+              }}
+            >
+              <InfoIcon sx={{ fontSize: "0.625rem" }} />
+              View scope is determined by your authorized access level.
+            </FormHelperText>
+          </FormControl>
+
+          {(isCircleScope || isBranchScope) && (
+            <FormControl size="small" fullWidth>
+              <InputLabel id="dialog-entity-label">
+                Select {isCircleScope ? "Circle" : "Branch"} *
+              </InputLabel>
+              <Select
+                labelId="dialog-entity-label"
+                value={entityCode}
+                label={`Select ${isCircleScope ? "Circle" : "Branch"} *`}
+                onChange={(e) => setEntityCode(e.target.value)}
+              >
+                {entityOptions.length === 0 ? (
+                  <MenuItem disabled value="">
+                    No entities found in user profile
+                  </MenuItem>
+                ) : (
+                  entityOptions.map((entity) => (
+                    <MenuItem
+                      key={entity.id || entity.code}
+                      value={entity.id || entity.code}
+                    >
+                      {entity.name}
+                    </MenuItem>
+                  ))
+                )}
+              </Select>
+            </FormControl>
+          )}
+
+          <TextField
+            type="date"
+            size="small"
+            fullWidth
+            label="Report Date"
+            InputLabelProps={{ shrink: true }}
+            value={reportDate}
+            onChange={(e) => setReportDate(e.target.value)}
+          />
+        </Box>
+      </DialogContent>
+
+      <DialogActions sx={{ p: 2, px: 3 }}>
+        <Button onClick={handleReset} color="inherit" variant="outlined">
+          Reset
+        </Button>
+        <Button
+          onClick={handleApply}
+          color="primary"
+          variant="contained"
+          disabled={!isApplyEnabled}
+        >
+          Apply
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+
+
+
+
+
+
+
+// ********************************************* HierarchyPath ********************************************* //
+
+import React from "react";
+import { Box, Typography } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
+
+export default function HierarchyPath({
+  activeHierarchyConfig,
+  maxVisibleLevel,
+  isSetupComplete,
+}) {
+  const theme = useTheme();
+  if (!isSetupComplete) return null;
+
+  return (
+    <Box display="flex" alignItems="center" gap={0.5}>
+      <Typography
+        variant="body2"
+        color="text.secondary"
+        sx={{ mr: 1, fontWeight: 500 }}
+      >
+        Path:
+      </Typography>
+      {activeHierarchyConfig.hierarchy.map((item, index) => {
+        const isActive = index <= maxVisibleLevel;
+        return (
+          <Box key={index} display="flex" alignItems="center">
+            <Box display="flex" alignItems="center" gap={1}>
+              <Box
+                sx={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: "50%",
+                  bgcolor: isActive ? "primary.main" : "background.paper",
+                  border: "2px solid",
+                  borderColor: isActive ? "primary.main" : "divider",
+                }}
+              />
+              <Typography
+                variant="body2"
+                sx={{
+                  fontWeight: isActive ? 600 : 500,
+                  color: isActive ? "text.primary" : "text.disabled",
+                  textTransform: "capitalize",
+                }}
+              >
+                {item.replace("_", " ")}
+              </Typography>
+            </Box>
+            {index < activeHierarchyConfig.hierarchy.length - 1 && (
+              <Box
+                sx={{
+                  backgroundColor:
+                    index < maxVisibleLevel
+                      ? theme.palette.primary.main
+                      : theme.palette.divider,
+                  width: 24,
+                  height: 2,
+                  mx: 1,
+                  borderRadius: 1,
+                }}
+              />
+            )}
+          </Box>
+        );
+      })}
+    </Box>
+  );
+}
+
+
+
+
+
+
+
+// **************************************** InstructionalTooltip ************************************ //
+
+import { styled, keyframes } from "@mui/material/styles";
+import TuneIcon from "@mui/icons-material/Tune";
+import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
+import Box from "@mui/material/Box";
+import Typography from "@mui/material/Typography";
+
+// 1. Define the Pulse Animation
+const pulse = keyframes`
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(25, 118, 210, 0.7); }
+  70% { transform: scale(1.05); box-shadow: 0 0 0 6px rgba(25, 118, 210, 0); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(25, 118, 210, 0); }
+`;
+
+// 3. Custom Tooltip with Bold Text
+const InstructionalTooltip = ({ children, title }) => (
+  <Tooltip
+    title={
+      <Box sx={{ py: 0.5 }}>
+        <Typography variant="subtitle2" fontWeight="bold" color="primary.main">
+          {title}
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          Select criteria to generate the drill-down report.
+        </Typography>
+      </Box>
+    }
+    arrow
+    placement="bottom-end"
+    componentsProps={{
+      tooltip: {
+        sx: {
+          bgcolor: "background.paper",
+          color: "text.primary",
+          border: "1px solid",
+          borderColor: "divider",
+          boxShadow: 3,
+          maxWidth: 220,
+        },
+      },
+      arrow: {
+        sx: {
+          color: "background.paper",
+          "&::before": { border: "1px solid", borderColor: "divider" },
+        },
+      },
+    }}
+  >
+    {children}
+  </Tooltip>
+);
+
+
+
+
+
+// ************************************** PulsingFilterButton **************************************** //
+
+// 2. Create a Styled IconButton with Pulse
+const PulsingFilterButton = styled(IconButton)(({ theme }) => ({
+  border: `2px solid ${theme.palette.primary.main}`, // Thicker border for prominence
+  backgroundColor: theme.palette.primary.light, // Light background to stand out
+  color: theme.palette.primary.contrastText,
+  marginRight: theme.spacing(1),
+  "&:hover": {
+    border: `2px solid ${theme.palette.primary.dark}`,
+    backgroundColor: theme.palette.primary.main,
+  },
+  // Apply the animation
+  animation: `${pulse} 2s infinite`,
+}));
+
+
+
+
+
+// ********************************************** ReportAnalysisHeader ************************************* //
+
+import React from "react";
+import { Box, Paper, Typography, IconButton, Tooltip } from "@mui/material";
+import AnalyticsIcon from "@mui/icons-material/Analytics";
+import TuneIcon from "@mui/icons-material/Tune";
+import FullscreenIcon from "@mui/icons-material/Fullscreen";
+import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
+
+export default function ReportAnalysisHeader({
+  activeReport,
+  isFullscreen,
+  toggleFullscreen,
+  onOpenFilter,
+  filtersApplied,
+}) {
+  return (
+    <Paper
+      elevation={0}
+      sx={{
+        p: 3,
+        borderRadius: 2,
+        boxShadow: "0 5px 10px rgba(0,0,0,0.2)",
+        border: 1,
+        borderColor: "divider",
+        display: "flex",
+        justifyContent: "space-between",
+        flexDirection: "row",
+        flexShrink: 0,
+      }}
+    >
+      <Box display="flex" alignItems="center" gap={2}>
+        <Box
+          sx={{
+            backgroundColor: "primary.main",
+            borderRadius: "10px",
+            width: 44,
+            height: 44,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <AnalyticsIcon sx={{ color: "primary.contrastText", fontSize: 24 }} />
+        </Box>
+        <Box sx={{ overflow: "hidden" }}>
+          <Typography
+            variant="h6"
+            sx={{ fontWeight: 700, color: "text.primary" }}
+          >
+            {activeReport?.displayName || "Financial Analytics"}
+          </Typography>
+          <Typography variant="caption" sx={{ color: "text.primary" }}>
+            Dynamic Drill-Down Matrix
+          </Typography>
+        </Box>
+      </Box>
+
+      {/* <Box display="flex" alignItems="center" gap={1}>
+        <Tooltip title="Filter Reports" arrow placement="bottom">
+          <IconButton
+            onClick={onOpenFilter}
+            color="primary"
+            sx={{ border: "1px solid", borderColor: "divider" }}
+          >
+            <TuneIcon />
+          </IconButton>
+        </Tooltip>
+      </Box> */}
+
+      <Box
+        display="flex"
+        alignItems="center"
+        gap={1.5}
+        sx={{
+          p: 1,
+          bgcolor: "action.hover", // Light background to group the elements
+          borderRadius: 1,
+          border: "1px dashed",
+          borderColor: filtersApplied ? "divider" : "primary.main", // Dashed border highlights importance
+        }}
+      >
+        {/* Button with Badge */}
+        <Tooltip
+          title="Select criteria to generate the report"
+          arrow
+          placement="bottom"
+        >
+          <IconButton
+            onClick={onOpenFilter}
+            color="primary" // Makes the icon blue/prominent
+            size="medium"
+            sx={{
+              border: "1px solid",
+              borderColor: "divider",
+              bgcolor: "background.paper",
+              boxShadow: 1,
+              "&:hover": {
+                bgcolor: "primary.main",
+                color: "primary.contrastText",
+                boxShadow: 2,
+              },
+            }}
+          >
+            <TuneIcon />
+          </IconButton>
+        </Tooltip>
+
+        {/* Instructional Text */}
+        <Box sx={{ display: "flex", flexDirection: "column" }}>
+          <Typography
+            variant="body2"
+            fontWeight="bold"
+            color={filtersApplied ? "text.secondary" : "primary.main"}
+          >
+            {filtersApplied ? "Filters Applied" : "Set Filters to Start"}
+          </Typography>
+          {!filtersApplied && (
+            <Typography variant="caption" color="text.secondary">
+              Required to view report
+            </Typography>
+          )}
+        </Box>
+      </Box>
+    </Paper>
+  );
+}
+
+
+
+
+
+// ************************************* analyticsContants ********************************** //
+
+export const formatCurrency = (value) => {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "INR",
+  }).format(value || 0);
+};
+
+export const DEFAULT_CONFIG = { hierarchy: [], availableMetrics: [] };
+
+
+
+
+// ************************************ ReportAnalysisScreen ************************************ //
+
+import React, {
+  useState,
+  useMemo,
+  useCallback,
+  useEffect,
+  useRef,
+} from "react";
+import { useSelector, useDispatch } from "react-redux";
+import {
+  Box,
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Typography,
+  CircularProgress,
+  IconButton,
+} from "@mui/material";
+import DatasetIcon from "@mui/icons-material/Dataset";
+import { useTheme } from "@mui/material/styles";
+import { useVirtualizer } from "@tanstack/react-virtual";
+
+import {
+  enterComponentFullscreen,
+  exitComponentFullscreen,
+} from "../../store/slices/uiSlice";
+import useApi from "../../hooks/useApi";
+import useCustomSnackbar from "../../utils/useCustomSnackbar";
+
+import ReportAnalysisHeader from "./components/ReportAnalysisHeader";
+import HierarchyPath from "./components/HierarchyPath";
+import ActualTreeTableRow from "./components/ActualTreeTableRow";
+import FilterDialog from "./components/FilterDialog";
+import { fetchInitialData, fetchChildrenData } from "./api/analyticsApi";
+
+import FullscreenIcon from "@mui/icons-material/Fullscreen";
+import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
+
+const DEFAULT_CONFIG = { hierarchy: [], availableMetrics: [] };
 
 export default function ReportAnalysisScreen() {
   const { callApi } = useApi();
   const dispatch = useDispatch();
-  const user = useSelector((state) => state.auth.user);
+  const theme = useTheme();
+  const tableContainerRef = useRef(null);
+  const showSnackBar = useCustomSnackbar();
 
-  // Fullscreen state managed strictly via Redux UI Slice
+  const user = useSelector((state) => state.auth.user);
   const isFullscreen = useSelector(
     (state) => state.ui?.isComponentFullscreen || false,
   );
-
   const cachedNodes = useSelector((state) => state.analyticsCache?.nodes || {});
-  const showSnackBar = useCustomSnackbar();
 
   const [reportsConfig, setReportsConfig] = useState([]);
-  const [selectedReportCode, setSelectedReportCode] = useState("");
-  const [selectedViewCode, setSelectedViewCode] = useState("");
+  const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
+
+  // Master Filter State
+  const [appliedFilters, setAppliedFilters] = useState({
+    reportCode: "",
+    viewCode: "", // Drives both Scope and Hierarchy
+    head: null,
+    entityCode: "",
+    reportDate: "",
+  });
 
   const [data, setData] = useState([]);
   const [expandedIds, setExpandedIds] = useState(new Map());
   const [loadingIds, setLoadingIds] = useState(new Set());
   const [isInitializing, setIsInitializing] = useState(false);
 
-  const theme = useTheme();
-
-  const tableContainerRef = useRef(null);
-
+  // --- DERIVED CONFIGURATION DYNAMICS ---
   const activeReport = useMemo(() => {
     return (
-      reportsConfig.find((r) => r.reportCode === selectedReportCode) || null
+      reportsConfig.find((r) => r.reportCode === appliedFilters.reportCode) ||
+      null
     );
-  }, [reportsConfig, selectedReportCode]);
+  }, [reportsConfig, appliedFilters.reportCode]);
 
-  const activeView = useMemo(() => {
+  // Dynamically resolve hierarchy based on the exact selected viewCode
+  const activeHierarchyConfig = useMemo(() => {
+    if (!activeReport || !appliedFilters.viewCode) return DEFAULT_CONFIG;
     return (
-      activeReport?.views?.find((v) => v.viewCode === selectedViewCode) || null
+      activeReport.views.find((v) => v.viewCode === appliedFilters.viewCode) ||
+      DEFAULT_CONFIG
     );
-  }, [activeReport, selectedViewCode]);
+  }, [activeReport, appliedFilters.viewCode]);
 
-  const activeHierarchyConfig = activeView || DEFAULT_CONFIG;
+  const isSetupComplete = !!(
+    appliedFilters.reportCode &&
+    appliedFilters.viewCode &&
+    appliedFilters.head &&
+    appliedFilters.reportDate &&
+    activeHierarchyConfig.hierarchy.length > 0
+  );
+
+  const filtersApplied = !!appliedFilters.reportCode;
 
   // --- REDUX FULLSCREEN LOGIC ---
   const toggleFullscreen = useCallback(() => {
     if (isFullscreen) {
       dispatch(exitComponentFullscreen());
-
-      // If exiting via the UI button, safely remove the fake history state
-      if (window.history.state && window.history.state.isFullscreenOverlay) {
-        window.history.back();
-      }
+      if (window.history.state?.isFullscreenOverlay) window.history.back();
     } else {
       dispatch(enterComponentFullscreen());
-      showSnackBar("To exit ful screen press 'F'", "info");
-
-      // Inject fake state to activate the browser's Back button
+      showSnackBar("To exit full screen press 'F' or 'Esc'", "info");
       window.history.pushState({ isFullscreenOverlay: true }, "");
     }
-  }, [isFullscreen, dispatch]);
+  }, [isFullscreen, dispatch, showSnackBar]);
 
-  // Intercept the Browser's Back Button
   useEffect(() => {
-    const handlePopState = () => {
-      // When the back button is clicked, exit full screen instead of changing pages
-      if (isFullscreen) {
-        dispatch(exitComponentFullscreen());
-      }
-    };
-
+    const handlePopState = () =>
+      isFullscreen && dispatch(exitComponentFullscreen());
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, [isFullscreen, dispatch]);
 
-  // Handle 'Escape' key press to automatically revert Redux Fullscreen
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === "f" && isFullscreen) {
-        dispatch(exitComponentFullscreen());
-        if (window.history.state && window.history.state.isFullscreenOverlay) {
-          window.history.back();
+      if (e.key === "f") {
+        if (isFullscreen) {
+          dispatch(exitComponentFullscreen());
+          if (window.history.state?.isFullscreenOverlay) window.history.back();
+        } else {
+          dispatch(enterComponentFullscreen());
+          window.history.pushState({ isFullscreenOverlay: true }, "");
         }
-      }
-      if (e.key === "f" && !isFullscreen) {
-        dispatch(enterComponentFullscreen());
-        window.history.pushState({ isFullscreenOverlay: true }, "");
-        showSnackBar("To exit ful screen press 'F'", "info");
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isFullscreen, dispatch]);
 
+  // --- CONFIG FETCHING ---
   useEffect(() => {
     const fetchConfig = async () => {
       try {
         const response = await callApi("/AS/analytics/config", {}, "GET");
-        console.log("Response : ", response);
-
-        const configData = Array.isArray(response)
-          ? response
-          : response?.data || [];
-        setReportsConfig(configData);
+        setReportsConfig(
+          Array.isArray(response) ? response : response?.data || [],
+        );
+        console.log("Response: ", response);
+        
       } catch (error) {
-        console.error("Failed to fetch analytics configurations", error);
-        showSnackBar("Error: " + error.title, "error");
+        showSnackBar("Error fetching configuration", "error");
       }
     };
     if (user) fetchConfig();
   }, [callApi, user, showSnackBar]);
 
-  useEffect(() => {
-    const loadRoot = async () => {
-      if (!selectedReportCode || !selectedViewCode) {
-        setData((prev) => (prev.length === 0 ? prev : []));
-        return;
-      }
-      setIsInitializing(true);
-      setData([]);
-      setExpandedIds(new Map());
+  // --- DATA FETCHING (Root Level) ---
 
-      try {
-        const rootData = await fetchInitialData(
-          callApi,
-          showSnackBar,
-          selectedViewCode,
-          activeHierarchyConfig.hierarchy,
-          activeHierarchyConfig.availableMetrics,
-        );
+  const handleApplyFilters = async (newFilters) => {
+    setIsInitializing(true);
+
+    try {
+      // Find the specific hierarchy configuration for the selected report & view
+      const targetReport = reportsConfig.find(
+        (r) => r.reportCode === newFilters.reportCode,
+      );
+      const targetHierarchyConfig =
+        targetReport?.views.find((v) => v.viewCode === newFilters.viewCode) ||
+        DEFAULT_CONFIG;
+
+      const rootData = await fetchInitialData(
+        callApi,
+        showSnackBar,
+        newFilters,
+        targetHierarchyConfig.hierarchy,
+        targetHierarchyConfig.availableMetrics,
+      );
+
+      // If data is empty, DO NOT apply filters or close dialog. Path naturally stays hidden.
+      if (!rootData || rootData.length === 0) {
+        showSnackBar("No data found for the selected combination", "warning");
+      } else {
+        // Success: Update main view state, inject data, and close dialog
+        setAppliedFilters(newFilters);
         setData(rootData);
-      } catch (error) {
-        console.error("Failed to load initial data", error);
-      } finally {
-        setIsInitializing(false);
+        setExpandedIds(new Map());
+        setIsFilterDialogOpen(false);
       }
-    };
-    loadRoot();
-  }, [
-    selectedReportCode,
-    selectedViewCode,
-    activeHierarchyConfig,
-    callApi,
-    showSnackBar,
-  ]);
+    } catch (error) {
+      console.error("Failed to load initial data", error);
+      showSnackBar("Error fetching data", "error");
+    } finally {
+      setIsInitializing(false);
+    }
+  };
 
+  // --- NODE EXPANSION LOGIC ---
   const appendChildrenToTree = useCallback((nodes, parentId, newChildren) => {
     return nodes.map((node) => {
       if (node.id === parentId) return { ...node, children: newChildren };
@@ -488,11 +1245,9 @@ export default function ReportAnalysisScreen() {
       const isExpanded = expandedIds.has(node.id);
 
       if (isExpanded) {
-        // Manual Collapse
         setExpandedIds((prev) => {
           const next = new Map(prev);
           next.delete(node.id);
-
           const removeDescendants = (currentNode) => {
             if (currentNode.children) {
               currentNode.children.forEach((child) => {
@@ -505,11 +1260,10 @@ export default function ReportAnalysisScreen() {
           return next;
         });
       } else {
-        // Expansion
         if (!node.children && node.hasChildren) {
-          const cacheKey = `${selectedViewCode}_${node.id}`;
+          const filterHash = `${appliedFilters.viewCode}_${appliedFilters.entityCode}_${appliedFilters.head.headCode}_${appliedFilters.reportDate}`;
+          const cacheKey = `${filterHash}_${node.id}`;
           const cachedEntry = cachedNodes[cacheKey];
-          // 15 minutes TTL check
           const isCacheValid =
             cachedEntry && Date.now() - cachedEntry.timestamp < 900000;
 
@@ -524,7 +1278,7 @@ export default function ReportAnalysisScreen() {
                 callApi,
                 showSnackBar,
                 node,
-                selectedViewCode,
+                appliedFilters,
                 activeHierarchyConfig.hierarchy,
                 activeHierarchyConfig.availableMetrics,
               );
@@ -551,13 +1305,10 @@ export default function ReportAnalysisScreen() {
           }
         }
 
-        // Auto-Collapse Sibling Logic
         setExpandedIds((prev) => {
           const next = new Map();
           prev.forEach((level, id) => {
-            if (level < node.level) {
-              next.set(id, level);
-            }
+            if (level < node.level) next.set(id, level);
           });
           next.set(node.id, node.level);
           return next;
@@ -567,9 +1318,8 @@ export default function ReportAnalysisScreen() {
     [
       expandedIds,
       appendChildrenToTree,
-      activeHierarchyConfig.hierarchy,
-      activeHierarchyConfig.availableMetrics,
-      selectedViewCode,
+      activeHierarchyConfig,
+      appliedFilters,
       callApi,
       showSnackBar,
       cachedNodes,
@@ -577,6 +1327,7 @@ export default function ReportAnalysisScreen() {
     ],
   );
 
+  // --- VIRTUALIZATION ENGINE ---
   const visibleRows = useMemo(() => {
     const rows = [];
     const traverse = (nodes) => {
@@ -599,7 +1350,6 @@ export default function ReportAnalysisScreen() {
     maxVisibleLevel + 1,
   );
 
-  // --- VIRTUALIZATION ENGINE ---
   const virtualizer = useVirtualizer({
     count: visibleRows.length,
     getScrollElement: () => tableContainerRef.current,
@@ -611,14 +1361,11 @@ export default function ReportAnalysisScreen() {
   const totalColumnsCount =
     visibleHierarchyLevels.length +
     activeHierarchyConfig.availableMetrics.length;
-
   const paddingTop = virtualItems.length > 0 ? virtualItems[0].start : 0;
   const paddingBottom =
     virtualItems.length > 0
       ? virtualizer.getTotalSize() - virtualItems[virtualItems.length - 1].end
       : 0;
-
-  const isSetupComplete = selectedReportCode && selectedViewCode;
 
   return (
     <Box
@@ -626,7 +1373,6 @@ export default function ReportAnalysisScreen() {
         display: "flex",
         flexDirection: "column",
         gap: 1.5,
-        // DYNAMIC REDUX FULLSCREEN STYLES
         ...(isFullscreen
           ? {
               position: "fixed",
@@ -636,151 +1382,31 @@ export default function ReportAnalysisScreen() {
               bottom: 0,
               width: "100vw",
               height: "100vh",
-              zIndex: 1299, // Safely below standard MUI dropdowns (1300), but over everything else
-              //bgcolor: theme.palette.mode === "dark" ? "#121212" : "#f4f5f9",
+              zIndex: 1299,
               p: 2,
             }
-          : {
-              height: "calc(100vh - 220px)",
-            }),
+          : { height: "calc(100vh - 220px)" }),
       }}
     >
-      {/* ================= UPPER BOX ================= */}
-      <Paper
-        elevation={0}
-        sx={{
-          p: 3,
-          borderRadius: 2,
-          boxShadow: "0 5px 10px rgba(0,0,0,0.2)",
-          border: 1,
-          borderColor: "divider",
-          display: "flex",
-          justifyContent: "space-between",
-          flexDirection: "row",
-          flexShrink: 0,
-        }}
-      >
-        <Box display="flex" alignItems="center" gap={2}>
-          <Box
-            sx={{
-              backgroundColor: "primary.main",
-              borderRadius: "10px",
-              width: 44,
-              height: 44,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <AnalyticsIcon
-              sx={{ color: "primary.contrastText", fontSize: 24 }}
-            />
-          </Box>
+      <ReportAnalysisHeader
+        activeReport={activeReport}
+        isFullscreen={isFullscreen}
+        toggleFullscreen={toggleFullscreen}
+        onOpenFilter={() => setIsFilterDialogOpen(true)}
+        filtersApplied={filtersApplied}
+      />
 
-          <Box sx={{ overflow: "hidden" }}>
-            <Typography
-              variant="h6"
-              sx={{ fontWeight: 700, color: "text.primary" }}
-            >
-              {activeReport?.displayName || "Financial Analytics"}
-            </Typography>
-            <Typography variant="caption" sx={{ color: "text.primary" }}>
-              Dynamic Drill-Down Matrix
-            </Typography>
-          </Box>
-        </Box>
+      <FilterDialog
+        open={isFilterDialogOpen}
+        onClose={() => setIsFilterDialogOpen(false)}
+        onApply={handleApplyFilters}
+        reportsConfig={reportsConfig}
+        currentFilters={appliedFilters}
+        callApi={callApi}
+        user={user} // Passes Redux authorized entities downward
+        isApplying={isInitializing}
+      />
 
-        <Box display="flex" alignItems="center" gap={2}>
-          <FormControl
-            size="small"
-            sx={{
-              minWidth: 400,
-              maxWidth: 500,
-              bgcolor: "background.paper",
-              borderRadius: 1,
-            }}
-          >
-            <InputLabel id="report-source-label" shrink>
-              Database Report
-            </InputLabel>
-            <Select
-              labelId="report-source-label"
-              value={selectedReportCode}
-              label="Database Report"
-              onChange={(e) => {
-                setSelectedReportCode(e.target.value);
-                setSelectedViewCode("");
-              }}
-              displayEmpty
-              notched
-            >
-              <MenuItem value="" disabled>
-                <Typography sx={{ fontSize: "14px" }}>
-                  {" "}
-                  Please select a report
-                </Typography>
-              </MenuItem>
-              {reportsConfig.map((report) => (
-                <MenuItem key={report.reportCode} value={report.reportCode}>
-                  <Typography sx={{ fontSize: "14px" }}>
-                    {report.displayName}
-                  </Typography>
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-
-          <FormControl
-            size="small"
-            sx={{
-              minWidth: 300,
-              maxWidth: 350,
-              bgcolor: "background.paper",
-              borderRadius: 1,
-            }}
-          >
-            <InputLabel id="hierarchy-view-label" shrink>
-              Hierarchy View
-            </InputLabel>
-            <Select
-              labelId="hierarchy-view-label"
-              value={selectedViewCode}
-              label="Hierarchy View"
-              onChange={(e) => setSelectedViewCode(e.target.value)}
-              displayEmpty
-              notched
-              disabled={!activeReport}
-            >
-              <MenuItem value="" disabled>
-                <Typography sx={{ fontSize: "14px" }}>
-                  Please select a view hierarchy
-                </Typography>
-              </MenuItem>
-              {activeReport?.views?.map((view) => (
-                <MenuItem key={view.viewCode} value={view.viewCode}>
-                  <Typography sx={{ fontSize: "14px" }}>
-                    {view.displayName}
-                  </Typography>
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-
-          <IconButton>
-            <Tooltip
-              onClick={toggleFullscreen}
-              sx={{ cursor: "pointer" }}
-              title={isFullscreen ? "Exit Full Screen (Esc)" : "Full Screen"}
-              arrow
-              placement="bottom"
-            >
-              {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
-            </Tooltip>
-          </IconButton>
-        </Box>
-      </Paper>
-
-      {/* ================= LOWER BOX ================= */}
       <Paper
         elevation={0}
         sx={{
@@ -799,192 +1425,17 @@ export default function ReportAnalysisScreen() {
             borderBottom: 1,
             borderColor: "divider",
             px: 2,
-            py: 2,
+            py: 1.5,
             minHeight: 44,
             display: "flex",
             alignItems: "center",
-            //justifyContent: "space-between",
           }}
         >
-          <Box>
-            {isSetupComplete && (
-              <Box display="flex" alignItems="center" gap={0.5}>
-                <Typography
-                  variant="body2"
-                  color="text.secondary"
-                  sx={{ mr: 1, fontWeight: 500 }}
-                >
-                  Path:
-                </Typography>
-                {activeHierarchyConfig.hierarchy.map((item, index) => {
-                  const isActive = index <= maxVisibleLevel;
-                  return (
-                    <Box key={index} display="flex" alignItems="center">
-                      <Box display="flex" alignItems="center" gap={1}>
-                        <Box
-                          sx={{
-                            width: 10,
-                            height: 10,
-                            borderRadius: "50%",
-                            bgcolor: isActive
-                              ? "primary.main"
-                              : "background.paper",
-                            border: "2px solid",
-                            borderColor: isActive ? "primary.main" : "divider",
-                          }}
-                        />
-                        <Typography
-                          variant="body2"
-                          sx={{
-                            fontWeight: isActive ? 600 : 500,
-                            color: isActive ? "text.primary" : "text.disabled",
-                            textTransform: "capitalize",
-                          }}
-                        >
-                          {item.replace("_", " ")}
-                        </Typography>
-                      </Box>
-
-                      {index < activeHierarchyConfig.hierarchy.length - 1 && (
-                        <Box
-                          sx={{
-                            backgroundColor:
-                              index < maxVisibleLevel
-                                ? theme.palette.primary.main
-                                : theme.palette.divider,
-                            width: 24,
-                            height: 2,
-                            mx: 1,
-                            borderRadius: 1,
-                          }}
-                        />
-                      )}
-                    </Box>
-                  );
-                })}
-              </Box>
-            )}
-          </Box>
-
-          {/* <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            {!isFullscreen ? (
-              <Box
-                sx={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  bgcolor: theme.palette.purple[100],
-                  borderRadius: 1,
-                  boxShadow: "0 2px 2px 0 rgba(0, 0, 0, 0.2)",
-                  pl: 1,
-                  pr: 1,
-                  p: 1,
-                  height: 30,
-                }}
-              >
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  fontWeight={200}
-                  p={1}
-                >
-                  <b>Full screen</b>
-                  <Box
-                    component="kbd"
-                    sx={{
-                      display: "inline-flex",
-                      height: 20,
-                      minWidth: 20,
-                      alignItems: "center",
-                      justifyContent: "center",
-                      borderRadius: "6px",
-                      border: "1px solid",
-                      borderColor: theme.palette.grey[400],
-                      backgroundColor: "background.paper",
-                      px: 0.75,
-                      mx: 0.5,
-                      fontFamily: "monospace",
-                      fontSize: 13,
-                      fontWeight: 600,
-                      boxShadow: "0 1px 0 0 rgba(0,0,0,0.2)",
-                    }}
-                  >
-                    F
-                  </Box>
-                </Typography>
-                <Tooltip
-                  onClick={toggleFullscreen}
-                  sx={{ cursor: "pointer" }}
-                  title={
-                    isFullscreen ? "Exit Full Screen (Esc)" : "Full Screen"
-                  }
-                  arrow
-                  placement="bottom"
-                >
-                  {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
-                </Tooltip>
-                //    REDUX Full Screen Toggle Button
-              </Box>
-            ) : (
-              <Box
-                sx={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  bgcolor: theme.palette.purple[100],
-                  borderRadius: 1,
-                  boxShadow: "0 2px 2px 0 rgba(0, 0, 0, 0.2)",
-                  pl: 1,
-                  pr: 1,
-                  p: 1,
-                  height: 30,
-                }}
-              >
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  fontWeight={200}
-                  p={1}
-                >
-                  <b>Exit full screen</b>
-                  <Box
-                    component="kbd"
-                    sx={{
-                      display: "inline-flex",
-                      height: 20,
-                      minWidth: 20,
-                      alignItems: "center",
-                      justifyContent: "center",
-                      borderRadius: "6px",
-                      border: "1px solid",
-                      borderColor: theme.palette.grey[400],
-                      backgroundColor: "background.paper",
-                      px: 0.75,
-                      mx: 0.5,
-                      fontFamily: "monospace",
-                      fontSize: 13,
-                      fontWeight: 600,
-                      boxShadow: "0 1px 0 0 rgba(0,0,0,0.2)",
-                    }}
-                  >
-                    F
-                  </Box>
-                </Typography>
-                <Tooltip
-                  onClick={toggleFullscreen}
-                  sx={{ cursor: "pointer" }}
-                  title={
-                    isFullscreen ? "Exit Full Screen (Esc)" : "Full Screen"
-                  }
-                  arrow
-                  placement="bottom"
-                >
-                  {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
-                </Tooltip>
-                //  REDUX Full Screen Toggle Button
-              </Box>
-            )}
-          </Box> */}
+          <HierarchyPath
+            activeHierarchyConfig={activeHierarchyConfig}
+            maxVisibleLevel={maxVisibleLevel}
+            isSetupComplete={isSetupComplete}
+          />
         </Box>
 
         <TableContainer
@@ -1012,16 +1463,14 @@ export default function ReportAnalysisScreen() {
                 zIndex: 10,
               }}
             >
-              <Box>
-                <DatasetIcon
-                  sx={{ fontSize: 64, color: "action.disabled", mb: 1 }}
-                />
-              </Box>
+              <DatasetIcon
+                sx={{ fontSize: 64, color: "action.disabled", mb: 1 }}
+              />
               <Typography variant="h6" color="text.secondary">
                 No Data to Display
               </Typography>
               <Typography variant="body2" color="text.disabled">
-                Please select both a database report and a hierarchy view above.
+                Click the filter icon to select a report combination and scope.
               </Typography>
             </Box>
           )}
@@ -1041,7 +1490,7 @@ export default function ReportAnalysisScreen() {
                 Executing Query ...
               </Typography>
             </Box>
-          ) : isSetupComplete ? (
+          ) : isSetupComplete && data.length > 0 ? (
             <Table
               stickyHeader
               size="small"
@@ -1049,31 +1498,25 @@ export default function ReportAnalysisScreen() {
             >
               <TableHead>
                 <TableRow>
-                  {visibleHierarchyLevels.map((levelName, index) => {
-                    //const colWidth = index === 0 ? 100 : 200;
-                    return (
-                      <TableCell
-                        key={levelName}
-                        sx={{
-                          backgroundColor:
-                            theme.palette.purple?.[100] ||
-                            theme.palette.primary.light,
-                          color: "text.primary",
-                          fontWeight: 700,
-                          borderRight: 1,
-                          borderColor: "divider",
-                          borderBottom: 2,
-                          py: 1,
-                          whiteSpace: "nowrap",
-                          //width: colWidth,
-                          //minWidth: colWidth,
-                          //maxWidth: colWidth,
-                        }}
-                      >
-                        {levelName.replace("_", " ").toUpperCase()}
-                      </TableCell>
-                    );
-                  })}
+                  {visibleHierarchyLevels.map((levelName) => (
+                    <TableCell
+                      key={levelName}
+                      sx={{
+                        backgroundColor:
+                          theme.palette.purple?.[100] ||
+                          theme.palette.primary.light,
+                        color: "text.primary",
+                        fontWeight: 700,
+                        borderRight: 1,
+                        borderColor: "divider",
+                        borderBottom: 2,
+                        py: 1,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {levelName.replace("_", " ").toUpperCase()}
+                    </TableCell>
+                  ))}
                   {activeHierarchyConfig.availableMetrics.map((metric) => (
                     <TableCell
                       key={metric.logicalName}
@@ -1089,9 +1532,6 @@ export default function ReportAnalysisScreen() {
                         borderBottom: 2,
                         py: 1,
                         whiteSpace: "nowrap",
-                        //width: 160,
-                        //minWidth: 160,
-                        //maxWidth: 160,
                       }}
                     >
                       {metric.displayName}
@@ -1100,7 +1540,6 @@ export default function ReportAnalysisScreen() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {/* Virtualization top spacing */}
                 {paddingTop > 0 && (
                   <TableRow>
                     <TableCell
@@ -1129,14 +1568,15 @@ export default function ReportAnalysisScreen() {
                       theme={theme}
                       ref={virtualizer.measureElement}
                       data-index={virtualRow.index}
+                      showSnackBar={showSnackBar}
                     />
                   );
                 })}
 
-                {/* Virtualization bottom spacing */}
                 {paddingBottom > 0 && (
                   <TableRow>
                     <TableCell
+                      col
                       colSpan={totalColumnsCount}
                       style={{
                         height: `${paddingBottom}px`,
@@ -1157,912 +1597,68 @@ export default function ReportAnalysisScreen() {
             borderTop: 1,
             borderColor: "divider",
             px: 2,
+            py: 1,
             display: "flex",
-            justifyContent: "flex-end",
+            justifyContent: "space-between",
             alignItems: "center",
             minHeight: 40,
           }}
         >
-          <Typography
-            variant="caption"
-            color="text.secondary"
-            fontWeight={500}
-            sx={{ mr: 2 }}
-          >
+          <Typography variant="caption" color="text.secondary" fontWeight={500}>
             Showing {visibleRows.length} rows
           </Typography>
-        </Box>
-      </Paper>
-    </Box>
-  );
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// **************************************************************************** AdminReportAnalysisScreen ****************************************************************************** //
-
-import { useState, useMemo, useCallback, useEffect, memo, forwardRef } from "react";
-import { useSelector } from "react-redux";
-import {
-  Box,
-  Paper,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Typography,
-  IconButton,
-  CircularProgress,
-  MenuItem,
-  Select,
-  FormControl,
-  InputLabel,
-  TablePagination,
-} from "@mui/material";
-import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
-import ChevronRightIcon from "@mui/icons-material/ChevronRight";
-import DatasetIcon from "@mui/icons-material/Dataset";
-import { useTheme } from "@mui/material/styles";
-import { motion, AnimatePresence } from "framer-motion";
-
-// Assume these are available in your project structure
-import useApi from "../../hooks/useApi";
-import useCustomSnackbar from "../../utils/useCustomSnackbar";
-
-// --- MOTION WRAPPERS ---
-const MotionTableRow = motion(TableRow);
-const MotionBox = motion(Box);
-
-// --- CONFIGURATION & CONSTANTS ---
-const moduleType = "WHOLE_BANK";
-
-const formatCurrency = (value) => {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "INR",
-  }).format(value || 0);
-};
-
-// Admin Specific Hierarchy
-const ADMIN_HIERARCHY_VIEWS = {
-  MASTER_HIERARCHY: {
-    id: "MASTER_HIERARCHY",
-    label: "Global Master Hierarchy",
-    hierarchy: ["comp_code", "CGL_Number", "Circle_name", "Product", "Branch_name"],
-  },
-};
-
-const DEFAULT_ADMIN_HIERARCHY_CONFIG = { hierarchy: [] };
-
-// --- ACTUAL API LOGIC ---
-const fetchAnalyticsData = async (callApi, showSnackBar, payload) => {
-  try {
-    const responseData = await callApi(
-      "/AS/analytics-reports/drill-down",
-      payload,
-      "POST"
-    );
-    return responseData?.data || [];
-  } catch (error) {
-    console.error("Error fetching analytics data:", error);
-    showSnackBar("Failed to fetch admin analytics data", "error");
-  }
-};
-
-const fetchInitialData = async (callApi, showSnackBar, hierarchy, fileName) => {
-  const rootDimension = hierarchy[0];
-  const payload = {
-    fileName: fileName,
-    dimensions: [rootDimension],
-    metrics: ["jan", "feb", "mar"],
-    hierarchy: hierarchy,
-    filters: [],
-  };
-  const apiData = await fetchAnalyticsData(callApi, showSnackBar, payload);
-
-  return (apiData || []).map((row) => ({
-    ...row,
-    level: 0,
-    nodeFilters: [],
-    id: `root-${row.name}`,
-  }));
-};
-
-const fetchChildrenData = async (
-  callApi,
-  showSnackBar,
-  parentNode,
-  hierarchy,
-  fileName
-) => {
-  const childLevel = parentNode.level + 1;
-  const nextDimension = hierarchy[childLevel];
-
-  const currentFilters = [
-    ...(parentNode.nodeFilters || []),
-    {
-      field: hierarchy[parentNode.level],
-      operator: "EQUALS",
-      value: parentNode.name,
-    },
-  ];
-  const payload = {
-    fileName: fileName,
-    dimensions: [nextDimension],
-    metrics: ["jan", "feb", "mar"],
-    hierarchy: hierarchy,
-    filters: currentFilters,
-  };
-  const apiData = await fetchAnalyticsData(callApi, showSnackBar, payload);
-
-  return (apiData || []).map((row) => ({
-    ...row,
-    level: childLevel,
-    nodeFilters: currentFilters,
-    id: `${parentNode.id}->lvl${childLevel}-${row.name}`,
-  }));
-};
-
-// --- COMPONENTS ---
-
-// 1. The MUI Row Component (Now with Cell Hover & Scroll Reveal)
-const TreeTableRow = memo(
-  forwardRef(({ node, isExpanded, isLoading, onToggle, maxVisibleLevel, index }, ref) => {
-    const total = (node.jan || 0) + (node.feb || 0) + (node.mar || 0);
-
-    return (
-      <MotionTableRow
-        ref={ref}
-        hover
-        // SCROLL ANIMATION: initial state is hidden. whileInView triggers when scrolling into view.
-        initial={{ opacity: 0, y: 30 }}
-        whileInView={{ opacity: 1, y: 0 }}
-        viewport={{ once: true, margin: "-10px" }} // Triggers slightly before it fully enters viewport
-        exit={{ opacity: 0, y: -20 }}
-        transition={{ duration: 0.4, delay: Math.min(index * 0.03, 0.2), ease: "easeOut" }}
-      >
-        {/* Hierarchy Name Columns */}
-        {Array.from({ length: maxVisibleLevel + 1 }).map((_, colIndex) => {
-          if (colIndex === node.level) {
-            return (
-              <TableCell
-                key={colIndex}
-                sx={{
-                  borderRight: 1,
-                  borderColor: "divider",
-                  minWidth: 220,
-                  bgcolor: "background.paper",
-                  p: 0, // Reset padding so MotionBox fills the cell entirely
-                }}
-              >
-                <MotionBox
-                  // HOVER ANIMATION: Pops out the cell
-                  whileHover={{
-                    scale: 1.04,
-                    zIndex: 10,
-                    boxShadow: "0px 6px 15px rgba(0,0,0,0.12)",
-                    backgroundColor: "background.paper",
-                    borderRadius: "6px",
-                  }}
-                  transition={{ type: "spring", stiffness: 300, damping: 20 }}
-                  sx={{
-                    display: "flex",
-                    alignItems: "center",
-                    pl: node.level * 3 + 2,
-                    pr: 2,
-                    py: 1,
-                    position: "relative",
-                  }}
-                >
-                  {node.hasChildren ? (
-                    <MotionBox
-                      whileHover={{ scale: 1.2 }}
-                      whileTap={{ scale: 0.8 }}
-                      transition={{ type: "spring", stiffness: 400, damping: 17 }}
-                    >
-                      <IconButton
-                        size="small"
-                        color="primary"
-                        onClick={() => onToggle(node)}
-                        disabled={isLoading}
-                        sx={{
-                          mr: 1.5,
-                          border: 1,
-                          borderColor: "divider",
-                          borderRadius: "50%",
-                          height: 22,
-                          width: 22,
-                          p: 0.3,
-                          bgcolor: "action.hover",
-                          "&.Mui-focusVisible": { bgcolor: "action.selected" },
-                        }}
-                      >
-                        {isLoading ? (
-                          <CircularProgress size={14} color="inherit" />
-                        ) : isExpanded ? (
-                          "-"
-                        ) : (
-                          "+"
-                        )}
-                      </IconButton>
-                    </MotionBox>
-                  ) : (
-                    <Box sx={{ width: 26, mr: 1.5 }} />
-                  )}
-                  <Typography
-                    variant="body2"
-                    color="text.primary"
-                    sx={{ fontWeight: node.level === 0 ? 600 : 400 }}
-                  >
-                    {node.name}
-                  </Typography>
-                </MotionBox>
-              </TableCell>
-            );
-          }
-          return (
-            <TableCell
-              key={colIndex}
-              sx={{
-                borderRight: 1,
-                borderColor: "divider",
-                minWidth: 150,
-                bgcolor: "background.default",
-              }}
-            />
-          );
-        })}
-
-        {/* Data Columns (Jan, Feb, Mar) */}
-        {['jan', 'feb', 'mar'].map((month) => (
-          <TableCell key={month} align="right" sx={{ borderRight: 1, borderColor: "divider", p: 0 }}>
-            <MotionBox
-              whileHover={{
-                scale: 1.15,
-                zIndex: 20,
-                boxShadow: "0px 8px 25px rgba(0,0,0,0.15)",
-                backgroundColor: "background.paper",
-                borderRadius: "6px",
-              }}
-              transition={{ type: "spring", stiffness: 300, damping: 15 }}
-              sx={{ p: "6px 16px", color: "text.secondary", position: "relative" }}
-            >
-              {formatCurrency(node[month])}
-            </MotionBox>
-          </TableCell>
-        ))}
-
-        {/* YTD Total Column */}
-        <TableCell align="right" sx={{ bgcolor: "action.hover", p: 0 }}>
-          <MotionBox
-            whileHover={{
-              scale: 1.15,
-              zIndex: 20,
-              boxShadow: "0px 8px 25px rgba(0,0,0,0.15)",
-              backgroundColor: "background.paper",
-              borderRadius: "6px",
-            }}
-            transition={{ type: "spring", stiffness: 300, damping: 15 }}
-            sx={{ p: "6px 16px", color: "text.primary", fontWeight: 600, position: "relative" }}
-          >
-            {formatCurrency(total)}
-          </MotionBox>
-        </TableCell>
-      </MotionTableRow>
-    );
-  })
-);
-TreeTableRow.displayName = "TreeTableRow";
-
-// 2. The Main Screen Component
-export default function AdminReportAnalysisScreen() {
-  const { callApi } = useApi();
-  const user = useSelector((state) => state.auth.user);
-  const showSnackBar = useCustomSnackbar();
-
-  const [availableReports, setAvailableReports] = useState([]);
-  const [selectedReportFile, setSelectedReportFile] = useState("");
-  const [activeHierarchyKey, setActiveHierarchyKey] = useState(""); 
-
-  const [data, setData] = useState([]);
-  const [expandedIds, setExpandedIds] = useState(new Set());
-  const [loadingIds, setLoadingIds] = useState(new Set());
-  const [isInitializing, setIsInitializing] = useState(false);
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
-
-  const theme = useTheme();
-
-  const activeHierarchyConfig = activeHierarchyKey 
-    ? ADMIN_HIERARCHY_VIEWS[activeHierarchyKey] 
-    : DEFAULT_ADMIN_HIERARCHY_CONFIG;
-
-  const activeReportName = useMemo(() => {
-    if (!selectedReportFile) return "Financial Administrative Workspace";
-    const reportObj = availableReports.find(
-      (r) => r.fileName === selectedReportFile
-    );
-    return reportObj ? reportObj.reportName : "Global Administrative Workspace";
-  }, [selectedReportFile, availableReports]);
-
-  useEffect(() => {
-    const fetchReportTypes = async () => {
-      try {
-        const payload = { roleId: user?.role, moduleType: moduleType };
-        const response = await callApi("/RS/reports/types", payload, "POST");
-        setAvailableReports(response?.data || []);
-      } catch (error) {
-        console.error("Failed to fetch report types", error);
-        showSnackBar("Failed to fetch report types", "error");
-      }
-    };
-    if (user) fetchReportTypes();
-  }, [callApi, user, showSnackBar]);
-
-  useEffect(() => {
-    setPage(0);
-  }, [selectedReportFile, activeHierarchyKey]);
-
-  useEffect(() => {
-    const loadRoot = async () => {
-      if (!selectedReportFile || !activeHierarchyKey) {
-        setData((prev) => (prev.length === 0 ? prev : []));
-        return;
-      }
-      setIsInitializing(true);
-      setData([]);
-      setExpandedIds(new Set());
-
-      try {
-        const rootData = await fetchInitialData(
-          callApi,
-          showSnackBar,
-          activeHierarchyConfig.hierarchy,
-          selectedReportFile
-        );
-        setData(rootData);
-      } catch (error) {
-        console.error("Failed to load initial data", error);
-      } finally {
-        setIsInitializing(false);
-      }
-    };
-    loadRoot();
-  }, [
-    selectedReportFile,
-    activeHierarchyKey,
-    activeHierarchyConfig,
-    callApi,
-    showSnackBar,
-  ]);
-
-  const appendChildrenToTree = useCallback((nodes, parentId, newChildren) => {
-    return nodes.map((node) => {
-      if (node.id === parentId) return { ...node, children: newChildren };
-      if (node.children)
-        return {
-          ...node,
-          children: appendChildrenToTree(node.children, parentId, newChildren),
-        };
-      return node;
-    });
-  }, []);
-
-  const handleToggle = useCallback(
-    async (node) => {
-      const isExpanded = expandedIds.has(node.id);
-
-      if (isExpanded) {
-        setExpandedIds((prev) => {
-          const next = new Set(prev);
-          next.delete(node.id);
-
-          const removeDescendants = (currentNode) => {
-            if (currentNode.children) {
-              currentNode.children.forEach((child) => {
-                next.delete(child.id);
-                removeDescendants(child);
-              });
-            }
-          };
-          removeDescendants(node);
-          return next;
-        });
-      } else {
-        if (!node.children && node.hasChildren) {
-          setLoadingIds((prev) => new Set(prev).add(node.id));
-          try {
-            const children = await fetchChildrenData(
-              callApi,
-              showSnackBar,
-              node,
-              activeHierarchyConfig.hierarchy,
-              selectedReportFile
-            );
-            setData((prevData) =>
-              appendChildrenToTree(prevData, node.id, children)
-            );
-          } catch (error) {
-            console.error("Failed to fetch children", error);
-          } finally {
-            setLoadingIds((prev) => {
-              const next = new Set(prev);
-              next.delete(node.id);
-              return next;
-            });
-          }
-        }
-        setExpandedIds((prev) => new Set(prev).add(node.id));
-      }
-    },
-    [
-      expandedIds,
-      appendChildrenToTree,
-      activeHierarchyConfig.hierarchy,
-      selectedReportFile,
-      callApi,
-      showSnackBar,
-    ]
-  );
-
-  const visibleRows = useMemo(() => {
-    const rows = [];
-    const traverse = (nodes) => {
-      for (const node of nodes) {
-        rows.push(node);
-        if (expandedIds.has(node.id) && node.children) traverse(node.children);
-      }
-    };
-    traverse(data);
-    return rows;
-  }, [data, expandedIds]);
-
-  const maxVisibleLevel = useMemo(() => {
-    if (visibleRows.length === 0) return 0;
-    return Math.max(...visibleRows.map((row) => row.level));
-  }, [visibleRows]);
-
-  const visibleHierarchyLevels = activeHierarchyConfig.hierarchy.slice(
-    0,
-    maxVisibleLevel + 1
-  );
-
-  const paginatedRows = useMemo(() => {
-    const startIndex = page * rowsPerPage;
-    return visibleRows.slice(startIndex, startIndex + rowsPerPage);
-  }, [visibleRows, page, rowsPerPage]);
-
-  const handleChangePage = (event, newPage) => setPage(newPage);
-  const handleChangeRowsPerPage = (event) => {
-    setRowsPerPage(parseInt(event.target.value, 10));
-    setPage(0);
-  };
-
-  const isSetupComplete = selectedReportFile && activeHierarchyKey;
-
-  const pathContainerVariants = {
-    hidden: { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: { staggerChildren: 0.1 }, 
-    },
-    exit: { opacity: 0, transition: { duration: 0.2 } }
-  };
-
-  const pathChipVariants = {
-    hidden: { opacity: 0, x: -40 },
-    show: { 
-      opacity: 1, 
-      x: 0, 
-      transition: { type: "spring", stiffness: 250, damping: 20 } 
-    },
-  };
-
-  return (
-    <Box sx={{ p: 2, height: "calc(100vh - 64px)", display: "flex", flexDirection: "column", gap: 2 }}>
-      
-      {/* ================= UPPER BOX ================= */}
-      <Paper
-        elevation={0}
-        sx={{
-          p: 3,
-          borderRadius: 2,
-          boxShadow: "0 4px 20px rgba(0,0,0,0.05)",
-          border: 1,
-          borderColor: "divider",
-          display: "flex",
-          flexDirection: "column",
-          gap: 3,
-        }}
-      >
-        <Box display="flex" alignItems="center" gap={2}>
-          <MotionBox
-            initial={{ scale: 0, rotate: -180 }}
-            animate={{ scale: 1, rotate: 0 }}
-            transition={{ type: "spring", stiffness: 260, damping: 20 }}
-            sx={{
-              backgroundColor: "primary.main",
-              borderRadius: "12px",
-              width: 56,
-              height: 56,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-            }}
-          >
-            <AdminPanelSettingsIcon sx={{ color: "primary.contrastText", fontSize: 32 }} />
-          </MotionBox>
-          
-          <Box sx={{ overflow: "hidden" }}>
-            <AnimatePresence mode="wait">
-              <MotionBox
-                key={activeReportName}
-                initial={{ opacity: 0, x: -30 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 30 }}
-                transition={{ duration: 0.3 }}
-              >
-                <Typography variant="h5" sx={{ fontWeight: 700, color: "text.primary" }}>
-                  {activeReportName}
-                </Typography>
-              </MotionBox>
-            </AnimatePresence>
-            <Typography variant="body2" sx={{ color: "text.secondary", opacity: 0.8 }}>
-              System Administrator Drill-Down Matrix
-            </Typography>
-          </Box>
-        </Box>
-
-        <Box display="flex" alignItems="center" gap={3}>
-          <MotionBox 
-            initial={{ x: -50, opacity: 0 }} 
-            animate={{ x: 0, opacity: 1 }} 
-            transition={{ type: "spring", delay: 0.1 }}
-          >
-            <FormControl
-              size="small"
-              sx={{ 
-                minWidth: 300, 
-                bgcolor: "background.paper",
-                borderRadius: 1,
-                "& .MuiOutlinedInput-root.Mui-focused fieldset": {
-                  boxShadow: `0 0 10px ${theme.palette.primary.light}`,
-                  transition: "box-shadow 0.3s ease-in-out"
-                }
-              }}
-            >
-              <InputLabel id="admin-report-source-label" shrink>
-                Database Report
-              </InputLabel>
-              <Select
-                labelId="admin-report-source-label"
-                value={selectedReportFile}
-                label="Database Report"
-                onChange={(e) => setSelectedReportFile(e.target.value)}
-                displayEmpty
-                notched
-                MenuProps={{
-                  TransitionProps: { timeout: 400 },
-                  PaperProps: {
-                    component: motion.div,
-                    initial: { opacity: 0, y: -20 },
-                    animate: { opacity: 1, y: 0 },
-                    sx: { mt: 1, borderRadius: 2, boxShadow: 3 },
-                  },
-                }}
-              >
-                <MenuItem value="" disabled>
-                  <em>Please select the report</em>
-                </MenuItem>
-                {availableReports.map((report, i) => (
-                  <MenuItem key={report.fileName} value={report.fileName}>
-                    <MotionBox
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: i * 0.05 }}
-                    >
-                      {report.reportName}
-                    </MotionBox>
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </MotionBox>
-
-          <MotionBox 
-            initial={{ x: -50, opacity: 0 }} 
-            animate={{ x: 0, opacity: 1 }} 
-            transition={{ type: "spring", delay: 0.2 }}
-          >
-            <FormControl
-              size="small"
-              sx={{ 
-                minWidth: 260,
-                bgcolor: "background.paper",
-                borderRadius: 1,
-                "& .MuiOutlinedInput-root.Mui-focused fieldset": {
-                  boxShadow: `0 0 10px ${theme.palette.primary.light}`,
-                  transition: "box-shadow 0.3s ease-in-out"
-                }
-              }}
-            >
-              <InputLabel id="admin-hierarchy-view-label" shrink>
-                Hierarchy View
-              </InputLabel>
-              <Select
-                labelId="admin-hierarchy-view-label"
-                value={activeHierarchyKey}
-                label="Hierarchy View"
-                onChange={(e) => setActiveHierarchyKey(e.target.value)}
-                displayEmpty
-                notched
-                MenuProps={{
-                  PaperProps: {
-                    component: motion.div,
-                    initial: { opacity: 0, y: -20 },
-                    animate: { opacity: 1, y: 0 },
-                    sx: { mt: 1, borderRadius: 2, boxShadow: 3 },
-                  },
-                }}
-              >
-                <MenuItem value="" disabled>
-                  <em>Please select a Hierarchy View</em>
-                </MenuItem>
-                {Object.values(ADMIN_HIERARCHY_VIEWS).map((view, i) => (
-                  <MenuItem key={view.id} value={view.id}>
-                    <MotionBox
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: i * 0.05 }}
-                    >
-                      {view.label}
-                    </MotionBox>
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </MotionBox>
-        </Box>
-      </Paper>
-
-      {/* ================= LOWER BOX ================= */}
-      <Paper
-        elevation={0}
-        sx={{
-          flexGrow: 1,
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-          borderRadius: 2,
-          boxShadow: "0 4px 20px rgba(0,0,0,0.05)",
-          border: 1,
-          borderColor: "divider",
-        }}
-      >
-        <Box sx={{ borderBottom: 1, borderColor: "divider", px: 3, py: 1.5, minHeight: 52, display: 'flex', alignItems: 'center' }}>
-          <AnimatePresence>
-            {isSetupComplete && (
-              <MotionBox
-                variants={pathContainerVariants}
-                initial="hidden"
-                animate="show"
-                exit="hidden"
-                display="flex"
-                alignItems="center"
-                gap={1}
-              >
-                <Typography variant="body2" color="text.secondary" sx={{ mr: 1, fontWeight: 500 }}>
-                  Path:
-                </Typography>
-                {activeHierarchyConfig.hierarchy.map((item, index) => (
-                  <Box key={index} display="flex" alignItems="center">
-                    <MotionBox
-                      variants={pathChipVariants}
-                      sx={{
-                        px: 1.5,
-                        py: 0.5,
-                        bgcolor: index <= maxVisibleLevel ? "primary.main" : "background.paper",
-                        color: index <= maxVisibleLevel ? "primary.contrastText" : "text.primary",
-                        borderRadius: 1,
-                        border: 1,
-                        borderColor: index <= maxVisibleLevel ? "primary.main" : "divider",
-                        fontSize: "0.75rem",
-                        fontWeight: 600,
-                        textTransform: "capitalize",
-                      }}
-                    >
-                      {item.replace("_", " ")}
-                    </MotionBox>
-                    {index < activeHierarchyConfig.hierarchy.length - 1 && (
-                      <MotionBox
-                        initial={{ opacity: 0, scale: 0 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ delay: index * 0.1 + 0.2 }}
-                      >
-                        <ChevronRightIcon sx={{ mx: 0.5, color: "text.disabled", fontSize: 18 }} />
-                      </MotionBox>
-                    )}
-                  </Box>
-                ))}
-              </MotionBox>
-            )}
-          </AnimatePresence>
-        </Box>
-
-        <TableContainer sx={{ flexGrow: 1, bgcolor: "background.default", position: "relative" }}>
-          {!isSetupComplete && (
-            <Box
-              sx={{
-                position: "absolute",
-                top: 0, left: 0, right: 0, bottom: 0,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                zIndex: 10,
-              }}
-            >
-              <MotionBox
-                animate={{ y: [0, -15, 0] }}
-                transition={{ repeat: Infinity, duration: 2.5, ease: "easeInOut" }}
-              >
-                <DatasetIcon sx={{ fontSize: 72, color: "action.disabled", mb: 2 }} />
-              </MotionBox>
-              <Typography variant="h6" color="text.secondary">
-                No Data to Display
-              </Typography>
-              <Typography variant="body2" color="text.disabled">
-                Please select both a database report and a hierarchy view above to begin administrative analysis.
-              </Typography>
-            </Box>
-          )}
-
-          {isInitializing ? (
-            <Box sx={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-              <CircularProgress size={40} color="primary" sx={{ mb: 2 }} />
-              <Typography variant="body1" color="text.secondary">
-                Executing Query...
-              </Typography>
-            </Box>
-          ) : isSetupComplete ? (
-            <Table stickyHeader size="small" sx={{ minWidth: 1000 }}>
-              <TableHead>
-                <TableRow>
-                  {visibleHierarchyLevels.map((levelName, index) => (
-                    <TableCell
-                      key={levelName}
-                      sx={{
-                        backgroundColor: theme.palette.purple ? theme.palette.purple[100] : "#f5f5f5",
-                        color: "text.primary",
-                        fontWeight: 700,
-                        borderRight: 1,
-                        borderColor: "divider",
-                        borderBottom: 2,
-                        width: 220,
-                      }}
-                    >
-                      <MotionBox
-                        initial={{ y: -20, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        transition={{ delay: index * 0.1 }}
-                      >
-                        {levelName.replace("_", " ").toUpperCase()}
-                      </MotionBox>
-                    </TableCell>
-                  ))}
-                  {["January", "February", "March", "YTD Total"].map((month, idx) => (
-                    <TableCell
-                      key={month}
-                      align="right"
-                      sx={{
-                        backgroundColor: theme.palette.purple ? theme.palette.purple[200] : "#eeeeee",
-                        color: "text.primary",
-                        fontWeight: month === "YTD Total" ? 800 : 700,
-                        borderRight: month !== "YTD Total" ? 1 : 0,
-                        borderColor: "divider",
-                        borderBottom: 2,
-                      }}
-                    >
-                      <MotionBox
-                        initial={{ y: -20, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        transition={{ delay: (visibleHierarchyLevels.length + idx) * 0.1 }}
-                      >
-                        {month}
-                      </MotionBox>
-                    </TableCell>
-                  ))}
-                </TableRow>
-              </TableHead>
-              <TableBody key={page}>
-                <AnimatePresence>
-                  {paginatedRows.map((row, index) => (
-                    <TreeTableRow
-                      key={row.id}
-                      node={row}
-                      index={index}
-                      isExpanded={expandedIds.has(row.id)}
-                      isLoading={loadingIds.has(row.id)}
-                      onToggle={handleToggle}
-                      maxVisibleLevel={maxVisibleLevel}
-                    />
-                  ))}
-                </AnimatePresence>
-              </TableBody>
-            </Table>
-          ) : null}
-        </TableContainer>
-
-        <Box
-          sx={{
-            bgcolor: "background.paper",
-            borderTop: 1,
-            borderColor: "divider",
-            px: 3,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            <MotionBox
-              animate={
-                isSetupComplete
-                  ? { scale: [1, 1.3, 1], opacity: [0.6, 1, 0.6] }
-                  : { scale: 1, opacity: 1 }
-              }
-              transition={{ repeat: Infinity, duration: 1.5 }}
-              sx={{
-                width: 10,
-                height: 10,
-                borderRadius: "50%",
-                bgcolor: isSetupComplete ? "success.main" : "action.disabled",
-              }}
-            />
-            <Typography variant="caption" color="text.secondary" fontWeight={500}>
-              {isSetupComplete ? "Connected & Synced" : "No Connection"}
+            <IconButton
+              onClick={toggleFullscreen}
+              size="small"
+              sx={{ border: "1px solid", borderColor: "divider", mr: 0.5 }}
+            >
+              {isFullscreen ? (
+                <FullscreenExitIcon fontSize="small" />
+              ) : (
+                <FullscreenIcon fontSize="small" />
+              )}
+            </IconButton>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ userSelect: "none" }}
+            >
+              {isFullscreen ? "Exit Full Screen" : "Press F to Full Screen"}
             </Typography>
           </Box>
-          <TablePagination
-            component="div"
-            count={visibleRows.length}
-            page={page}
-            onPageChange={handleChangePage}
-            rowsPerPage={rowsPerPage}
-            onRowsPerPageChange={handleChangeRowsPerPage}
-            rowsPerPageOptions={[10, 25, 50, 100]}
-            sx={{
-              ".MuiTablePagination-toolbar": { minHeight: 50, padding: 0 },
-              ".MuiTablePagination-selectLabel, .MuiTablePagination-displayedRows": { margin: 0, color: "text.secondary" },
-            }}
-          />
         </Box>
       </Paper>
     </Box>
   );
 }
 
+
+
+
+
+
+
+// ********************************************* analyticsCacheSlice ************************************ //
+
+import { createSlice } from "@reduxjs/toolkit";
+
+const analyticsCacheSlice = createSlice({
+  name: "analyticsCache",
+  initialState: {
+    nodes: {}, // Structure: { [cacheKey]: { data: [], timestamp: 123456789 } }
+  },
+  reducers: {
+    cacheNode: (state, action) => {
+      const { key, data, timestamp } = action.payload;
+      state.nodes[key] = { data, timestamp };
+    },
+    // Optional: Call this on user logout or when manually refreshing reports
+    clearCache: (state) => {
+      state.nodes = {};
+    },
+  },
+});
+
+export const { cacheNode, clearCache } = analyticsCacheSlice.actions;
+export default analyticsCacheSlice.reducer;
