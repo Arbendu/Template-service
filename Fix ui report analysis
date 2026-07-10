@@ -414,3 +414,327 @@
 
 
 /common-master/branches-code-name-only?q=123&circleCode=
+
+
+
+import React, { useState, useEffect, useMemo } from "react";
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  IconButton,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  TextField,
+  Autocomplete,
+  Box,
+  Typography,
+  CircularProgress,
+  FormHelperText,
+} from "@mui/material";
+import CloseIcon from "@mui/icons-material/Close";
+import InfoIcon from "@mui/icons-material/Info";
+import QueryStatsIcon from "@mui/icons-material/QueryStats";
+import { fetchHeads } from "../api/analyticsApi";
+
+export default function FilterDialog({
+  open,
+  onClose,
+  onApply,
+  reportsConfig = [],
+  currentFilters,
+  callApi,
+  user,
+  isApplying,
+}) {
+  const [reportCode, setReportCode] = useState("");
+  const [viewCode, setViewCode] = useState(""); // Replaces "scope" state
+  const [head, setHead] = useState(null);
+  const [entityCode, setEntityCode] = useState("");
+  const [reportDate, setReportDate] = useState("");
+
+  const [headInputValue, setHeadInputValue] = useState("");
+  const [headOptions, setHeadOptions] = useState([]);
+  const [isHeadsLoading, setIsHeadsLoading] = useState(false);
+
+  // Sync state when dialog opens
+  useEffect(() => {
+    if (open) {
+      setReportCode(currentFilters?.reportCode || "");
+      setViewCode(currentFilters?.viewCode || "");
+      setHead(currentFilters?.head || null);
+      setEntityCode(currentFilters?.entityCode || "");
+      setReportDate(currentFilters?.reportDate || "");
+      if (currentFilters?.head) setHeadOptions([currentFilters.head]);
+    }
+  }, [open, currentFilters]);
+
+  // Derived available Scopes directly from Config Views
+  const availableViews = useMemo(() => {
+    if (!reportCode) return [];
+    const report = reportsConfig.find((r) => r.reportCode === reportCode);
+    return report?.views || [];
+  }, [reportCode, reportsConfig]);
+
+  // Determine if we need to show the Entity Dropdown based on the selected view
+  const isCircleScope = viewCode.includes("CIRCLE");
+  const isBranchScope = viewCode.includes("BRANCH");
+
+  // Dynamically load Entities from User Profile instead of an API
+  const entityOptions = useMemo(() => {
+    if (!user) return [];
+    if (isCircleScope) return user.circles || []; // Fallback array if undefined
+    if (isBranchScope) return user.branches || [];
+    return [];
+  }, [user, isCircleScope, isBranchScope]);
+
+  // Debounced API call for Head Code Autocomplete
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(async () => {
+      if (headInputValue && headInputValue.length >= 2 && reportCode) {
+        setIsHeadsLoading(true);
+        const data = await fetchHeads(callApi, reportCode, headInputValue);
+        setHeadOptions(data);
+        setIsHeadsLoading(false);
+      } else {
+        setHeadOptions(head ? [head] : []);
+      }
+    }, 500);
+    return () => clearTimeout(delayDebounceFn);
+  }, [headInputValue, reportCode, callApi, head]);
+
+  const handleReset = () => {
+    setReportCode("");
+    setViewCode("");
+    setHead(null);
+    setEntityCode("");
+    setReportDate("");
+    setHeadOptions([]);
+  };
+
+  const handleApply = () => {
+    onApply({
+      reportCode,
+      viewCode,
+      head,
+      entityCode: !isCircleScope && !isBranchScope ? "" : entityCode,
+      reportDate,
+    });
+    //onClose();
+  };
+
+  const isApplyEnabled = useMemo(() => {
+    const baseValid = reportCode && viewCode && head?.headCode && reportDate;
+    if (!baseValid) return false;
+    if (isCircleScope || isBranchScope) return !!entityCode;
+    return true;
+  }, [
+    reportCode,
+    viewCode,
+    head,
+    entityCode,
+    reportDate,
+    isCircleScope,
+    isBranchScope,
+  ]);
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle
+        sx={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 2,
+        }}
+      >
+        <Typography
+          variant="h6"
+          fontWeight="bold"
+          sx={{ display: "flex", alignItems: "center", gap: 2 }}
+        >
+          <QueryStatsIcon /> Drill Down Filters
+        </Typography>
+        <IconButton onClick={onClose} size="small">
+          <CloseIcon />
+        </IconButton>
+      </DialogTitle>
+
+      <DialogContent dividers>
+        <Box display="flex" flexDirection="column" gap={3} py={1}>
+          <FormControl size="small" fullWidth>
+            <InputLabel id="dialog-report-label">Select Report</InputLabel>
+            <Select
+              labelId="dialog-report-label"
+              value={reportCode}
+              label="Select Report"
+              onChange={(e) => {
+                setReportCode(e.target.value);
+                setViewCode("");
+                setEntityCode("");
+                setHead(null);
+                setHeadInputValue("");
+                setHeadOptions([]);
+              }}
+            >
+              {reportsConfig.map((report) => (
+                <MenuItem key={report.reportCode} value={report.reportCode}>
+                  {report.displayName}
+                </MenuItem>
+              ))}
+            </Select>
+            <FormHelperText
+              id="scope-helper-text"
+              sx={{
+                fontStyle: "italic",
+                fontSize: "0.75rem",
+                display: "flex",
+                alignItems: "center",
+                gap: "4px",
+                lineHeight: 1.5,
+              }}
+            >
+              <InfoIcon sx={{ fontSize: "0.625rem" }} />
+              Please select a report to initiate drill-down analysis.
+            </FormHelperText>
+          </FormControl>
+
+          <Autocomplete
+            size="small"
+            options={headOptions}
+            getOptionLabel={(option) =>
+              option ? `${option.headCode} - ${option.headName}` : ""
+            }
+            value={head}
+            onChange={(event, newValue) => setHead(newValue)}
+            onInputChange={(event, newInputValue) =>
+              setHeadInputValue(newInputValue)
+            }
+            loading={isHeadsLoading}
+            disabled={!reportCode}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Search Head Code"
+                variant="outlined"
+                InputProps={{
+                  ...params.InputProps,
+                  endAdornment: (
+                    <React.Fragment>
+                      {isHeadsLoading ? (
+                        <CircularProgress color="inherit" size={20} />
+                      ) : null}
+                      {params.InputProps.endAdornment}
+                    </React.Fragment>
+                  ),
+                }}
+                helperText={
+                  <span
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "4px",
+                    }}
+                  >
+                    <InfoIcon sx={{ fontSize: "0.625rem" }} />
+                    <em>Type 2+ characters to search.</em>
+                  </span>
+                }
+              />
+            )}
+          />
+
+          <FormControl size="small" fullWidth disabled={!reportCode}>
+            <InputLabel id="dialog-scope-label">Scope</InputLabel>
+            <Select
+              labelId="dialog-scope-label"
+              value={viewCode}
+              label="Scope"
+              onChange={(e) => {
+                setViewCode(e.target.value);
+                setEntityCode("");
+              }}
+            >
+              {availableViews.map((view) => (
+                <MenuItem key={view.viewCode} value={view.viewCode}>
+                  {view.displayName}
+                </MenuItem>
+              ))}
+            </Select>
+            <FormHelperText
+              id="scope-helper-text"
+              sx={{
+                fontStyle: "italic",
+                fontSize: "0.75rem",
+                display: "flex",
+                alignItems: "center",
+                gap: "4px",
+                lineHeight: 1.5,
+              }}
+            >
+              <InfoIcon sx={{ fontSize: "0.625rem" }} />
+              View scope is determined by your authorized access level.
+            </FormHelperText>
+          </FormControl>
+
+          {(isCircleScope || isBranchScope) && (
+            <FormControl size="small" fullWidth>
+              <InputLabel id="dialog-entity-label">
+                Select {isCircleScope ? "Circle" : "Branch"} *
+              </InputLabel>
+              <Select
+                labelId="dialog-entity-label"
+                value={entityCode}
+                label={`Select ${isCircleScope ? "Circle" : "Branch"} *`}
+                onChange={(e) => setEntityCode(e.target.value)}
+              >
+                {entityOptions.length === 0 ? (
+                  <MenuItem disabled value="">
+                    No entities found in user profile
+                  </MenuItem>
+                ) : (
+                  entityOptions.map((entity) => (
+                    <MenuItem
+                      key={entity.id || entity.code}
+                      value={entity.id || entity.code}
+                    >
+                      {entity.name}
+                    </MenuItem>
+                  ))
+                )}
+              </Select>
+            </FormControl>
+          )}
+
+          <TextField
+            type="date"
+            size="small"
+            fullWidth
+            label="Report Date"
+            InputLabelProps={{ shrink: true }}
+            value={reportDate}
+            onChange={(e) => setReportDate(e.target.value)}
+          />
+        </Box>
+      </DialogContent>
+
+      <DialogActions sx={{ p: 2, px: 3 }}>
+        <Button onClick={handleReset} color="inherit" variant="outlined">
+          Reset
+        </Button>
+        <Button
+          onClick={handleApply}
+          color="primary"
+          variant="contained"
+          disabled={!isApplyEnabled}
+        >
+          Apply
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
