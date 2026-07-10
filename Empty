@@ -370,3 +370,65 @@ export default function FilterDialog({
     </Dialog>
   );
 }
+
+
+
+
+
+{/* Displays copy button on ANY expanded parent, removing the level === 1 restriction */}
+{isExpanded && !isLoading && node.hasChildren && (
+  <Tooltip title="Copy Data (Excel Format)" placement="top" arrow>
+    <IconButton
+      size="small"
+      onClick={(e) => {
+        e.stopPropagation(); // Prevents row toggle when clicking the copy button
+
+        const rows = [];
+
+        // 1. Recursive function to traverse children and build Tab-Separated columns
+        const traverse = (currentNode) => {
+          // Create an array of empty strings based on the max visible hierarchy depth
+          const columns = Array(maxVisibleLevel + 1).fill("");
+          
+          // Place the current node's name in its specific column level (creates the diagonal alignment)
+          columns[currentNode.level] = currentNode.name;
+
+          // Map over active metrics to grab amounts dynamically
+          const metrics = activeMetrics.map(
+            (m) => currentNode[m.logicalName] || ""
+          );
+
+          // Combine the hierarchy columns and the metric columns, separated by Tabs
+          const rowString = [...columns, ...metrics].join("\t");
+          rows.push(rowString);
+
+          // If this node has loaded children, recursively run them so they are included in the copy
+          if (currentNode.children && currentNode.children.length > 0) {
+            currentNode.children.forEach((child) => traverse(child));
+          }
+        };
+
+        // 2. Start the recursive generation from the clicked row
+        traverse(node);
+
+        // 3. Join all the generated rows with a Newline character
+        const combinedData = rows.join("\n");
+
+        // 4. Send the perfectly formatted block to the clipboard
+        navigator.clipboard
+          .writeText(combinedData)
+          .then(() => {
+            showSnackBar("Data copied in Spreadsheet format", "success");
+          })
+          .catch((err) => {
+            console.error("Failed to copy text: ", err);
+            showSnackBar("Failed to copy text", "error");
+          });
+      }}
+      sx={{ ml: 2, padding: "2px" }}
+    >
+      <ContentCopyIcon sx={{ fontSize: 16, color: "text.secondary" }} />
+    </IconButton>
+  </Tooltip>
+)}
+
