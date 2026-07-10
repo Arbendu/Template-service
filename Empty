@@ -1,1 +1,372 @@
 
+import React, { useState, useEffect, useMemo } from "react";
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  IconButton,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  TextField,
+  Autocomplete,
+  Box,
+  Typography,
+  CircularProgress,
+  FormHelperText,
+} from "@mui/material";
+import CloseIcon from "@mui/icons-material/Close";
+import InfoIcon from "@mui/icons-material/Info";
+import QueryStatsIcon from "@mui/icons-material/QueryStats";
+import { fetchHeads } from "../api/analyticsApi";
+
+export default function FilterDialog({
+  open,
+  onClose,
+  onApply,
+  reportsConfig = [],
+  currentFilters,
+  callApi,
+  user,
+  isApplying,
+}) {
+  // --- USER AUTH MAPPING ---
+  // Verify these keys match exactly what your Redis auth object returns
+  const isAdmin = user?.role === "ADMIN" || user?.isAdmin === true;
+  const userCircleCode = user?.circleCode;
+  const userCircleName = user?.circleName;
+  const userBranchCode = user?.branchCode;
+  const userBranchName = user?.branchName;
+
+  const [reportCode, setReportCode] = useState("");
+  const [viewCode, setViewCode] = useState("");
+  const [head, setHead] = useState(null);
+  const [reportDate, setReportDate] = useState("");
+  
+  // Entity (Circle/Branch) State mapping
+  const [entity, setEntity] = useState(null); // Stores the selected object { code, name }
+  const [entityInputValue, setEntityInputValue] = useState("");
+  const [entityOptions, setEntityOptions] = useState([]);
+  const [isEntityLoading, setIsEntityLoading] = useState(false);
+
+  const [headInputValue, setHeadInputValue] = useState("");
+  const [headOptions, setHeadOptions] = useState([]);
+  const [isHeadsLoading, setIsHeadsLoading] = useState(false);
+
+  const isCircleScope = viewCode.includes("CIRCLE");
+  const isBranchScope = viewCode.includes("BRANCH");
+
+  // Sync state when dialog opens
+  useEffect(() => {
+    if (open) {
+      setReportCode(currentFilters?.reportCode || "");
+      setViewCode(currentFilters?.viewCode || "");
+      setHead(currentFilters?.head || null);
+      setReportDate(currentFilters?.reportDate || "");
+      
+      // Restore entity state if it exists
+      if (currentFilters?.entityCode && currentFilters?.entityName) {
+        setEntity({ code: currentFilters.entityCode, name: currentFilters.entityName });
+      } else {
+        setEntity(null);
+      }
+      
+      if (currentFilters?.head) setHeadOptions([currentFilters.head]);
+    }
+  }, [open, currentFilters]);
+
+  // Derived available Scopes directly from Config Views
+  const availableViews = useMemo(() => {
+    if (!reportCode) return [];
+    const report = reportsConfig.find((r) => r.reportCode === reportCode);
+    return report?.views || [];
+  }, [reportCode, reportsConfig]);
+
+  // --- ENTITY FETCHING & AUTO-FILL LOGIC ---
+  useEffect(() => {
+    // 1. If not admin, auto-select their default entity and lock it
+    if (!isAdmin) {
+      if (isCircleScope && userCircleCode) {
+        setEntity({ code: userCircleCode, name: userCircleName || userCircleCode });
+      } else if (isBranchScope && userBranchCode) {
+        setEntity({ code: userBranchCode, name: userBranchName || userBranchCode });
+      } else {
+        setEntity(null);
+      }
+      return; // Exit early so non-admins don't fetch data
+    }
+
+    // 2. If Admin, fetch data dynamically on input change
+    const delayDebounceFn = setTimeout(async () => {
+      if (entityInputValue && entityInputValue.length >= 2) {
+        setIsEntityLoading(true);
+        try {
+          let response;
+          let mappedData = [];
+          
+          if (isCircleScope) {
+            // Assuming the circle search API endpoint
+            response = await callApi(`/common-master/circles?q=${entityInputValue}`, {}, "GET");
+            const data = response?.data || [];
+            // Map Circle response to a standard { code, name } format
+            mappedData = data.map(c => ({ code: c.circleCode, name: c.circleName }));
+          } 
+          else if (isBranchScope) {
+            // Branch API endpoint as requested
+            response = await callApi(`/common-master/branches-code-name-only?q=${entityInputValue}&circleCode=`, {}, "GET");
+            const data = response?.data || [];
+            // Branch response is already in { code, name } format, but we ensure mapping
+            mappedData = data.map(b => ({ code: b.code, name: b.name }));
+          }
+          
+          setEntityOptions(mappedData);
+        } catch (error) {
+          console.error("Error fetching entities:", error);
+          setEntityOptions([]);
+        } finally {
+          setIsEntityLoading(false);
+        }
+      } else {
+        setEntityOptions(entity ? [entity] : []);
+      }
+    }, 500);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [entityInputValue, isCircleScope, isBranchScope, isAdmin, callApi, entity, userCircleCode, userCircleName, userBranchCode, userBranchName]);
+
+  // --- HEAD CODE FETCHING LOGIC ---
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(async () => {
+      if (headInputValue && headInputValue.length >= 2 && reportCode) {
+        setIsHeadsLoading(true);
+        const data = await fetchHeads(callApi, reportCode, headInputValue);
+        setHeadOptions(data);
+        setIsHeadsLoading(false);
+      } else {
+        setHeadOptions(head ? [head] : []);
+      }
+    }, 500);
+    return () => clearTimeout(delayDebounceFn);
+  }, [headInputValue, reportCode, callApi, head]);
+
+  const handleReset = () => {
+    setReportCode("");
+    setViewCode("");
+    setHead(null);
+    setEntity(null);
+    setReportDate("");
+    setHeadOptions([]);
+    setEntityOptions([]);
+  };
+
+  const handleApply = () => {
+    onApply({
+      reportCode,
+      viewCode,
+      head,
+      entityCode: entity?.code || "",
+      entityName: entity?.name || "", // Saving name for restoring filter state cleanly
+      reportDate,
+    });
+  };
+
+  const isApplyEnabled = useMemo(() => {
+    const baseValid = reportCode && viewCode && head?.headCode && reportDate;
+    if (!baseValid) return false;
+    if (isCircleScope || isBranchScope) return !!entity?.code;
+    return true;
+  }, [reportCode, viewCode, head, entity, reportDate, isCircleScope, isBranchScope]);
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle
+        sx={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 2,
+        }}
+      >
+        <Typography
+          variant="h6"
+          fontWeight="bold"
+          sx={{ display: "flex", alignItems: "center", gap: 2 }}
+        >
+          <QueryStatsIcon /> Drill Down Filters
+        </Typography>
+        <IconButton onClick={onClose} size="small" disabled={isApplying}>
+          <CloseIcon />
+        </IconButton>
+      </DialogTitle>
+
+      <DialogContent dividers>
+        <Box display="flex" flexDirection="column" gap={3} py={1}>
+          
+          {/* Report Code Selection */}
+          <FormControl size="small" fullWidth>
+            <InputLabel id="dialog-report-label">Select Report</InputLabel>
+            <Select
+              labelId="dialog-report-label"
+              value={reportCode}
+              label="Select Report"
+              disabled={isApplying}
+              onChange={(e) => {
+                setReportCode(e.target.value);
+                setViewCode("");
+                setEntity(null);
+                setHead(null);
+                setHeadInputValue("");
+                setHeadOptions([]);
+              }}
+            >
+              {reportsConfig.map((report) => (
+                <MenuItem key={report.reportCode} value={report.reportCode}>
+                  {report.displayName}
+                </MenuItem>
+              ))}
+            </Select>
+            <FormHelperText
+              id="scope-helper-text"
+              sx={{ fontStyle: "italic", fontSize: "0.75rem", display: "flex", alignItems: "center", gap: "4px", lineHeight: 1.5 }}
+            >
+              <InfoIcon sx={{ fontSize: "0.625rem" }} />
+              Please select a report to initiate drill-down analysis.
+            </FormHelperText>
+          </FormControl>
+
+          {/* Head Code Autocomplete */}
+          <Autocomplete
+            size="small"
+            options={headOptions}
+            getOptionLabel={(option) => option ? `${option.headCode} - ${option.headName}` : ""}
+            value={head}
+            onChange={(event, newValue) => setHead(newValue)}
+            onInputChange={(event, newInputValue) => setHeadInputValue(newInputValue)}
+            loading={isHeadsLoading}
+            disabled={!reportCode || isApplying}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Search Head Code"
+                variant="outlined"
+                InputProps={{
+                  ...params.InputProps,
+                  endAdornment: (
+                    <React.Fragment>
+                      {isHeadsLoading ? <CircularProgress color="inherit" size={20} /> : null}
+                      {params.InputProps.endAdornment}
+                    </React.Fragment>
+                  ),
+                }}
+                helperText={
+                  <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                    <InfoIcon sx={{ fontSize: "0.625rem" }} />
+                    <em>Type 2+ characters to search.</em>
+                  </span>
+                }
+              />
+            )}
+          />
+
+          {/* Scope Selection */}
+          <FormControl size="small" fullWidth disabled={!reportCode || isApplying}>
+            <InputLabel id="dialog-scope-label">Scope</InputLabel>
+            <Select
+              labelId="dialog-scope-label"
+              value={viewCode}
+              label="Scope"
+              onChange={(e) => {
+                setViewCode(e.target.value);
+                setEntity(null); // Clear entity when switching scope
+              }}
+            >
+              {availableViews.map((view) => (
+                <MenuItem key={view.viewCode} value={view.viewCode}>
+                  {view.displayName}
+                </MenuItem>
+              ))}
+            </Select>
+            <FormHelperText
+              id="scope-helper-text"
+              sx={{ fontStyle: "italic", fontSize: "0.75rem", display: "flex", alignItems: "center", gap: "4px", lineHeight: 1.5 }}
+            >
+              <InfoIcon sx={{ fontSize: "0.625rem" }} />
+              View scope is determined by your authorized access level.
+            </FormHelperText>
+          </FormControl>
+
+          {/* Conditional Autocomplete for Circle/Branch */}
+          {(isCircleScope || isBranchScope) && (
+            <Autocomplete
+              size="small"
+              options={entityOptions}
+              // Uses standardized { code, name } structure from our mapper
+              getOptionLabel={(option) => option ? `${option.code} - ${option.name}` : ""}
+              value={entity}
+              onChange={(event, newValue) => setEntity(newValue)}
+              onInputChange={(event, newInputValue) => setEntityInputValue(newInputValue)}
+              loading={isEntityLoading}
+              // Disable if API is applying OR if user is not an admin
+              disabled={!isAdmin || isApplying}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label={`Search ${isCircleScope ? "Circle" : "Branch"} *`}
+                  variant="outlined"
+                  InputProps={{
+                    ...params.InputProps,
+                    endAdornment: (
+                      <React.Fragment>
+                        {isEntityLoading ? <CircularProgress color="inherit" size={20} /> : null}
+                        {params.InputProps.endAdornment}
+                      </React.Fragment>
+                    ),
+                  }}
+                  helperText={
+                    <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                      <InfoIcon sx={{ fontSize: "0.625rem" }} />
+                      <em>
+                        {isAdmin 
+                          ? "Type 2+ characters to search." 
+                          : "Locked to your authorized profile."}
+                      </em>
+                    </span>
+                  }
+                />
+              )}
+            />
+          )}
+
+          {/* Report Date */}
+          <TextField
+            type="date"
+            size="small"
+            fullWidth
+            label="Report Date"
+            InputLabelProps={{ shrink: true }}
+            value={reportDate}
+            onChange={(e) => setReportDate(e.target.value)}
+            disabled={isApplying}
+          />
+        </Box>
+      </DialogContent>
+
+      <DialogActions sx={{ p: 2, px: 3 }}>
+        <Button onClick={handleReset} color="inherit" variant="outlined" disabled={isApplying}>
+          Reset
+        </Button>
+        <Button
+          onClick={handleApply}
+          color="primary"
+          variant="contained"
+          disabled={!isApplyEnabled || isApplying}
+        >
+          {isApplying ? "Applying..." : "Apply"}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
