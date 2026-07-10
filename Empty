@@ -2,36 +2,97 @@
 
 export const fetchAnalyticsData = async (callApi, showSnackBar, payload) => {
   try {
+    console.log("Drill-down payload: ", payload);
     const responseData = await callApi(
       "/AS/analytics/drill-down",
       payload,
       "POST",
     );
-    console.log("Drill-down payload: ", payload);
     
     return responseData?.data || [];
   } catch (error) {
     console.error("Error fetching analytics data:", error);
-    showSnackBar("Error: " + error.title, "error");
+    showSnackBar("Error: " + error?.title || "Failed to fetch data", "error");
   }
+};
+
+// Autocomplete API for Heads
+export const fetchHeads = async (callApi, reportName, search) => {
+  if (!search || search.length < 2) return [];
+  try {
+    const response = await callApi(
+      `/AS/analytics/heads/search?reportName=${reportName}&search=${search}`,
+      {},
+      "GET",
+    );
+    return Array.isArray(response) ? response : response?.data || [];
+  } catch (error) {
+    console.error("Error fetching heads:", error);
+    return [];
+  }
+};
+
+const formatDateToDDMMYYYY = (dateString) => {
+  if (!dateString) return "";
+  const [year, month, day] = dateString.split("-");
+  return `${day}-${month}-${year}`;
+};
+
+// Base payload filter builder
+const buildBaseFilters = (appliedFilters) => {
+
+  const formattedDate = formatDateToDDMMYYYY(appliedFilters.reportDate);
+  const filters = [
+    {
+      logicalField: "ReportDate",
+      operator: "EQUALS",
+      value: formattedDate,
+    },
+    {
+      logicalField: "HeadCode",
+      operator: "EQUALS",
+      value: appliedFilters.head?.headCode,
+    },
+  ];
+
+  // Inject Circle or Branch filter if an entity is selected and the view requires it
+  if (appliedFilters.entityCode) {
+    const isCircleScope = appliedFilters.viewCode.includes("CIRCLE");
+    const isBranchScope = appliedFilters.viewCode.includes("BRANCH");
+
+    if (isCircleScope) {
+      filters.push({
+        logicalField: "Circle",
+        operator: "EQUALS",
+        value: appliedFilters.entityCode,
+      });
+    } else if (isBranchScope) {
+      filters.push({
+        logicalField: "Branch",
+        operator: "EQUALS",
+        value: appliedFilters.entityCode,
+      });
+    }
+  }
+
+  return filters;
 };
 
 export const fetchInitialData = async (
   callApi,
   showSnackBar,
-  viewCode,
+  appliedFilters,
   hierarchy,
   metrics,
-  reportDate
 ) => {
   const rootDimension = hierarchy[0];
   const payload = {
-    viewCode: viewCode,
-    reportDate: reportDate,
+    viewCode: appliedFilters.viewCode,
     dimensions: [rootDimension],
     metrics: metrics.map((m) => m.logicalName),
-    filters: [],
+    filters: buildBaseFilters(appliedFilters),
   };
+
   const apiData = await fetchAnalyticsData(callApi, showSnackBar, payload);
 
   return (apiData || []).map((row) => ({
@@ -45,10 +106,9 @@ export const fetchChildrenData = async (
   callApi,
   showSnackBar,
   parentNode,
-  viewCode,
+  appliedFilters,
   hierarchy,
   metrics,
-  reportDate
 ) => {
   const childLevel = parentNode.level + 1;
   const nextDimension = hierarchy[childLevel];
@@ -63,12 +123,12 @@ export const fetchChildrenData = async (
   ];
 
   const payload = {
-    viewCode: viewCode,
-    reportDate: reportDate,
+    viewCode: appliedFilters.viewCode,
     dimensions: [nextDimension],
     metrics: metrics.map((m) => m.logicalName),
-    filters: currentFilters,
+    filters: [...buildBaseFilters(appliedFilters), ...currentFilters],
   };
+
   const apiData = await fetchAnalyticsData(callApi, showSnackBar, payload);
 
   return (apiData || []).map((row) => ({
@@ -341,6 +401,7 @@ export default ActualTreeTableRow;
 
 
 
+
 // ********************************************** FilterDialog ********************************************* //
 
 import React, { useState, useEffect, useMemo } from "react";
@@ -359,12 +420,13 @@ import {
   Autocomplete,
   Box,
   Typography,
+  CircularProgress,
   FormHelperText,
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
-import StarIcon from "@mui/icons-material/Star";
 import InfoIcon from "@mui/icons-material/Info";
 import QueryStatsIcon from "@mui/icons-material/QueryStats";
+import { fetchHeads } from "../api/analyticsApi";
 
 export default function FilterDialog({
   open,
@@ -372,57 +434,100 @@ export default function FilterDialog({
   onApply,
   reportsConfig = [],
   currentFilters,
+  callApi,
+  user,
+  isApplying,
 }) {
-  // Local state for the dialog form
   const [reportCode, setReportCode] = useState("");
+  const [viewCode, setViewCode] = useState(""); // Replaces "scope" state
   const [head, setHead] = useState(null);
-  const [scope, setScope] = useState("");
-  const [entityCode, setEntityCode] = useState(""); // For specific Circle/Branch
+  const [entityCode, setEntityCode] = useState("");
   const [reportDate, setReportDate] = useState("");
 
-  // Placeholder state for Autocomplete & Entity Dropdown options (To be connected to your APIs)
+  const [headInputValue, setHeadInputValue] = useState("");
   const [headOptions, setHeadOptions] = useState([]);
-  const [entityOptions, setEntityOptions] = useState([]);
+  const [isHeadsLoading, setIsHeadsLoading] = useState(false);
 
-  // Sync local state with currently applied filters when dialog opens
+  // Sync state when dialog opens
   useEffect(() => {
     if (open) {
       setReportCode(currentFilters?.reportCode || "");
+      setViewCode(currentFilters?.viewCode || "");
       setHead(currentFilters?.head || null);
-      setScope(currentFilters?.scope || "");
       setEntityCode(currentFilters?.entityCode || "");
       setReportDate(currentFilters?.reportDate || "");
+      if (currentFilters?.head) setHeadOptions([currentFilters.head]);
     }
   }, [open, currentFilters]);
 
+  // Derived available Scopes directly from Config Views
+  const availableViews = useMemo(() => {
+    if (!reportCode) return [];
+    const report = reportsConfig.find((r) => r.reportCode === reportCode);
+    return report?.views || [];
+  }, [reportCode, reportsConfig]);
+
+  // Determine if we need to show the Entity Dropdown based on the selected view
+  const isCircleScope = viewCode.includes("CIRCLE");
+  const isBranchScope = viewCode.includes("BRANCH");
+
+  // Dynamically load Entities from User Profile instead of an API
+  const entityOptions = useMemo(() => {
+    if (!user) return [];
+    if (isCircleScope) return user.circles || []; // Fallback array if undefined
+    if (isBranchScope) return user.branches || [];
+    return [];
+  }, [user, isCircleScope, isBranchScope]);
+
+  // Debounced API call for Head Code Autocomplete
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(async () => {
+      if (headInputValue && headInputValue.length >= 2 && reportCode) {
+        setIsHeadsLoading(true);
+        const data = await fetchHeads(callApi, reportCode, headInputValue);
+        setHeadOptions(data);
+        setIsHeadsLoading(false);
+      } else {
+        setHeadOptions(head ? [head] : []);
+      }
+    }, 500);
+    return () => clearTimeout(delayDebounceFn);
+  }, [headInputValue, reportCode, callApi, head]);
+
   const handleReset = () => {
     setReportCode("");
+    setViewCode("");
     setHead(null);
-    setScope("");
     setEntityCode("");
     setReportDate("");
+    setHeadOptions([]);
   };
 
   const handleApply = () => {
     onApply({
       reportCode,
+      viewCode,
       head,
-      scope,
-      entityCode: scope === "BANK" ? "" : entityCode,
+      entityCode: !isCircleScope && !isBranchScope ? "" : entityCode,
       reportDate,
     });
-    onClose();
+    //onClose();
   };
 
-  // Validation: Check if all mandatory fields are filled
   const isApplyEnabled = useMemo(() => {
-    const baseValid = reportCode && head && scope && reportDate;
+    const baseValid = reportCode && viewCode && head?.headCode && reportDate;
     if (!baseValid) return false;
-    if (scope === "CIRCLE" || scope === "BRANCH") {
-      return !!entityCode;
-    }
-    return true; // BANK scope doesn't need entityCode
-  }, [reportCode, head, scope, entityCode, reportDate]);
+    if (isCircleScope || isBranchScope) return !!entityCode;
+    return true;
+  }, [
+    reportCode,
+    viewCode,
+    head,
+    entityCode,
+    reportDate,
+    isCircleScope,
+    isBranchScope,
+  ]);
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
@@ -431,22 +536,16 @@ export default function FilterDialog({
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          gap: 2, // Adds spacing between the icon/text group and the close button
+          gap: 2,
         }}
       >
         <Typography
           variant="h6"
           fontWeight="bold"
-          sx={{
-            display: "flex",
-            alignItems: "center",
-            gap: 2, // Adds spacing between the icon and the text
-          }}
+          sx={{ display: "flex", alignItems: "center", gap: 2 }}
         >
-          <QueryStatsIcon />
-          Drill Down Filters
+          <QueryStatsIcon /> Drill Down Filters
         </Typography>
-
         <IconButton onClick={onClose} size="small">
           <CloseIcon />
         </IconButton>
@@ -454,16 +553,20 @@ export default function FilterDialog({
 
       <DialogContent dividers>
         <Box display="flex" flexDirection="column" gap={3} py={1}>
-          {/* 1. Report Name */}
           <FormControl size="small" fullWidth>
-            <InputLabel id="dialog-report-label" size="small">
-              Select Report
-            </InputLabel>
+            <InputLabel id="dialog-report-label">Select Report</InputLabel>
             <Select
               labelId="dialog-report-label"
               value={reportCode}
               label="Select Report"
-              onChange={(e) => setReportCode(e.target.value)}
+              onChange={(e) => {
+                setReportCode(e.target.value);
+                setViewCode("");
+                setEntityCode("");
+                setHead(null);
+                setHeadInputValue("");
+                setHeadOptions([]);
+              }}
             >
               {reportsConfig.map((report) => (
                 <MenuItem key={report.reportCode} value={report.reportCode}>
@@ -472,36 +575,50 @@ export default function FilterDialog({
               ))}
             </Select>
             <FormHelperText
-              id="report-helper-text"
+              id="scope-helper-text"
               sx={{
                 fontStyle: "italic",
-                fontSize: "0.62rem",
+                fontSize: "0.75rem",
                 display: "flex",
                 alignItems: "center",
-                gap: "4px", // Spacing between icon and text
+                gap: "4px",
+                lineHeight: 1.5,
               }}
             >
               <InfoIcon sx={{ fontSize: "0.625rem" }} />
-              Choose a report to begin detailed analysis
+              Please select a report to initiate drill-down analysis.
             </FormHelperText>
           </FormControl>
 
-          {/* 2. Head / Head Code (Autocomplete) */}
           <Autocomplete
             size="small"
             options={headOptions}
-            getOptionLabel={(option) => option?.name || ""}
+            getOptionLabel={(option) =>
+              option ? `${option.headCode} - ${option.headName}` : ""
+            }
             value={head}
             onChange={(event, newValue) => setHead(newValue)}
-            onInputChange={(event, newInputValue) => {
-              // TODO: Trigger your backend API search here based on newInputValue
-              // setHeadOptions(response.data);
-            }}
+            onInputChange={(event, newInputValue) =>
+              setHeadInputValue(newInputValue)
+            }
+            loading={isHeadsLoading}
+            disabled={!reportCode}
             renderInput={(params) => (
               <TextField
                 {...params}
                 label="Search Head Code"
                 variant="outlined"
+                InputProps={{
+                  ...params.InputProps,
+                  endAdornment: (
+                    <React.Fragment>
+                      {isHeadsLoading ? (
+                        <CircularProgress color="inherit" size={20} />
+                      ) : null}
+                      {params.InputProps.endAdornment}
+                    </React.Fragment>
+                  ),
+                }}
                 helperText={
                   <span
                     style={{
@@ -511,105 +628,83 @@ export default function FilterDialog({
                     }}
                   >
                     <InfoIcon sx={{ fontSize: "0.625rem" }} />
-                    <em>
-                      Type 2 or more characters to search heads or head codes.
-                    </em>
+                    <em>Type 2+ characters to search.</em>
                   </span>
                 }
-                // Apply styles to the helper text via FormHelperText props if needed,
-                // but inline styling or sx on the component inside helperText works best for custom layouts
-                FormHelperTextProps={{
-                  sx: {
-                    fontSize: "0.62rem", // Smaller size
-                    // marginLeft: 0, // Reset default margin if needed
-                  },
-                }}
               />
             )}
           />
 
-          {/* 3. Scope */}
-          <FormControl size="small" fullWidth>
+          <FormControl size="small" fullWidth disabled={!reportCode}>
             <InputLabel id="dialog-scope-label">Scope</InputLabel>
             <Select
               labelId="dialog-scope-label"
-              value={scope}
-              //   label="Select Scope"
+              value={viewCode}
+              label="Scope"
               onChange={(e) => {
-                setScope(e.target.value);
-                setEntityCode(""); // Reset entity when scope changes
+                setViewCode(e.target.value);
+                setEntityCode("");
               }}
             >
-              <MenuItem value="BANK">BANK</MenuItem>
-              <MenuItem value="CIRCLE">CIRCLE</MenuItem>
-              <MenuItem value="BRANCH">BRANCH</MenuItem>
+              {availableViews.map((view) => (
+                <MenuItem key={view.viewCode} value={view.viewCode}>
+                  {view.displayName}
+                </MenuItem>
+              ))}
             </Select>
             <FormHelperText
-              id="report-helper-text"
+              id="scope-helper-text"
               sx={{
                 fontStyle: "italic",
-                fontSize: "0.62rem",
+                fontSize: "0.75rem",
                 display: "flex",
                 alignItems: "center",
-                gap: "4px", // Spacing between icon and text
+                gap: "4px",
+                lineHeight: 1.5,
               }}
             >
               <InfoIcon sx={{ fontSize: "0.625rem" }} />
-              Options are limited to your authorized organizational scope
+              View scope is determined by your authorized access level.
             </FormHelperText>
           </FormControl>
 
-          {/* Conditional Dropdown for Circle/Branch */}
-          {(scope === "CIRCLE" || scope === "BRANCH") && (
+          {(isCircleScope || isBranchScope) && (
             <FormControl size="small" fullWidth>
               <InputLabel id="dialog-entity-label">
-                Select {scope === "CIRCLE" ? "Circle" : "Branch"} *
+                Select {isCircleScope ? "Circle" : "Branch"} *
               </InputLabel>
               <Select
                 labelId="dialog-entity-label"
                 value={entityCode}
-                label={`Select ${scope === "CIRCLE" ? "Circle" : "Branch"} *`}
+                label={`Select ${isCircleScope ? "Circle" : "Branch"} *`}
                 onChange={(e) => setEntityCode(e.target.value)}
               >
-                {/* TODO: Populate dynamically based on user Role/Scope API */}
-                {entityOptions.map((entity) => (
-                  <MenuItem key={entity.id} value={entity.id}>
-                    {entity.name}
+                {entityOptions.length === 0 ? (
+                  <MenuItem disabled value="">
+                    No entities found in user profile
                   </MenuItem>
-                ))}
+                ) : (
+                  entityOptions.map((entity) => (
+                    <MenuItem
+                      key={entity.id || entity.code}
+                      value={entity.id || entity.code}
+                    >
+                      {entity.name}
+                    </MenuItem>
+                  ))
+                )}
               </Select>
             </FormControl>
           )}
 
-          {/* 4. Date */}
           <TextField
             type="date"
             size="small"
             fullWidth
-            label="Report Date *"
+            label="Report Date"
             InputLabelProps={{ shrink: true }}
             value={reportDate}
             onChange={(e) => setReportDate(e.target.value)}
-            helperText={
-              <span
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "4px",
-                }}
-              >
-                <InfoIcon sx={{ fontSize: "0.625rem" }} />
-                <em>Type or select a date to view the data</em>
-              </span>
-            }
-            // Apply styles to the helper text via FormHelperText props if needed,
-            // but inline styling or sx on the component inside helperText works best for custom layouts
-            FormHelperTextProps={{
-              sx: {
-                fontSize: "0.62rem", // Smaller size
-                // marginLeft: 0, // Reset default margin if needed
-              },
-            }}
           />
         </Box>
       </DialogContent>
@@ -630,6 +725,7 @@ export default function FilterDialog({
     </Dialog>
   );
 }
+
 
 
 
@@ -706,6 +802,7 @@ export default function HierarchyPath({
     </Box>
   );
 }
+
 
 
 
@@ -878,26 +975,24 @@ export default function ReportAnalysisHeader({
           arrow
           placement="bottom"
         >
-          
-            <IconButton
-              onClick={onOpenFilter}
-              color="primary" // Makes the icon blue/prominent
-              size="medium"
-              sx={{
-                border: "1px solid",
-                borderColor: "divider",
-                bgcolor: "background.paper",
-                boxShadow: 1,
-                "&:hover": {
-                  bgcolor: "primary.main",
-                  color: "primary.contrastText",
-                  boxShadow: 2,
-                },
-              }}
-            >
-              <TuneIcon />
-            </IconButton>
-          
+          <IconButton
+            onClick={onOpenFilter}
+            color="primary" // Makes the icon blue/prominent
+            size="medium"
+            sx={{
+              border: "1px solid",
+              borderColor: "divider",
+              bgcolor: "background.paper",
+              boxShadow: 1,
+              "&:hover": {
+                bgcolor: "primary.main",
+                color: "primary.contrastText",
+                boxShadow: 2,
+              },
+            }}
+          >
+            <TuneIcon />
+          </IconButton>
         </Tooltip>
 
         {/* Instructional Text */}
@@ -919,6 +1014,7 @@ export default function ReportAnalysisHeader({
     </Paper>
   );
 }
+
 
 
 
@@ -958,35 +1054,29 @@ import {
   TableRow,
   Typography,
   CircularProgress,
-  Tooltip,
   IconButton,
 } from "@mui/material";
 import DatasetIcon from "@mui/icons-material/Dataset";
 import { useTheme } from "@mui/material/styles";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
-// --- REDUX UI ACTIONS ---
-// Update this path if your uiSlice is located somewhere else
 import {
   enterComponentFullscreen,
   exitComponentFullscreen,
 } from "../../store/slices/uiSlice";
-
-// --- HOOKS ---
 import useApi from "../../hooks/useApi";
 import useCustomSnackbar from "../../utils/useCustomSnackbar";
 
-// --- COMPONENTS & UTILS ---
 import ReportAnalysisHeader from "./components/ReportAnalysisHeader";
 import HierarchyPath from "./components/HierarchyPath";
 import ActualTreeTableRow from "./components/ActualTreeTableRow";
 import FilterDialog from "./components/FilterDialog";
 import { fetchInitialData, fetchChildrenData } from "./api/analyticsApi";
-import { DEFAULT_CONFIG } from "./utils/analyticsConstants";
 
-import TuneIcon from "@mui/icons-material/Tune";
 import FullscreenIcon from "@mui/icons-material/Fullscreen";
 import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
+
+const DEFAULT_CONFIG = { hierarchy: [], availableMetrics: [] };
 
 export default function ReportAnalysisScreen() {
   const { callApi } = useApi();
@@ -996,22 +1086,19 @@ export default function ReportAnalysisScreen() {
   const showSnackBar = useCustomSnackbar();
 
   const user = useSelector((state) => state.auth.user);
-
-  // Fullscreen state managed strictly via Redux UI Slice
   const isFullscreen = useSelector(
     (state) => state.ui?.isComponentFullscreen || false,
   );
   const cachedNodes = useSelector((state) => state.analyticsCache?.nodes || {});
 
-  // --- STATE ---
   const [reportsConfig, setReportsConfig] = useState([]);
   const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
 
-  // Master Filter State (Applied Filters via Dialog)
+  // Master Filter State
   const [appliedFilters, setAppliedFilters] = useState({
     reportCode: "",
+    viewCode: "", // Drives both Scope and Hierarchy
     head: null,
-    scope: "",
     entityCode: "",
     reportDate: "",
   });
@@ -1020,9 +1107,8 @@ export default function ReportAnalysisScreen() {
   const [expandedIds, setExpandedIds] = useState(new Map());
   const [loadingIds, setLoadingIds] = useState(new Set());
   const [isInitializing, setIsInitializing] = useState(false);
-  const [filtersApplied, setFiltersApplied] = React.useState(false);
 
-  // --- DERIVED VALUES ---
+  // --- DERIVED CONFIGURATION DYNAMICS ---
   const activeReport = useMemo(() => {
     return (
       reportsConfig.find((r) => r.reportCode === appliedFilters.reportCode) ||
@@ -1030,23 +1116,30 @@ export default function ReportAnalysisScreen() {
     );
   }, [reportsConfig, appliedFilters.reportCode]);
 
-  // Fallback to DEFAULT_CONFIG until the dynamic Scope-based hierarchy API is fully implemented
-  const activeHierarchyConfig = DEFAULT_CONFIG;
+  // Dynamically resolve hierarchy based on the exact selected viewCode
+  const activeHierarchyConfig = useMemo(() => {
+    if (!activeReport || !appliedFilters.viewCode) return DEFAULT_CONFIG;
+    return (
+      activeReport.views.find((v) => v.viewCode === appliedFilters.viewCode) ||
+      DEFAULT_CONFIG
+    );
+  }, [activeReport, appliedFilters.viewCode]);
 
   const isSetupComplete = !!(
     appliedFilters.reportCode &&
+    appliedFilters.viewCode &&
     appliedFilters.head &&
-    appliedFilters.scope &&
-    appliedFilters.reportDate
+    appliedFilters.reportDate &&
+    activeHierarchyConfig.hierarchy.length > 0
   );
+
+  const filtersApplied = !!appliedFilters.reportCode;
 
   // --- REDUX FULLSCREEN LOGIC ---
   const toggleFullscreen = useCallback(() => {
     if (isFullscreen) {
       dispatch(exitComponentFullscreen());
-      if (window.history.state && window.history.state.isFullscreenOverlay) {
-        window.history.back();
-      }
+      if (window.history.state?.isFullscreenOverlay) window.history.back();
     } else {
       dispatch(enterComponentFullscreen());
       showSnackBar("To exit full screen press 'F' or 'Esc'", "info");
@@ -1055,44 +1148,39 @@ export default function ReportAnalysisScreen() {
   }, [isFullscreen, dispatch, showSnackBar]);
 
   useEffect(() => {
-    const handlePopState = () => {
-      if (isFullscreen) {
-        dispatch(exitComponentFullscreen());
-      }
-    };
+    const handlePopState = () =>
+      isFullscreen && dispatch(exitComponentFullscreen());
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, [isFullscreen, dispatch]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === "f" && isFullscreen) {
-        dispatch(exitComponentFullscreen());
-        if (window.history.state && window.history.state.isFullscreenOverlay) {
-          window.history.back();
+      if (e.key === "f") {
+        if (isFullscreen) {
+          dispatch(exitComponentFullscreen());
+          if (window.history.state?.isFullscreenOverlay) window.history.back();
+        } else {
+          dispatch(enterComponentFullscreen());
+          window.history.pushState({ isFullscreenOverlay: true }, "");
         }
-      }
-      if (e.key === "f" && !isFullscreen) {
-        dispatch(enterComponentFullscreen());
-        window.history.pushState({ isFullscreenOverlay: true }, "");
-        showSnackBar("To exit full screen press 'F' or 'Esc'", "info");
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isFullscreen, dispatch, showSnackBar]);
+  }, [isFullscreen, dispatch]);
 
   // --- CONFIG FETCHING ---
   useEffect(() => {
     const fetchConfig = async () => {
       try {
         const response = await callApi("/AS/analytics/config", {}, "GET");
-        const configData = Array.isArray(response)
-          ? response
-          : response?.data || [];
-        setReportsConfig(configData);
+        setReportsConfig(
+          Array.isArray(response) ? response : response?.data || [],
+        );
+        console.log("Response: ", response);
+        
       } catch (error) {
-        console.error("Failed to fetch analytics configurations", error);
         showSnackBar("Error fetching configuration", "error");
       }
     };
@@ -1100,55 +1188,54 @@ export default function ReportAnalysisScreen() {
   }, [callApi, user, showSnackBar]);
 
   // --- DATA FETCHING (Root Level) ---
-  useEffect(() => {
-    const loadRoot = async () => {
-      if (!isSetupComplete) {
-        setData((prev) => (prev.length === 0 ? prev : []));
-        return;
+
+  const handleApplyFilters = async (newFilters) => {
+    setIsInitializing(true);
+
+    try {
+      // Find the specific hierarchy configuration for the selected report & view
+      const targetReport = reportsConfig.find(
+        (r) => r.reportCode === newFilters.reportCode,
+      );
+      const targetHierarchyConfig =
+        targetReport?.views.find((v) => v.viewCode === newFilters.viewCode) ||
+        DEFAULT_CONFIG;
+
+      const rootData = await fetchInitialData(
+        callApi,
+        showSnackBar,
+        newFilters,
+        targetHierarchyConfig.hierarchy,
+        targetHierarchyConfig.availableMetrics,
+      );
+
+      // If data is empty, DO NOT apply filters or close dialog. Path naturally stays hidden.
+      if (!rootData || rootData.length === 0) {
+        showSnackBar("No data found for the selected combination", "warning");
+      } else {
+        // Success: Update main view state, inject data, and close dialog
+        setAppliedFilters(newFilters);
+        setData(rootData);
+        setExpandedIds(new Map());
+        setIsFilterDialogOpen(false);
       }
-      setIsInitializing(true);
-      setData([]);
-      setExpandedIds(new Map());
-
-      try {
-        const rootData = await fetchInitialData(
-          callApi,
-          showSnackBar,
-          appliedFilters, // Replaced selectedViewCode with the entire filters object
-          activeHierarchyConfig.hierarchy,
-          activeHierarchyConfig.availableMetrics,
-        );
-
-        if (!rootData || rootData.length === 0) {
-          showSnackBar("No data found for the selected combination", "warning");
-        }
-
-        setData(rootData || []);
-      } catch (error) {
-        console.error("Failed to load initial data", error);
-      } finally {
-        setIsInitializing(false);
-      }
-    };
-    loadRoot();
-  }, [
-    appliedFilters,
-    activeHierarchyConfig,
-    callApi,
-    showSnackBar,
-    isSetupComplete,
-  ]);
+    } catch (error) {
+      console.error("Failed to load initial data", error);
+      showSnackBar("Error fetching data", "error");
+    } finally {
+      setIsInitializing(false);
+    }
+  };
 
   // --- NODE EXPANSION LOGIC ---
   const appendChildrenToTree = useCallback((nodes, parentId, newChildren) => {
     return nodes.map((node) => {
       if (node.id === parentId) return { ...node, children: newChildren };
-      if (node.children) {
+      if (node.children)
         return {
           ...node,
           children: appendChildrenToTree(node.children, parentId, newChildren),
         };
-      }
       return node;
     });
   }, []);
@@ -1158,11 +1245,9 @@ export default function ReportAnalysisScreen() {
       const isExpanded = expandedIds.has(node.id);
 
       if (isExpanded) {
-        // Manual Collapse
         setExpandedIds((prev) => {
           const next = new Map(prev);
           next.delete(node.id);
-
           const removeDescendants = (currentNode) => {
             if (currentNode.children) {
               currentNode.children.forEach((child) => {
@@ -1175,10 +1260,9 @@ export default function ReportAnalysisScreen() {
           return next;
         });
       } else {
-        // Expansion
         if (!node.children && node.hasChildren) {
-          // Utilizing scope and date in the cache key to prevent data crossover
-          const cacheKey = `${appliedFilters.scope}_${node.id}_${appliedFilters.reportDate}`;
+          const filterHash = `${appliedFilters.viewCode}_${appliedFilters.entityCode}_${appliedFilters.head.headCode}_${appliedFilters.reportDate}`;
+          const cacheKey = `${filterHash}_${node.id}`;
           const cachedEntry = cachedNodes[cacheKey];
           const isCacheValid =
             cachedEntry && Date.now() - cachedEntry.timestamp < 900000;
@@ -1194,7 +1278,7 @@ export default function ReportAnalysisScreen() {
                 callApi,
                 showSnackBar,
                 node,
-                appliedFilters, // Replaced selectedViewCode with the entire filters object
+                appliedFilters,
                 activeHierarchyConfig.hierarchy,
                 activeHierarchyConfig.availableMetrics,
               );
@@ -1221,13 +1305,10 @@ export default function ReportAnalysisScreen() {
           }
         }
 
-        // Auto-Collapse Sibling Logic
         setExpandedIds((prev) => {
           const next = new Map();
           prev.forEach((level, id) => {
-            if (level < node.level) {
-              next.set(id, level);
-            }
+            if (level < node.level) next.set(id, level);
           });
           next.set(node.id, node.level);
           return next;
@@ -1304,12 +1385,9 @@ export default function ReportAnalysisScreen() {
               zIndex: 1299,
               p: 2,
             }
-          : {
-              height: "calc(100vh - 220px)",
-            }),
+          : { height: "calc(100vh - 220px)" }),
       }}
     >
-      {/* ================= UPPER BOX / HEADER ================= */}
       <ReportAnalysisHeader
         activeReport={activeReport}
         isFullscreen={isFullscreen}
@@ -1318,16 +1396,17 @@ export default function ReportAnalysisScreen() {
         filtersApplied={filtersApplied}
       />
 
-      {/* ================= FILTER DIALOG ================= */}
       <FilterDialog
         open={isFilterDialogOpen}
         onClose={() => setIsFilterDialogOpen(false)}
-        onApply={(newFilters) => setAppliedFilters(newFilters)}
+        onApply={handleApplyFilters}
         reportsConfig={reportsConfig}
         currentFilters={appliedFilters}
+        callApi={callApi}
+        user={user} // Passes Redux authorized entities downward
+        isApplying={isInitializing}
       />
 
-      {/* ================= LOWER BOX / DATA TABLE ================= */}
       <Paper
         elevation={0}
         sx={{
@@ -1461,7 +1540,6 @@ export default function ReportAnalysisScreen() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {/* Virtualization top spacing */}
                 {paddingTop > 0 && (
                   <TableRow>
                     <TableCell
@@ -1490,14 +1568,15 @@ export default function ReportAnalysisScreen() {
                       theme={theme}
                       ref={virtualizer.measureElement}
                       data-index={virtualRow.index}
+                      showSnackBar={showSnackBar}
                     />
                   );
                 })}
 
-                {/* Virtualization bottom spacing */}
                 {paddingBottom > 0 && (
                   <TableRow>
                     <TableCell
+                      col
                       colSpan={totalColumnsCount}
                       style={{
                         height: `${paddingBottom}px`,
@@ -1518,33 +1597,21 @@ export default function ReportAnalysisScreen() {
             borderTop: 1,
             borderColor: "divider",
             px: 2,
-            py: 1, // Added vertical padding for better spacing
+            py: 1,
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
             minHeight: 40,
           }}
         >
-          {/* Left Side: Row Count */}
           <Typography variant="caption" color="text.secondary" fontWeight={500}>
             Showing {visibleRows.length} rows
           </Typography>
-
-          {/* Right Side: Fullscreen Control */}
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            {/* <Tooltip
-              title={isFullscreen ? "Exit Full Screen (F)" : "Full Screen"}
-              arrow
-              placement="top"
-            > */}
             <IconButton
               onClick={toggleFullscreen}
-              size="small" // Ensures small icon size
-              sx={{
-                border: "1px solid",
-                borderColor: "divider",
-                mr: 0.5, // Small gap between button and text
-              }}
+              size="small"
+              sx={{ border: "1px solid", borderColor: "divider", mr: 0.5 }}
             >
               {isFullscreen ? (
                 <FullscreenExitIcon fontSize="small" />
@@ -1552,13 +1619,10 @@ export default function ReportAnalysisScreen() {
                 <FullscreenIcon fontSize="small" />
               )}
             </IconButton>
-            {/* </Tooltip> */}
-
-            {/* Text Label */}
             <Typography
               variant="caption"
               color="text.secondary"
-              sx={{ userSelect: "none" }} // Prevents text highlighting on click
+              sx={{ userSelect: "none" }}
             >
               {isFullscreen ? "Exit Full Screen" : "Press F to Full Screen"}
             </Typography>
@@ -1568,6 +1632,7 @@ export default function ReportAnalysisScreen() {
     </Box>
   );
 }
+
 
 
 
@@ -1597,280 +1662,3 @@ const analyticsCacheSlice = createSlice({
 
 export const { cacheNode, clearCache } = analyticsCacheSlice.actions;
 export default analyticsCacheSlice.reducer;
-
-
-
-
-// *********************************** /analytics/config response ************************************************** //
-
-[
-    {
-        "reportCode": "YSA",
-        "displayName": "Yearly Statement Of Abstract",
-        "views": [
-            {
-                "viewCode": "YSA_BANK",
-                "displayName": "YSA_BANK",
-                "hierarchy": [
-                    "Geography",
-                    "Circle",
-                    "Cgl",
-                    "Product",
-                    "Branch",
-                    "ReportDate",
-                    "CompCode",
-                    "HeadCode"
-                ],
-                "availableMetrics": [
-                    {
-                        "logicalName": "TotalAmount",
-                        "displayName": "Amount"
-                    }
-                ]
-            },
-            {
-                "viewCode": "YSA_CIRCLE",
-                "displayName": "YSA_CIRCLE",
-                "hierarchy": [
-                    "Cgl",
-                    "Product",
-                    "Branch",
-                    "Circle",
-                    "ReportDate",
-                    "CompCode",
-                    "HeadCode"
-                ],
-                "availableMetrics": [
-                    {
-                        "logicalName": "TotalAmount",
-                        "displayName": "Amount"
-                    }
-                ]
-            },
-            {
-                "viewCode": "YSA_BRANCH",
-                "displayName": "YSA_BRANCH",
-                "hierarchy": [
-                    "Cgl",
-                    "Product",
-                    "Branch",
-                    "ReportDate",
-                    "CompCode",
-                    "HeadCode"
-                ],
-                "availableMetrics": [
-                    {
-                        "logicalName": "TotalAmount",
-                        "displayName": "Amount"
-                    }
-                ]
-            }
-        ]
-    },
-    {
-        "reportCode": "PNL",
-        "displayName": "Profit & Loss Analysis",
-        "views": [
-            {
-                "viewCode": "PNL_BANK",
-                "displayName": "PNL_BANK",
-                "hierarchy": [
-                    "Geography",
-                    "Circle",
-                    "Cgl",
-                    "Product",
-                    "Branch",
-                    "ReportDate",
-                    "CompCode",
-                    "HeadCode"
-                ],
-                "availableMetrics": [
-                    {
-                        "logicalName": "TotalAmount",
-                        "displayName": "Amount"
-                    }
-                ]
-            },
-            {
-                "viewCode": "PNL_CIRCLE",
-                "displayName": "PNL_CIRCLE",
-                "hierarchy": [
-                    "Cgl",
-                    "Product",
-                    "Branch",
-                    "Circle",
-                    "ReportDate",
-                    "CompCode",
-                    "HeadCode"
-                ],
-                "availableMetrics": [
-                    {
-                        "logicalName": "TotalAmount",
-                        "displayName": "Amount"
-                    }
-                ]
-            },
-            {
-                "viewCode": "PNL_BRANCH",
-                "displayName": "PNL_BRANCH",
-                "hierarchy": [
-                    "Cgl",
-                    "Product",
-                    "Branch",
-                    "ReportDate",
-                    "CompCode",
-                    "HeadCode"
-                ],
-                "availableMetrics": [
-                    {
-                        "logicalName": "TotalAmount",
-                        "displayName": "Amount"
-                    }
-                ]
-            }
-        ]
-    },
-    {
-        "reportCode": "NWSA",
-        "displayName": "NWSA Report",
-        "views": [
-            {
-                "viewCode": "NWSA_BANK",
-                "displayName": "NWSA_BANK",
-                "hierarchy": [
-                    "Geography",
-                    "Circle",
-                    "Cgl",
-                    "Product",
-                    "Branch",
-                    "ReportDate",
-                    "CompCode",
-                    "HeadCode"
-                ],
-                "availableMetrics": [
-                    {
-                        "logicalName": "TotalAmount",
-                        "displayName": "Amount"
-                    }
-                ]
-            },
-            {
-                "viewCode": "NWSA_BRANCH",
-                "displayName": "NWSA_BRANCH",
-                "hierarchy": [
-                    "Cgl",
-                    "Product",
-                    "Branch",
-                    "ReportDate",
-                    "CompCode",
-                    "HeadCode"
-                ],
-                "availableMetrics": [
-                    {
-                        "logicalName": "TotalAmount",
-                        "displayName": "Amount"
-                    }
-                ]
-            },
-            {
-                "viewCode": "NWSA_CIRCLE",
-                "displayName": "NWSA_CIRCLE",
-                "hierarchy": [
-                    "Cgl",
-                    "Product",
-                    "Branch",
-                    "Circle",
-                    "ReportDate",
-                    "CompCode",
-                    "HeadCode"
-                ],
-                "availableMetrics": [
-                    {
-                        "logicalName": "TotalAmount",
-                        "displayName": "Amount"
-                    }
-                ]
-            }
-        ]
-    }
-]
-
-
-
-
-
-
-// ***************************************** Updated Scenario ************************************ //
-
-Step 2: The Autocomplete "Code" API
-When the user selects a report (e.g., YSA) and starts typing a Head Code (e.g., "100"), call this
-API to get suggestions.
-● Endpoint: analytics/heads/search?reportName=ysa_report&search=100
-● Headers: Authorization: Bearer <JWT_TOKEN>
-Response Example:
-[
-{
-"headCode": "1001",
-"headName": "Bank Charges"
-},
-{
-"headCode": "1002",
-"headName": "Interest on Loans"
-}
-]
-
-
-
-
-
-Scenario A: Bank Level Scope Selected
-Because the Bank hierarchy is ["Geography", "Circle", "Cgl", ...], you ask for Geography.
-{
-"viewCode": "PNL_BANK",
-"dimensions": ["Geography"],
-"metrics": ["TotalAmount"],
-"filters": [
-{ "logicalField": "ReportDate", "operator": "EQUALS", "value":
-"2026-03-31" },
-{ "logicalField": "ReportType", "operator": "EQUALS", "value":
-"pnl_report" },
-{ "logicalField": "HeadCode", "operator": "EQUALS", "value":
-"1001" }
-]
-}
-Scenario B: Circle Level Scope Selected (User typed "Kolkata")
-Because the Circle hierarchy is ["Cgl", "Product", "Branch"], you ask for Cgl. Notice how Circle is
-now passed as a filter!
-{
-"viewCode": "PNL_CIRCLE",
-"dimensions": ["Cgl"],
-"metrics": ["TotalAmount"],
-"filters": [
-{ "logicalField": "ReportDate", "operator": "EQUALS", "value":
-"2026-03-31" },
-{ "logicalField": "ReportType", "operator": "EQUALS", "value":
-"pnl_report" },
-{ "logicalField": "HeadCode", "operator": "EQUALS", "value":
-"1001" },
-{ "logicalField": "Circle", "operator": "EQUALS", "value":
-"Kolkata" }
-]
-}
-Scenario C: Branch Level Scope Selected (User typed "01111")
-Because the Branch hierarchy is ["Cgl", "Product"], you ask for Cgl. Notice how Branch is
-passed as a filter.
-{
-"viewCode": "PNL_BRANCH",
-"dimensions": ["Cgl"],
-"metrics": ["TotalAmount"],
-"filters": [
-{ "logicalField": "ReportDate", "operator": "EQUALS", "value":
-"2026-03-31" },
-{ "logicalField": "ReportType", "operator": "EQUALS", "value":
-"pnl_report" },
-{ "logicalField": "HeadCode", "operator": "EQUALS", "value":
-"1001" },
-{ "logicalField": "Branch", "operator": "EQUALS", "value": "01111"
-}
-]
-}
