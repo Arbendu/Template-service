@@ -1,27 +1,5 @@
 
-      <ReportAnalysisHeader
-        activeReport={activeReport}
-        isFullscreen={isFullscreen}
-        toggleFullscreen={toggleFullscreen}
-        onOpenFilter={() => setIsFilterDialogOpen(true)}
-        filtersApplied={filtersApplied}
-        appliedFilters={appliedFilters}
-        // --- REPLACE THE onClearFilters PROP WITH THIS ---
-        onClearFilters={() => {
-          setAppliedFilters({
-            reportCode: "",
-            viewCode: "",
-            head: null,
-            entityCode: "",
-            reportDate: "",
-          });
-          // Also clear the table data and expanded rows
-          setData([]);
-          setExpandedIds(new Map());
-        }}
-        // -------------------------------------------------
-      />
-
+      
 
 
 
