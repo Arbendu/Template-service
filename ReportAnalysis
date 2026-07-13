@@ -297,15 +297,21 @@ const ActualTreeTableRow = memo(
 
                               const rows = [];
 
-                              // 1. Recursive function to traverse children and build Tab-Separated columns
+                              // 1. Get headers starting exactly from the clicked node's level downward
+                              const allHeaders = Array.from(document.querySelectorAll("th")).map(th => th.innerText.trim()).filter(Boolean);
+                              const hierarchyHeaders = allHeaders.slice(node.level, maxVisibleLevel + 1);
+                              const metricHeaders = activeMetrics.map((m) => m.displayName || m.logicalName);
+                              rows.push([...hierarchyHeaders, ...metricHeaders].join("\t"));
+
+                              // 2. Recursive function to traverse children and build Tab-Separated columns
                               const traverse = (currentNode) => {
                                 // Create an array of empty strings based on the max visible hierarchy depth
-                                const columns = Array(maxVisibleLevel + 1).fill(
+                                const originalColumns = Array(maxVisibleLevel + 1).fill(
                                   "",
                                 );
 
                                 // Place the current node's name in its specific column level (creates the diagonal alignment)
-                                columns[currentNode.level] = currentNode.name;
+                                originalColumns[currentNode.level] = currentNode.name;
 
                                 // Map over active metrics to grab amounts dynamically
                                 const metrics = activeMetrics.map((m) => {
@@ -321,8 +327,11 @@ const ActualTreeTableRow = memo(
                                     : value;
                                 });
 
+                                // Slice the columns dynamically to match the header offset perfectly
+                                const shiftedColumns = originalColumns.slice(node.level);
+
                                 // Combine the hierarchy columns and the metric columns, separated by Tabs
-                                const rowString = [...columns, ...metrics].join(
+                                const rowString = [...shiftedColumns, ...metrics].join(
                                   "\t",
                                 );
                                 rows.push(rowString);
@@ -338,13 +347,13 @@ const ActualTreeTableRow = memo(
                                 }
                               };
 
-                              // 2. Start the recursive generation from the clicked row
+                              // 3. Start the recursive generation from the clicked row
                               traverse(node);
 
-                              // 3. Join all the generated rows with a Newline character
+                              // 4. Join all the generated rows with a Newline character
                               const combinedData = rows.join("\n");
 
-                              // 4. Send the perfectly formatted block to the clipboard
+                              // 5. Send the perfectly formatted block to the clipboard
                               navigator.clipboard
                                 .writeText(combinedData)
                                 .then(() => {
@@ -492,6 +501,7 @@ export default ActualTreeTableRow;
 
 
 
+
 // ********************************************** FilterDialog ********************************************* //
 
 import React, { useState, useEffect, useMemo } from "react";
@@ -522,6 +532,9 @@ import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import { DatePicker } from "@mui/x-date-pickers/DatePicker";
 import dayjs from "dayjs";
 
+// Ensure 'en-gb' locale logic maps uniformly across the date components
+import "dayjs/locale/en-gb";
+
 export default function FilterDialog({
   open,
   onClose,
@@ -534,7 +547,7 @@ export default function FilterDialog({
 }) {
   // --- USER AUTH MAPPING ---
   // Verify these keys match exactly what your Redis auth object returns
-  const isAdmin = user?.role === 10 || user?.roleName === "ADMIN";
+  // const isAdmin = user?.role === 10 || user?.roleName === "ADMIN";
   const userCircleCode = user?.circleCode;
   const userCircleName = user?.circleName;
   const userBranchCode = user?.branch;
@@ -544,6 +557,11 @@ export default function FilterDialog({
   const [viewCode, setViewCode] = useState("");
   const [head, setHead] = useState(null);
   const [reportDate, setReportDate] = useState("");
+
+  // Track the raw string typed by the user to catch incomplete masks like "DD/05/YYYY"
+  const [dateInputValue, setDateInputValue] = useState("");
+  // Unique dynamic key to explicitly force internal text component resets
+  const [datePickerKey, setDatePickerKey] = useState(0);
 
   // Entity (Circle/Branch) State mapping
   const [entity, setEntity] = useState(null); // Stores the selected object { code, name }
@@ -557,7 +575,7 @@ export default function FilterDialog({
 
   const isCircleScope = viewCode.includes("CIRCLE");
   const isBranchScope = viewCode.includes("BRANCH");
-  const MIN_ALLOWED_DATE = dayjs("2026-03-31");
+  const MIN_ALLOWED_DATE = dayjs("2026-03-31").startOf("day");
 
   const [etlDate, setEtlDate] = useState(null);
 
@@ -567,20 +585,38 @@ export default function FilterDialog({
       setReportCode(currentFilters?.reportCode || "");
       setViewCode(currentFilters?.viewCode || "");
       setHead(currentFilters?.head || null);
-      setReportDate(currentFilters?.reportDate || "");
 
-      // Restore entity state if it exists
+      const initialDate = currentFilters?.reportDate || "";
+      setReportDate(initialDate);
+      setDateInputValue(
+        initialDate ? dayjs(initialDate).format("DD/MM/YYYY") : "",
+      );
+
+      // Restore Head
+      if (currentFilters?.head) {
+        setHeadInputValue(
+          `${currentFilters.head.headCode} - ${currentFilters.head.headName}`,
+        );
+        setHeadOptions([currentFilters.head]);
+      } else {
+        setHeadInputValue("");
+        setHeadOptions([]);
+      }
+
+      // Restore Entity
       if (currentFilters?.entityCode && currentFilters?.entityName) {
         setEntity({
           code: currentFilters.entityCode,
           name: currentFilters.entityName,
         });
+        setEntityInputValue(
+          `${currentFilters.entityCode} - ${currentFilters.entityName}`,
+        );
       } else {
         setEntity(null);
-        setHead(null);
+        setEntityInputValue("");
+        setEntityOptions([]);
       }
-
-      if (currentFilters?.head) setHeadOptions([currentFilters.head]);
     }
   }, [open, currentFilters]);
 
@@ -594,22 +630,22 @@ export default function FilterDialog({
   // --- ENTITY FETCHING & AUTO-FILL LOGIC ---
   useEffect(() => {
     // 1. If not admin, auto-select their default entity and lock it
-    if (!isAdmin) {
-      if (isCircleScope && userCircleCode) {
-        setEntity({
-          code: userCircleCode,
-          name: userCircleName || userCircleCode,
-        });
-      } else if (isBranchScope && userBranchCode) {
-        setEntity({
-          code: userBranchCode,
-          name: userBranchName || userBranchCode,
-        });
-      } else {
-        setEntity(null);
-      }
-      return; // Exit early so non-admins don't fetch data
-    }
+    // if (!isAdmin) {
+    //   if (isCircleScope && userCircleCode) {
+    //     setEntity({
+    //       code: userCircleCode,
+    //       name: userCircleName || userCircleCode,
+    //     });
+    //   } else if (isBranchScope && userBranchCode) {
+    //     setEntity({
+    //       code: userBranchCode,
+    //       name: userBranchName || userBranchCode,
+    //     });
+    //   } else {
+    //     setEntity(null);
+    //   }
+    //   return; // Exit early so non-admins don't fetch data
+    // }
 
     // 2. If Admin, fetch data dynamically on input change
     const delayDebounceFn = setTimeout(async () => {
@@ -626,8 +662,6 @@ export default function FilterDialog({
               {},
               "GET",
             );
-            console.log("Circle code: ", response);
-
             const data = response?.data || [];
             // Map Circle response to a standard { code, name } format
             mappedData = data.map((c) => ({
@@ -641,7 +675,6 @@ export default function FilterDialog({
               {},
               "GET",
             );
-            console.log("Branch code: ", response);
             const data = response?.data || [];
             // Branch response is already in { code, name } format, but we ensure mapping
             mappedData = data.map((b) => ({ code: b.code, name: b.name }));
@@ -664,7 +697,6 @@ export default function FilterDialog({
     entityInputValue,
     isCircleScope,
     isBranchScope,
-    isAdmin,
     callApi,
     entity,
     userCircleCode,
@@ -687,78 +719,116 @@ export default function FilterDialog({
     }, 500);
     return () => clearTimeout(delayDebounceFn);
   }, [headInputValue, reportCode, callApi, head]);
-  useEffect(() => {
-    if (!head) {
-      setViewCode(""); // Clear the Scope value
-      setEntity(null); // Clear the Entity value (as per your existing logic)
-    }
-  }, [head]);
 
-  const handleReset = () => {
-    setReportCode("");
-    setViewCode("");
-    setHead(null);
-    setEntity(null);
-    setReportDate("");
-    setHeadOptions([]);
-    setEntityOptions([]);
-  };
-
+  // --- SYSTEM DATE FETCHING LOGIC ---
   useEffect(() => {
     const fetchSystemDate = async () => {
       if (!open) return;
       try {
         const dateRes = await callApi("/PS/file/fincore-date", {}, "GET");
         const etlRaw = dateRes?.data?.userDate;
-        const etl = etlRaw ? dayjs(etlRaw.split("T")[0]) : dayjs();
+        const etl = etlRaw
+          ? dayjs(etlRaw.split("T")[0]).endOf("day")
+          : dayjs().endOf("day");
         setEtlDate(etl);
       } catch (e) {
         console.error("Date error:", e);
-        setEtlDate(dayjs());
+        setEtlDate(dayjs().endOf("day"));
       }
     };
     fetchSystemDate();
   }, [open, callApi]);
 
+  const handleReset = () => {
+    setReportCode("");
+    setViewCode("");
+    setHead(null);
+    setHeadInputValue("");
+    setHeadOptions([]);
+
+    setEntity(null);
+    setEntityInputValue("");
+    setEntityOptions([]);
+
+    setReportDate("");
+    setDateInputValue("");
+    // Incrementing the key cleanly forces the DatePicker input UI to completely reset its internal DOM state
+    setDatePickerKey((prev) => prev + 1);
+  };
+
   const handleApply = () => {
+    if (dateValidation.error) return;
     onApply({
       reportCode,
       viewCode,
       head,
       entityCode: entity?.code || "",
-      entityName: entity?.name || "", // Saving name for restoring filter state cleanly
+      entityName: entity?.name || "",
       reportDate,
     });
   };
 
-  // const isApplyEnabled = useMemo(() => {
-  //   const baseValid = reportCode && viewCode && head?.headCode && reportDate;
-  //   if (!baseValid) return false;
-  //   if (isCircleScope || isBranchScope) return !!entity?.code;
-  //   return true;
-  // }, [
-  //   reportCode,
-  //   viewCode,
-  //   head,
-  //   entity,
-  //   reportDate,
-  //   isCircleScope,
-  //   isBranchScope,
-  // ]);
+  // Comprehensive validation metrics logic
+  const dateValidation = useMemo(() => {
+    const minDateStr = MIN_ALLOWED_DATE.format("DD/MM/YYYY");
+    const maxLimit = etlDate || dayjs().endOf("day");
+    const maxDateStr = maxLimit.format("DD/MM/YYYY");
+
+    if (!dateInputValue && !reportDate) {
+      return {
+        error: false,
+        text: `Allowed Range: ${minDateStr} - ${maxDateStr}`,
+      };
+    }
+
+    // Explicitly check for alpha-masked formats like "DD/05/YYYY" or "01/MM/2026"
+    const containsMaskCharacters = /[a-zA-Z]/.test(dateInputValue);
+    const selectedDate = dayjs(reportDate);
+
+    if (containsMaskCharacters || !selectedDate.isValid()) {
+      return {
+        error: true,
+        text: "Please enter a valid date.",
+      };
+    }
+
+    if (selectedDate.year() < 2000) {
+      return {
+        error: true,
+        text: `Date cannot be prior to ${minDateStr}`,
+      };
+    }
+
+    if (selectedDate.isBefore(MIN_ALLOWED_DATE, "day")) {
+      return {
+        error: true,
+        text: `Date cannot be prior to ${minDateStr}`,
+      };
+    }
+
+    if (selectedDate.isAfter(maxLimit, "day")) {
+      return {
+        error: true,
+        text: `Future dates beyond ${maxDateStr} are not allowed.`,
+      };
+    }
+
+    return {
+      error: false,
+      text: `Allowed Range: ${minDateStr} - ${maxDateStr}`,
+    };
+  }, [reportDate, dateInputValue, etlDate, MIN_ALLOWED_DATE]);
 
   const isApplyEnabled = useMemo(() => {
-    if (!reportCode || !viewCode || !head?.headCode || !reportDate)
+    if (
+      !reportCode ||
+      !viewCode ||
+      !head?.headCode ||
+      !reportDate ||
+      dateValidation.error
+    ) {
       return false;
-
-    const selectedDate = dayjs(reportDate);
-    const maxLimit = etlDate || dayjs();
-
-    const isValidRange =
-      selectedDate.isValid() &&
-      !selectedDate.isAfter(maxLimit, "day") &&
-      !selectedDate.isBefore(dayjs("2026-03-31"), "day");
-
-    if (!isValidRange) return false;
+    }
     if (isCircleScope || isBranchScope) return !!entity?.code;
     return true;
   }, [
@@ -769,44 +839,23 @@ export default function FilterDialog({
     reportDate,
     isCircleScope,
     isBranchScope,
-    etlDate,
+    dateValidation.error,
   ]);
 
-  const dateValidation = useMemo(() => {
-    if (!reportDate) {
-      return {
-        error: false,
-        text: "Please select a date to initiate drill-down analysis.",
-      };
-    }
-
-    const selectedDate = dayjs(reportDate);
-    const maxLimit = etlDate || dayjs(); // Fallback to current date if API is processing
-
-    if (!selectedDate.isValid()) {
-      return {
-        error: true,
-        text: "Please enter a valid date format (DD/MM/YYYY).",
-      };
-    }
-    if (selectedDate.isAfter(maxLimit, "day")) {
-      return {
-        error: true,
-        text: `Future dates beyond ${maxLimit.format("DD/MM/YYYY")} are not allowed.`,
-      };
-    }
-    if (selectedDate.isBefore(dayjs("2026-03-31"), "day")) {
-      return { error: true, text: "Date cannot be before 31st March 2026." };
-    }
-
-    return {
-      error: false,
-      text: "Report date verified and valid within authorized bounds.",
-    };
-  }, [reportDate, etlDate]);
-
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <Dialog
+      open={open}
+      onClose={(event, reason) => {
+        // Prevent dialog from closing on backdrop click or ESC key.
+        // Dialog should close only using the Close (X) icon.
+        if (reason === "backdropClick") return;
+        if (reason === "escapeKeyDown") return;
+ 
+        onClose();
+      }}
+      maxWidth="sm"
+      fullwidth
+    >
       <DialogTitle
         sx={{
           display: "flex",
@@ -840,10 +889,12 @@ export default function FilterDialog({
               onChange={(e) => {
                 setReportCode(e.target.value);
                 setViewCode("");
-                setEntity(null);
                 setHead(null);
                 setHeadInputValue("");
                 setHeadOptions([]);
+                setEntity(null);
+                setEntityInputValue("");
+                setEntityOptions([]);
               }}
             >
               {reportsConfig.map((report) => (
@@ -926,35 +977,21 @@ export default function FilterDialog({
           />
 
           {/* Scope Selection */}
-          <FormControl size="small" fullWidth disabled={!head || isApplying}>
+          <FormControl
+            size="small"
+            fullWidth
+            disabled={!reportCode || isApplying}
+          >
             <InputLabel id="dialog-scope-label">Scope</InputLabel>
             <Select
               labelId="dialog-scope-label"
               value={viewCode}
-              disabled={!head || isApplying}
               label="Scope"
               onChange={(e) => {
                 setViewCode(e.target.value);
-                setEntity(null);
-              }}
-              // CRITICAL: Force disabled styles explicitly
-              sx={{
-                // Target the root of the input when disabled
-                "&.Mui-disabled": {
-                  color: "rgba(0, 0, 0, 0.38)", // Ensure text is gray
-                  WebkitTextFillColor: "rgba(0, 0, 0, 0.38)", // Fix for Webkit browsers
-                },
-                // Target the outlined border when disabled
-                "& .MuiOutlinedInput-notchedOutline": {
-                  borderColor: "rgba(0, 0, 0, 0.23)", // Default disabled border color
-                },
-                "&.Mui-disabled .MuiOutlinedInput-notchedOutline": {
-                  borderColor: "rgba(0, 0, 0, 0.23)", // Force border color when disabled
-                },
-                // Ensure the label also looks disabled
-                "& .MuiInputLabel-root.Mui-disabled": {
-                  color: "rgba(0, 0, 0, 0.38)",
-                },
+                setEntity(null); // Clear entity when switching scope
+                setEntityInputValue("");
+                setEntityOptions([]);
               }}
             >
               {availableViews.map((view) => (
@@ -972,11 +1009,6 @@ export default function FilterDialog({
                 alignItems: "center",
                 gap: "4px",
                 lineHeight: 1.5,
-                // Optional: Gray out helper text when parent is disabled
-                color:
-                  !head || isApplying
-                    ? "rgba(0, 0, 0, 0.38)"
-                    : "rgba(0, 0, 0, 0.6)",
               }}
             >
               <InfoIcon sx={{ fontSize: "0.625rem" }} />
@@ -987,6 +1019,7 @@ export default function FilterDialog({
           {/* Conditional Autocomplete for Circle/Branch */}
           {(isCircleScope || isBranchScope) && (
             <Autocomplete
+              key={isCircleScope ? "circle" : "branch"}
               size="small"
               options={entityOptions}
               // 1. CRITICAL: Bind the input value explicitly to state
@@ -1014,7 +1047,7 @@ export default function FilterDialog({
                 }
               }}
               loading={isEntityLoading}
-              disabled={!isAdmin || isApplying}
+              disabled={isApplying}
               renderInput={(params) => (
                 <TextField
                   {...params}
@@ -1046,9 +1079,8 @@ export default function FilterDialog({
                     >
                       <InfoIcon sx={{ fontSize: "0.625rem" }} />
                       <em>
-                        {isAdmin
-                          ? `Type at least 2 alphanumeric characters to find a ${isCircleScope ? "circle" : "branch"}. `
-                          : "Locked to your authorized profile."}
+                        Type at least 2 alphanumeric characters to find a{" "}
+                        {isCircleScope ? "circle" : "branch"}.
                       </em>
                     </span>
                   }
@@ -1057,20 +1089,42 @@ export default function FilterDialog({
             />
           )}
 
-          {/* Report Date */}
-
-          <LocalizationProvider dateAdapter={AdapterDayjs}>
+          {/* Report Date Picker */}
+          <LocalizationProvider
+            dateAdapter={AdapterDayjs}
+            adapterLocale="en-gb"
+          >
             <DatePicker
-              label="Report Date"
+              key={`picker-key-${datePickerKey}`}
+              label="Select report date *"
               format="DD/MM/YYYY"
-              disabled={!viewCode || isApplying}
               value={reportDate ? dayjs(reportDate) : null}
-              minDate={dayjs("2026-03-31")}
-              maxDate={etlDate || dayjs()}
+              minDate={MIN_ALLOWED_DATE}
+              maxDate={etlDate || dayjs().endOf("day")}
+              disabled={!reportCode || isApplying}
+              onInputChange={(e) => {
+                setDateInputValue(e.target.value);
+              }}
+              onChange={(newValue) => {
+                if (newValue && newValue.isValid()) {
+                  let correctedValue = newValue;
+                  if (correctedValue.year() < 100) {
+                    correctedValue = correctedValue.set(
+                      "year",
+                      correctedValue.year() + 2000,
+                    );
+                  }
+                  setReportDate(correctedValue.format("YYYY-MM-DD"));
+                  setDateInputValue(correctedValue.format("DD/MM/YYYY"));
+                } else {
+                  setReportDate("");
+                }
+              }}
               slotProps={{
                 textField: {
                   size: "small",
                   fullWidth: true,
+                  placeholder: "DD/MM/YYYY",
                   error: dateValidation.error,
                   helperText: (
                     <span
@@ -1081,6 +1135,8 @@ export default function FilterDialog({
                         alignItems: "center",
                         gap: "4px",
                         marginTop: "4px",
+                        color: dateValidation.error ? "#d32f2f" : "inherit",
+                        fontWeight: dateValidation.error ? 600 : "normal",
                       }}
                     >
                       <InfoIcon sx={{ fontSize: "0.625rem" }} />
@@ -1088,13 +1144,9 @@ export default function FilterDialog({
                     </span>
                   ),
                 },
-              }}
-              onChange={(newValue) => {
-                setReportDate(
-                  newValue && newValue.isValid()
-                    ? newValue.format("YYYY-MM-DD")
-                    : "",
-                );
+                day: {
+                  showDaysOutsideCurrentMonth: true,
+                },
               }}
             />
           </LocalizationProvider>
@@ -1108,7 +1160,7 @@ export default function FilterDialog({
           variant="outlined"
           disabled={isApplying}
         >
-          Reset
+          Reset Form
         </Button>
         <Button
           onClick={handleApply}
@@ -1122,6 +1174,7 @@ export default function FilterDialog({
     </Dialog>
   );
 }
+
 
 
 
@@ -1148,60 +1201,102 @@ export default function HierarchyPath({
   if (!isSetupComplete) return null;
 
   return (
-    <Box display="flex" alignItems="center" gap={0.5}>
-      <Typography
-        variant="body2"
-        color="text.secondary"
-        sx={{ mr: 1, fontWeight: 500 }}
+    <Box
+      display="flex"
+      alignItems="center"
+      justifyContent="space-between"
+      gap={2}
+      sx={{ width: "100%" }}
+    >
+      {/* Left Side: Path Hierarchy */}
+      <Box
+        display="flex"
+        alignItems="center"
+        gap={0.5}
+        sx={{ overflow: "hidden" }}
       >
-        Path:
-      </Typography>
-      {activeHierarchyConfig.hierarchy.map((item, index) => {
-        const isActive = index <= maxVisibleLevel;
-        return (
-          <Box key={index} display="flex" alignItems="center">
-            <Box display="flex" alignItems="center" gap={1}>
-              <Box
-                sx={{
-                  width: 10,
-                  height: 10,
-                  borderRadius: "50%",
-                  bgcolor: isActive ? "primary.main" : "background.paper",
-                  border: "2px solid",
-                  borderColor: isActive ? "primary.main" : "divider",
-                }}
-              />
-              <Typography
-                variant="body2"
-                sx={{
-                  fontWeight: isActive ? 600 : 500,
-                  color: isActive ? "text.primary" : "text.disabled",
-                  textTransform: "capitalize",
-                }}
-              >
-                {item.replace("_", " ")}
-              </Typography>
-            </Box>
-            {index < activeHierarchyConfig.hierarchy.length - 1 && (
-              <Box
-                sx={{
-                  backgroundColor:
-                    index < maxVisibleLevel
-                      ? theme.palette.primary.main
-                      : theme.palette.divider,
-                  width: 24,
-                  height: 2,
-                  mx: 1,
-                  borderRadius: 1,
-                }}
-              />
-            )}
-          </Box>
-        );
-      })}
+        <Typography
+          variant="body2"
+          color="text.secondary"
+          sx={{ mr: 1, fontWeight: 500, flexShrink: 0 }}
+        >
+          Path:
+        </Typography>
+        <Box
+          display="flex"
+          alignItems="center"
+          gap={0.5}
+          sx={{ overflowX: "auto" }}
+        >
+          {activeHierarchyConfig.hierarchy.map((item, index) => {
+            const isActive = index <= maxVisibleLevel;
+            return (
+              <Box key={index} display="flex" alignItems="center">
+                <Box display="flex" alignItems="center" gap={1}>
+                  <Box
+                    sx={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: "50%",
+                      bgcolor: isActive ? "primary.main" : "background.paper",
+                      border: "2px solid",
+                      borderColor: isActive ? "primary.main" : "divider",
+                      flexShrink: 0,
+                    }}
+                  />
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      fontWeight: isActive ? 600 : 500,
+                      color: isActive ? "text.primary" : "text.disabled",
+                      textTransform: "capitalize",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {item.replace("_", " ")}
+                  </Typography>
+                </Box>
+                {index < activeHierarchyConfig.hierarchy.length - 1 && (
+                  <Box
+                    sx={{
+                      backgroundColor:
+                        index < maxVisibleLevel
+                          ? theme.palette.primary.main
+                          : theme.palette.divider,
+                      width: 24,
+                      height: 2,
+                      mx: 1,
+                      borderRadius: 1,
+                      flexShrink: 0,
+                    }}
+                  />
+                )}
+              </Box>
+            );
+          })}
+        </Box>
+      </Box>
+
+      {/* Right Side: Legend Text */}
+      <Box sx={{ flexShrink: 0 }}>
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ whiteSpace: "nowrap", fontSize: "0.8rem" }}
+        >
+          <Box component="span" sx={{ color: "success.main", fontWeight: 600 }}>
+            Positive/Green ~ Credit Balances
+          </Box>{" "}
+          & {" "}
+          <Box component="span" sx={{ color: "error.main", fontWeight: 600 }}>
+            Negative/Red ~ Debit Balances
+          </Box>{" "}
+        </Typography>
+      </Box>
     </Box>
   );
 }
+
 
 
 
@@ -1248,7 +1343,7 @@ export default function ReportAnalysisHeader({
     activeReport?.displayName ||
     appliedFilters?.reportName ||
     appliedFilters?.reportCode ||
-    "Drill-Down Data";
+    "Select Filters";
 
   const headDisplay =
     appliedFilters?.headCode ||
@@ -1273,7 +1368,6 @@ export default function ReportAnalysisHeader({
     typeof reportDisplay === "object"
       ? reportDisplay?.displayName
       : reportDisplay;
-  const cleanSubHeader = appliedFilters ? "Drill-Down Data" : "Select Filters";
   const cleanHead =
     typeof headDisplay === "object"
       ? `${headDisplay.headCode || ""} - ${headDisplay.headName || ""}`
@@ -1375,7 +1469,7 @@ export default function ReportAnalysisHeader({
       elevation={0}
       sx={{
         p: "16px 24px",
-        borderRadius: 0,
+        borderRadius: 1,
         bgcolor: "transparent",
         display: "flex",
         justifyContent: "space-between",
@@ -1423,7 +1517,7 @@ export default function ReportAnalysisHeader({
               fontSize: "11px",
             }}
           >
-            {cleanSubHeader}
+            View detailed matrix
           </Typography>
         </Box>
       </Box>
@@ -1452,17 +1546,24 @@ export default function ReportAnalysisHeader({
             }}
           >
             {displayedItems.map((item, index) => (
-              <Box key={index} sx={premiumCardStyle}>
-                <Box sx={miniIconWrapper}>{item.icon}</Box>
-                <Box sx={{ overflow: "hidden", flexGrow: 1, minWidth: 0 }}>
-                  <Typography variant="caption" sx={topLabelStyle}>
-                    {item.label}
-                  </Typography>
-                  <Typography variant="body2" noWrap sx={bottomValueStyle}>
-                    {item.value}
-                  </Typography>
+              <Tooltip
+                key={index}
+                title={`${item.label}: ${item.value}`} // 2. Show label and full value on hover
+                arrow
+                placement="bottom"
+              >
+                <Box key={index} sx={premiumCardStyle}>
+                  <Box sx={miniIconWrapper}>{item.icon}</Box>
+                  <Box sx={{ overflow: "hidden", flexGrow: 1, minWidth: 0 }}>
+                    <Typography variant="caption" sx={topLabelStyle}>
+                      {item.label}
+                    </Typography>
+                    <Typography variant="body2" noWrap sx={bottomValueStyle}>
+                      {item.value}
+                    </Typography>
+                  </Box>
                 </Box>
-              </Box>
+              </Tooltip>
             ))}
           </Box>
 
@@ -1504,7 +1605,7 @@ export default function ReportAnalysisHeader({
         )}
 
         {/* Modify Report Criteria Button */}
-        <Tooltip title="Modify Report Criteria" arrow placement="bottom">
+        <Tooltip title="Open filter dialog" arrow placement="bottom">
           <IconButton
             onClick={onOpenFilter}
             size="small"
@@ -1531,6 +1632,7 @@ export default function ReportAnalysisHeader({
     </Paper>
   );
 }
+
 
 
 
@@ -1920,7 +2022,18 @@ export default function ReportAnalysisScreen() {
         onOpenFilter={() => setIsFilterDialogOpen(true)}
         filtersApplied={filtersApplied}
         appliedFilters={appliedFilters}
-        onClearFilters={() => {setAppliedFilters(false);
+        onClearFilters={() => {
+          setAppliedFilters({
+            reportCode: "",
+            viewCode: "",
+            head: null,
+            entityCode: "",
+            entityName: "",
+            reportDate: "",
+          });
+          setData([]);
+          setExpandedIds(new Map());
+          setLoadingIds(new Map());
         }}
       />
 
@@ -2044,10 +2157,7 @@ export default function ReportAnalysisScreen() {
               >
                 No Data to Display
               </Typography>
-              <Typography
-                color="primary.main"
-                sx={{ maxWidth: 350, mb: 3 }}
-              >
+              <Typography color="primary.main" sx={{ maxWidth: 350, mb: 3 }}>
                 Configure the database report, head, hierarchy and report date
                 to render the drill-down matrix.
               </Typography>
@@ -2220,7 +2330,9 @@ export default function ReportAnalysisScreen() {
               color="text.secondary"
               sx={{ userSelect: "none" }}
             >
-              {isFullscreen ? "Press 'F9' to Exit Full Screen" : "Press 'F9' to Full Screen"}
+              {isFullscreen
+                ? "Press 'F9' to Exit Full Screen"
+                : "Press 'F9' to Full Screen"}
             </Typography>
           </Box>
         </Box>
@@ -2228,6 +2340,7 @@ export default function ReportAnalysisScreen() {
     </Box>
   );
 }
+
 
 
 
