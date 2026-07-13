@@ -1,1 +1,84 @@
 
+      <ReportAnalysisHeader
+        activeReport={activeReport}
+        isFullscreen={isFullscreen}
+        toggleFullscreen={toggleFullscreen}
+        onOpenFilter={() => setIsFilterDialogOpen(true)}
+        filtersApplied={filtersApplied}
+        appliedFilters={appliedFilters}
+        // --- REPLACE THE onClearFilters PROP WITH THIS ---
+        onClearFilters={() => {
+          setAppliedFilters({
+            reportCode: "",
+            viewCode: "",
+            head: null,
+            entityCode: "",
+            reportDate: "",
+          });
+          // Also clear the table data and expanded rows
+          setData([]);
+          setExpandedIds(new Map());
+        }}
+        // -------------------------------------------------
+      />
+
+
+
+
+
+
+
+
+
+
+
+  // Render values smoothly whether objects or raw strings
+  const cleanReport =
+    typeof reportDisplay === "object"
+      ? reportDisplay?.displayName
+      : reportDisplay;
+
+  // --- REPLACE THIS LINE ---
+  // OLD: const cleanSubHeader = appliedFilters ? "Drill-Down Data" : "Select Filters";
+  const cleanSubHeader = filtersApplied ? "Drill-Down Data" : "Select Filters";
+  // -------------------------
+
+  const cleanHead =
+    typeof headDisplay === "object"
+
+
+
+
+
+
+
+
+
+  // Sync state when dialog opens
+  useEffect(() => {
+    if (open) {
+      setReportCode(currentFilters?.reportCode || "");
+      setViewCode(currentFilters?.viewCode || "");
+      setHead(currentFilters?.head || null);
+      setReportDate(currentFilters?.reportDate || "");
+
+      // Restore entity state if it exists
+      if (currentFilters?.entityCode && currentFilters?.entityName) {
+        setEntity({
+          code: currentFilters.entityCode,
+          name: currentFilters.entityName,
+        });
+      } else {
+        setEntity(null);
+        // BUG FIX: Removed setHead(null) from here. It was inappropriately clearing the head!
+      }
+
+      // BUG FIX: Properly restore OR completely clear the Head Autocomplete states
+      if (currentFilters?.head) {
+        setHeadOptions([currentFilters.head]);
+      } else {
+        setHeadOptions([]);
+        setHeadInputValue(""); // Forces the lingering typed text to clear out
+      }
+    }
+  }, [open, currentFilters]);
