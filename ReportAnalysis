@@ -163,12 +163,14 @@ const ActualTreeTableRow = memo(
         activeMetrics,
         theme,
         isFullscreen,
+        hierarchyLength,
         showSnackBar,
         ...props
       },
       ref,
     ) => {
       const isRoot = node.level === 0;
+      const isLastLevel = node.level === hierarchyLength - 1;
 
       return (
         <TableRow
@@ -212,7 +214,7 @@ const ActualTreeTableRow = memo(
                       boxSizing: "border-box",
                     }}
                   >
-                    {node.hasChildren ? (
+                    {node.hasChildren && !isLastLevel ? (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -279,86 +281,91 @@ const ActualTreeTableRow = memo(
 
                     {/* Checks if it's fullscreen, expanded, data is loaded, and targets HeadCode (level 1) */}
 
-                    {isExpanded && !isLoading && node.hasChildren && (
-                      <Tooltip
-                        title="Copy Data (Excel Format)"
-                        placement="top"
-                        arrow
-                      >
-                        <IconButton
-                          size="small"
-                          onClick={(e) => {
-                            e.stopPropagation(); // Prevents row toggle when clicking the copy button
+                    {isExpanded &&
+                      !isLoading &&
+                      node.hasChildren &&
+                      !isLastLevel && (
+                        <Tooltip
+                          title="Copy Data (Excel Format)"
+                          placement="top"
+                          arrow
+                        >
+                          <IconButton
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation(); // Prevents row toggle when clicking the copy button
 
-                            const rows = [];
+                              const rows = [];
 
-                            // 1. Recursive function to traverse children and build Tab-Separated columns
-                            const traverse = (currentNode) => {
-                              // Create an array of empty strings based on the max visible hierarchy depth
-                              const columns = Array(maxVisibleLevel + 1).fill(
-                                "",
-                              );
+                              // 1. Recursive function to traverse children and build Tab-Separated columns
+                              const traverse = (currentNode) => {
+                                // Create an array of empty strings based on the max visible hierarchy depth
+                                const columns = Array(maxVisibleLevel + 1).fill(
+                                  "",
+                                );
 
-                              // Place the current node's name in its specific column level (creates the diagonal alignment)
-                              columns[currentNode.level] = currentNode.name;
+                                // Place the current node's name in its specific column level (creates the diagonal alignment)
+                                columns[currentNode.level] = currentNode.name;
 
-                              // Map over active metrics to grab amounts dynamically
-                              const metrics = activeMetrics.map((m) => {
+                                // Map over active metrics to grab amounts dynamically
+                                const metrics = activeMetrics.map((m) => {
                                   const value = currentNode[m.logicalName];
 
                                   // If the value is strictly null or undefined, leave it blank
-                                  if(value === null || value === undefined) return "";
+                                  if (value === null || value === undefined)
+                                    return "";
 
                                   // If it is a valid number (including 0), format to 2 dacimal places
-                                  return !isNaN(value) ? Number(value).toFixed(2) : value;
-                              },
-                              );
+                                  return !isNaN(value)
+                                    ? Number(value).toFixed(2)
+                                    : value;
+                                });
 
-                              // Combine the hierarchy columns and the metric columns, separated by Tabs
-                              const rowString = [...columns, ...metrics].join(
-                                "\t",
-                              );
-                              rows.push(rowString);
-
-                              // If this node has loaded children, recursively run them so they are included in the copy
-                              if (
-                                currentNode.children &&
-                                currentNode.children.length > 0
-                              ) {
-                                currentNode.children.forEach((child) =>
-                                  traverse(child),
+                                // Combine the hierarchy columns and the metric columns, separated by Tabs
+                                const rowString = [...columns, ...metrics].join(
+                                  "\t",
                                 );
-                              }
-                            };
+                                rows.push(rowString);
 
-                            // 2. Start the recursive generation from the clicked row
-                            traverse(node);
+                                // If this node has loaded children, recursively run them so they are included in the copy
+                                if (
+                                  currentNode.children &&
+                                  currentNode.children.length > 0
+                                ) {
+                                  currentNode.children.forEach((child) =>
+                                    traverse(child),
+                                  );
+                                }
+                              };
 
-                            // 3. Join all the generated rows with a Newline character
-                            const combinedData = rows.join("\n");
+                              // 2. Start the recursive generation from the clicked row
+                              traverse(node);
 
-                            // 4. Send the perfectly formatted block to the clipboard
-                            navigator.clipboard
-                              .writeText(combinedData)
-                              .then(() => {
-                                showSnackBar(
-                                  "Data copied in Spreadsheet format",
-                                  "success",
-                                );
-                              })
-                              .catch((err) => {
-                                console.error("Failed to copy text: ", err);
-                                showSnackBar("Failed to copy text", "error");
-                              });
-                          }}
-                          sx={{ ml: 2, padding: "2px" }}
-                        >
-                          <ContentCopyIcon
-                            sx={{ fontSize: 16, color: "text.secondary" }}
-                          />
-                        </IconButton>
-                      </Tooltip>
-                    )}
+                              // 3. Join all the generated rows with a Newline character
+                              const combinedData = rows.join("\n");
+
+                              // 4. Send the perfectly formatted block to the clipboard
+                              navigator.clipboard
+                                .writeText(combinedData)
+                                .then(() => {
+                                  showSnackBar(
+                                    "Data copied in Spreadsheet format",
+                                    "success",
+                                  );
+                                })
+                                .catch((err) => {
+                                  console.error("Failed to copy text: ", err);
+                                  showSnackBar("Failed to copy text", "error");
+                                });
+                            }}
+                            sx={{ ml: 2, padding: "2px" }}
+                          >
+                            <ContentCopyIcon
+                              sx={{ fontSize: 16, color: "text.secondary" }}
+                            />
+                          </IconButton>
+                        </Tooltip>
+                      )}
                     {/* {
                       isExpanded &&
                       !isLoading &&
@@ -467,7 +474,7 @@ const ActualTreeTableRow = memo(
       prevProps.node.id === nextProps.node.id &&
       prevProps.maxVisibleLevel === nextProps.maxVisibleLevel &&
       prevProps.index === nextProps.index &&
-      prevProps.theme === nextProps.theme 
+      prevProps.theme === nextProps.theme
       // prevProps.isFullscreen === nextProps.isFullscreen
     );
   },
@@ -475,6 +482,7 @@ const ActualTreeTableRow = memo(
 
 ActualTreeTableRow.displayName = "ActualTreeTableRow";
 export default ActualTreeTableRow;
+
 
 
 
@@ -509,6 +517,10 @@ import CloseIcon from "@mui/icons-material/Close";
 import InfoIcon from "@mui/icons-material/Info";
 import QueryStatsIcon from "@mui/icons-material/QueryStats";
 import { fetchHeads } from "../api/analyticsApi";
+import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
+import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
+import { DatePicker } from "@mui/x-date-pickers/DatePicker";
+import dayjs from "dayjs";
 
 export default function FilterDialog({
   open,
@@ -545,6 +557,9 @@ export default function FilterDialog({
 
   const isCircleScope = viewCode.includes("CIRCLE");
   const isBranchScope = viewCode.includes("BRANCH");
+  const MIN_ALLOWED_DATE = dayjs("2026-03-31");
+
+  const [etlDate, setEtlDate] = useState(null);
 
   // Sync state when dialog opens
   useEffect(() => {
@@ -562,6 +577,7 @@ export default function FilterDialog({
         });
       } else {
         setEntity(null);
+        setHead(null);
       }
 
       if (currentFilters?.head) setHeadOptions([currentFilters.head]);
@@ -611,7 +627,7 @@ export default function FilterDialog({
               "GET",
             );
             console.log("Circle code: ", response);
-            
+
             const data = response?.data || [];
             // Map Circle response to a standard { code, name } format
             mappedData = data.map((c) => ({
@@ -671,6 +687,12 @@ export default function FilterDialog({
     }, 500);
     return () => clearTimeout(delayDebounceFn);
   }, [headInputValue, reportCode, callApi, head]);
+  useEffect(() => {
+    if (!head) {
+      setViewCode(""); // Clear the Scope value
+      setEntity(null); // Clear the Entity value (as per your existing logic)
+    }
+  }, [head]);
 
   const handleReset = () => {
     setReportCode("");
@@ -681,6 +703,22 @@ export default function FilterDialog({
     setHeadOptions([]);
     setEntityOptions([]);
   };
+
+  useEffect(() => {
+    const fetchSystemDate = async () => {
+      if (!open) return;
+      try {
+        const dateRes = await callApi("/PS/file/fincore-date", {}, "GET");
+        const etlRaw = dateRes?.data?.userDate;
+        const etl = etlRaw ? dayjs(etlRaw.split("T")[0]) : dayjs();
+        setEtlDate(etl);
+      } catch (e) {
+        console.error("Date error:", e);
+        setEtlDate(dayjs());
+      }
+    };
+    fetchSystemDate();
+  }, [open, callApi]);
 
   const handleApply = () => {
     onApply({
@@ -693,9 +731,34 @@ export default function FilterDialog({
     });
   };
 
+  // const isApplyEnabled = useMemo(() => {
+  //   const baseValid = reportCode && viewCode && head?.headCode && reportDate;
+  //   if (!baseValid) return false;
+  //   if (isCircleScope || isBranchScope) return !!entity?.code;
+  //   return true;
+  // }, [
+  //   reportCode,
+  //   viewCode,
+  //   head,
+  //   entity,
+  //   reportDate,
+  //   isCircleScope,
+  //   isBranchScope,
+  // ]);
+
   const isApplyEnabled = useMemo(() => {
-    const baseValid = reportCode && viewCode && head?.headCode && reportDate;
-    if (!baseValid) return false;
+    if (!reportCode || !viewCode || !head?.headCode || !reportDate)
+      return false;
+
+    const selectedDate = dayjs(reportDate);
+    const maxLimit = etlDate || dayjs();
+
+    const isValidRange =
+      selectedDate.isValid() &&
+      !selectedDate.isAfter(maxLimit, "day") &&
+      !selectedDate.isBefore(dayjs("2026-03-31"), "day");
+
+    if (!isValidRange) return false;
     if (isCircleScope || isBranchScope) return !!entity?.code;
     return true;
   }, [
@@ -706,7 +769,41 @@ export default function FilterDialog({
     reportDate,
     isCircleScope,
     isBranchScope,
+    etlDate,
   ]);
+
+  const dateValidation = useMemo(() => {
+    if (!reportDate) {
+      return {
+        error: false,
+        text: "Please select a date to initiate drill-down analysis.",
+      };
+    }
+
+    const selectedDate = dayjs(reportDate);
+    const maxLimit = etlDate || dayjs(); // Fallback to current date if API is processing
+
+    if (!selectedDate.isValid()) {
+      return {
+        error: true,
+        text: "Please enter a valid date format (DD/MM/YYYY).",
+      };
+    }
+    if (selectedDate.isAfter(maxLimit, "day")) {
+      return {
+        error: true,
+        text: `Future dates beyond ${maxLimit.format("DD/MM/YYYY")} are not allowed.`,
+      };
+    }
+    if (selectedDate.isBefore(dayjs("2026-03-31"), "day")) {
+      return { error: true, text: "Date cannot be before 31st March 2026." };
+    }
+
+    return {
+      error: false,
+      text: "Report date verified and valid within authorized bounds.",
+    };
+  }, [reportDate, etlDate]);
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
@@ -775,14 +872,25 @@ export default function FilterDialog({
           <Autocomplete
             size="small"
             options={headOptions}
+            // 1. Explicitly control the input value
+            inputValue={headInputValue}
+            value={head}
             getOptionLabel={(option) =>
               option ? `${option.headCode} - ${option.headName}` : ""
             }
-            value={head}
             onChange={(event, newValue) => setHead(newValue)}
-            onInputChange={(event, newInputValue) =>
-              setHeadInputValue(newInputValue)
-            }
+            onInputChange={(event, newInputValue, reason) => {
+              // 2. Ignore 'reset' events (happens when selecting an option)
+              if (reason === "reset") return;
+
+              // 3. Filter special characters immediately
+              const filteredValue = newInputValue.replace(/[^a-zA-Z0-9 ]/g, "");
+
+              // Update state only if the value actually changed to prevent unnecessary renders
+              if (filteredValue !== headInputValue) {
+                setHeadInputValue(filteredValue);
+              }
+            }}
             loading={isHeadsLoading}
             disabled={!reportCode || isApplying}
             renderInput={(params) => (
@@ -810,7 +918,7 @@ export default function FilterDialog({
                     }}
                   >
                     <InfoIcon sx={{ fontSize: "0.625rem" }} />
-                    <em>Type atleast 2 characters to search.</em>
+                    <em>Enter at least 2 letters or numbers to search.</em>
                   </span>
                 }
               />
@@ -818,19 +926,35 @@ export default function FilterDialog({
           />
 
           {/* Scope Selection */}
-          <FormControl
-            size="small"
-            fullWidth
-            disabled={!reportCode || isApplying}
-          >
+          <FormControl size="small" fullWidth disabled={!head || isApplying}>
             <InputLabel id="dialog-scope-label">Scope</InputLabel>
             <Select
               labelId="dialog-scope-label"
               value={viewCode}
+              disabled={!head || isApplying}
               label="Scope"
               onChange={(e) => {
                 setViewCode(e.target.value);
-                setEntity(null); // Clear entity when switching scope
+                setEntity(null);
+              }}
+              // CRITICAL: Force disabled styles explicitly
+              sx={{
+                // Target the root of the input when disabled
+                "&.Mui-disabled": {
+                  color: "rgba(0, 0, 0, 0.38)", // Ensure text is gray
+                  WebkitTextFillColor: "rgba(0, 0, 0, 0.38)", // Fix for Webkit browsers
+                },
+                // Target the outlined border when disabled
+                "& .MuiOutlinedInput-notchedOutline": {
+                  borderColor: "rgba(0, 0, 0, 0.23)", // Default disabled border color
+                },
+                "&.Mui-disabled .MuiOutlinedInput-notchedOutline": {
+                  borderColor: "rgba(0, 0, 0, 0.23)", // Force border color when disabled
+                },
+                // Ensure the label also looks disabled
+                "& .MuiInputLabel-root.Mui-disabled": {
+                  color: "rgba(0, 0, 0, 0.38)",
+                },
               }}
             >
               {availableViews.map((view) => (
@@ -848,6 +972,11 @@ export default function FilterDialog({
                 alignItems: "center",
                 gap: "4px",
                 lineHeight: 1.5,
+                // Optional: Gray out helper text when parent is disabled
+                color:
+                  !head || isApplying
+                    ? "rgba(0, 0, 0, 0.38)"
+                    : "rgba(0, 0, 0, 0.6)",
               }}
             >
               <InfoIcon sx={{ fontSize: "0.625rem" }} />
@@ -860,23 +989,42 @@ export default function FilterDialog({
             <Autocomplete
               size="small"
               options={entityOptions}
-              // Uses standardized { code, name } structure from our mapper
+              // 1. CRITICAL: Bind the input value explicitly to state
+              inputValue={entityInputValue}
+              value={entity}
               getOptionLabel={(option) =>
                 option ? `${option.code} - ${option.name}` : ""
               }
-              value={entity}
               onChange={(event, newValue) => setEntity(newValue)}
-              onInputChange={(event, newInputValue) =>
-                setEntityInputValue(newInputValue)
-              }
+              onInputChange={(event, newInputValue, reason) => {
+                // 2. Ignore 'reset' events (occurs when selecting an option or clearing)
+                if (reason === "reset") return;
+
+                // 3. Filter out special characters immediately
+                // Allows only letters, numbers, and spaces.
+                // Add '-' or '_' inside the brackets if needed: [^a-zA-Z0-9 _-]
+                const filteredValue = newInputValue.replace(
+                  /[^a-zA-Z0-9 ]/g,
+                  "",
+                );
+
+                // Update state only if the value differs to prevent render loops
+                if (filteredValue !== entityInputValue) {
+                  setEntityInputValue(filteredValue);
+                }
+              }}
               loading={isEntityLoading}
-              // Disable if API is applying OR if user is not an admin
               disabled={!isAdmin || isApplying}
               renderInput={(params) => (
                 <TextField
                   {...params}
                   label={`Search ${isCircleScope ? "Circle" : "Branch"}`}
                   variant="outlined"
+                  // 4. Ensure no conflicting value/onChange props are passed here
+                  inputProps={{
+                    ...params.inputProps,
+                    autoComplete: "off", // Prevent browser autofill bypass
+                  }}
                   InputProps={{
                     ...params.InputProps,
                     endAdornment: (
@@ -899,7 +1047,7 @@ export default function FilterDialog({
                       <InfoIcon sx={{ fontSize: "0.625rem" }} />
                       <em>
                         {isAdmin
-                          ? "Select a circle to filter the dashboard data."
+                          ? `Type at least 2 alphanumeric characters to find a ${isCircleScope ? "circle" : "branch"}. `
                           : "Locked to your authorized profile."}
                       </em>
                     </span>
@@ -910,16 +1058,46 @@ export default function FilterDialog({
           )}
 
           {/* Report Date */}
-          <TextField
-            type="date"
-            size="small"
-            fullWidth
-            label="Report Date"
-            InputLabelProps={{ shrink: true }}
-            value={reportDate}
-            onChange={(e) => setReportDate(e.target.value)}
-            disabled={isApplying}
-          />
+
+          <LocalizationProvider dateAdapter={AdapterDayjs}>
+            <DatePicker
+              label="Report Date"
+              format="DD/MM/YYYY"
+              disabled={!viewCode || isApplying}
+              value={reportDate ? dayjs(reportDate) : null}
+              minDate={dayjs("2026-03-31")}
+              maxDate={etlDate || dayjs()}
+              slotProps={{
+                textField: {
+                  size: "small",
+                  fullWidth: true,
+                  error: dateValidation.error,
+                  helperText: (
+                    <span
+                      style={{
+                        fontStyle: "italic",
+                        fontSize: "0.75rem",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        marginTop: "4px",
+                      }}
+                    >
+                      <InfoIcon sx={{ fontSize: "0.625rem" }} />
+                      {dateValidation.text}
+                    </span>
+                  ),
+                },
+              }}
+              onChange={(newValue) => {
+                setReportDate(
+                  newValue && newValue.isValid()
+                    ? newValue.format("YYYY-MM-DD")
+                    : "",
+                );
+              }}
+            />
+          </LocalizationProvider>
         </Box>
       </DialogContent>
 
@@ -944,6 +1122,7 @@ export default function FilterDialog({
     </Dialog>
   );
 }
+
 
 
 
@@ -1030,79 +1209,7 @@ export default function HierarchyPath({
 
 
 
-// **************************************** InstructionalTooltip ************************************ //
 
-import { styled, keyframes } from "@mui/material/styles";
-import TuneIcon from "@mui/icons-material/Tune";
-import IconButton from "@mui/material/IconButton";
-import Tooltip from "@mui/material/Tooltip";
-import Box from "@mui/material/Box";
-import Typography from "@mui/material/Typography";
-
-// 1. Define the Pulse Animation
-const pulse = keyframes`
-  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(25, 118, 210, 0.7); }
-  70% { transform: scale(1.05); box-shadow: 0 0 0 6px rgba(25, 118, 210, 0); }
-  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(25, 118, 210, 0); }
-`;
-
-// 3. Custom Tooltip with Bold Text
-const InstructionalTooltip = ({ children, title }) => (
-  <Tooltip
-    title={
-      <Box sx={{ py: 0.5 }}>
-        <Typography variant="subtitle2" fontWeight="bold" color="primary.main">
-          {title}
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          Select criteria to generate the drill-down report.
-        </Typography>
-      </Box>
-    }
-    arrow
-    placement="bottom-end"
-    componentsProps={{
-      tooltip: {
-        sx: {
-          bgcolor: "background.paper",
-          color: "text.primary",
-          border: "1px solid",
-          borderColor: "divider",
-          boxShadow: 3,
-          maxWidth: 220,
-        },
-      },
-      arrow: {
-        sx: {
-          color: "background.paper",
-          "&::before": { border: "1px solid", borderColor: "divider" },
-        },
-      },
-    }}
-  >
-    {children}
-  </Tooltip>
-);
-
-
-
-
-
-// ************************************** PulsingFilterButton **************************************** //
-
-// 2. Create a Styled IconButton with Pulse
-const PulsingFilterButton = styled(IconButton)(({ theme }) => ({
-  border: `2px solid ${theme.palette.primary.main}`, // Thicker border for prominence
-  backgroundColor: theme.palette.primary.light, // Light background to stand out
-  color: theme.palette.primary.contrastText,
-  marginRight: theme.spacing(1),
-  "&:hover": {
-    border: `2px solid ${theme.palette.primary.dark}`,
-    backgroundColor: theme.palette.primary.main,
-  },
-  // Apply the animation
-  animation: `${pulse} 2s infinite`,
-}));
 
 
 
@@ -1111,131 +1218,320 @@ const PulsingFilterButton = styled(IconButton)(({ theme }) => ({
 // ********************************************** ReportAnalysisHeader ************************************* //
 
 import React from "react";
-import { Box, Paper, Typography, IconButton, Tooltip } from "@mui/material";
+import {
+  Box,
+  Paper,
+  Typography,
+  IconButton,
+  Tooltip,
+  Divider,
+} from "@mui/material";
 import AnalyticsIcon from "@mui/icons-material/Analytics";
 import TuneIcon from "@mui/icons-material/Tune";
-import FullscreenIcon from "@mui/icons-material/Fullscreen";
-import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
+import FilterAltOffIcon from "@mui/icons-material/FilterAltOff";
+import AssignmentIcon from "@mui/icons-material/Assignment";
+import AccountBalanceIcon from "@mui/icons-material/AccountBalance";
+import LayersIcon from "@mui/icons-material/Layers";
+import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
+import dayjs from "dayjs";
+import LocationOnIcon from "@mui/icons-material/LocationOn";
 
 export default function ReportAnalysisHeader({
   activeReport,
-  isFullscreen,
-  toggleFullscreen,
   onOpenFilter,
+  onClearFilters,
   filtersApplied,
+  appliedFilters,
 }) {
+  // Extract and sanitize filter display values
+  const reportDisplay =
+    activeReport?.displayName ||
+    appliedFilters?.reportName ||
+    appliedFilters?.reportCode ||
+    "Drill-Down Data";
+
+  const headDisplay =
+    appliedFilters?.headCode ||
+    appliedFilters?.head ||
+    appliedFilters?.searchHeadCode ||
+    "None Selected";
+
+  const scopeDisplay =
+    appliedFilters?.scope ||
+    appliedFilters?.selectedViewCode ||
+    appliedFilters?.viewCode ||
+    "None Selected";
+
+  const dateValue = appliedFilters?.reportDate || appliedFilters?.date;
+
+  const regionDisplay = appliedFilters?.entityCode
+    ? `${appliedFilters?.entityCode} - ${appliedFilters?.entityName}`
+    : `${activeReport?.entityCode} - ${activeReport?.entityName}`;
+
+  // Render values smoothly whether objects or raw strings
+  const cleanReport =
+    typeof reportDisplay === "object"
+      ? reportDisplay?.displayName
+      : reportDisplay;
+  const cleanSubHeader = appliedFilters ? "Drill-Down Data" : "Select Filters";
+  const cleanHead =
+    typeof headDisplay === "object"
+      ? `${headDisplay.headCode || ""} - ${headDisplay.headName || ""}`
+      : headDisplay;
+  const cleanScope =
+    typeof scopeDisplay === "object"
+      ? scopeDisplay?.displayName || scopeDisplay?.viewCode
+      : scopeDisplay;
+  const cleanDate = dateValue
+    ? dayjs(dateValue).isValid()
+      ? dayjs(dateValue).format("DD MMM YYYY")
+      : dateValue
+    : "Not Set";
+
+  // Configuration array for flexible, equal-width filtering items
+  const filterItems = [
+    {
+      label: "Report Type",
+      value: cleanReport,
+      icon: <AssignmentIcon sx={{ color: "#475569", fontSize: 17 }} />,
+    },
+    {
+      label: "Head Code",
+      value: cleanHead,
+      icon: <AccountBalanceIcon sx={{ color: "#475569", fontSize: 17 }} />,
+    },
+    {
+      label: "Scope",
+      value: cleanScope,
+      icon: <LayersIcon sx={{ color: "#475569", fontSize: 17 }} />,
+    },
+    {
+      label: cleanScope?.includes("CIRCLE") ? "Circle" : "Branch",
+      value: regionDisplay,
+      icon: <LocationOnIcon sx={{ color: "#475569", fontSize: 17 }} />,
+    },
+    {
+      label: "Report Date",
+      value: cleanDate,
+      icon: <CalendarMonthIcon sx={{ color: "#475569", fontSize: 17 }} />,
+    },
+  ];
+
+  // Filter out the 4th item (index 3) if scope contains 'BANK'
+  const displayedItems = filterItems.filter((item, index) => {
+    // Assuming the item to hide is always at index 3, or check by label/value
+    if (index === 3 && cleanScope?.includes("BANK")) {
+      return false; // Exclude this item
+    }
+    return true; // Keep all other items
+  });
+
+  // UI Card Styles - Flexible Equal Distributions
+  const premiumCardStyle = {
+    display: "flex",
+    alignItems: "center",
+    gap: 1.5,
+    p: "12px 18px",
+    borderRadius: "14px",
+    background: "rgba(255, 255, 255, 0.45)",
+    backdropFilter: "blur(8px)",
+    border: "1px solid rgba(255, 255, 255, 0.6)",
+    boxShadow: "0 4px 14px rgba(0,0,0,0.03)",
+    flex: "1 1 0px",
+    minWidth: "150px",
+    maxWidth: "300px",
+    overflow: "hidden",
+  };
+
+  const miniIconWrapper = {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    bgcolor: "rgba(255, 255, 255, 0.5)",
+    p: 1.1,
+    borderRadius: "10px",
+    flexShrink: 0,
+  };
+
+  const topLabelStyle = {
+    display: "block",
+    textTransform: "uppercase",
+    fontSize: "10px",
+    fontWeight: 700,
+    color: "#475569",
+    letterSpacing: "0.5px",
+    lineHeight: 1,
+  };
+
+  const bottomValueStyle = {
+    fontWeight: 600,
+    color: "#0f172a",
+    fontSize: "13.5px",
+    mt: 0.4,
+  };
+
   return (
     <Paper
       elevation={0}
       sx={{
-        p: 3,
-        borderRadius: 2,
-        boxShadow: "0 5px 10px rgba(0,0,0,0.2)",
-        border: 1,
-        borderColor: "divider",
+        p: "16px 24px",
+        borderRadius: 0,
+        bgcolor: "transparent",
         display: "flex",
         justifyContent: "space-between",
         flexDirection: "row",
         flexShrink: 0,
+        alignItems: "center",
+        gap: 3,
       }}
     >
-      <Box display="flex" alignItems="center" gap={2}>
+      {/* Left Module: Identity */}
+      <Box display="flex" alignItems="center" gap={1.5} sx={{ pl: 0.5 }}>
         <Box
           sx={{
-            backgroundColor: "primary.main",
-            borderRadius: "10px",
+            background: "linear-gradient(135deg, #4f46e5 0%, #3730a3 100%)",
+            borderRadius: "12px",
             width: 44,
             height: 44,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
+            boxShadow: "0 4px 12px rgba(79, 70, 229, 0.2)",
           }}
         >
-          <AnalyticsIcon sx={{ color: "primary.contrastText", fontSize: 24 }} />
+          <AnalyticsIcon sx={{ color: "#fff", fontSize: 22 }} />
         </Box>
         <Box sx={{ overflow: "hidden" }}>
           <Typography
-            variant="h6"
-            sx={{ fontWeight: 700, color: "text.primary" }}
+            variant="subtitle1"
+            sx={{
+              fontWeight: 700,
+              color: "text.primary",
+              letterSpacing: "-0.3px",
+              lineHeight: 1.1,
+            }}
           >
-            {activeReport?.displayName || "Financial Analytics"}
+            {cleanReport}
           </Typography>
-          <Typography variant="caption" sx={{ color: "text.primary" }}>
-            Dynamic Drill-Down Matrix
+          <Typography
+            variant="caption"
+            sx={{
+              color: "text.secondary",
+              fontWeight: 500,
+              display: "block",
+              mt: 0.1,
+              fontSize: "11px",
+            }}
+          >
+            {cleanSubHeader}
           </Typography>
         </Box>
       </Box>
 
-      {/* <Box display="flex" alignItems="center" gap={1}>
-        <Tooltip title="Filter Reports" arrow placement="bottom">
-          <IconButton
-            onClick={onOpenFilter}
-            color="primary"
-            sx={{ border: "1px solid", borderColor: "divider" }}
-          >
-            <TuneIcon />
-          </IconButton>
-        </Tooltip>
-      </Box> */}
+      {/* Center Module & Dividers: Rendered together ONLY when filters exist */}
+      {filtersApplied && (
+        <>
+          {/* Solid Black Divider after Identity Module */}
+          <Divider
+            orientation="vertical"
+            flexItem
+            sx={{ mx: 0.5, my: 0.5, borderColor: "#000000", opacity: 1 }}
+          />
 
-      <Box
-        display="flex"
-        alignItems="center"
-        gap={1.5}
-        sx={{
-          p: 1,
-          //bgcolor: "action.hover", // Light background to group the elements
-          borderRadius: 1,
-          //border: "1px dashed",
-          borderColor: filtersApplied ? "divider" : "primary.main", // Dashed border highlights importance
-        }}
-      >
-        {/* Button with Badge */}
-        <Tooltip
-          title="Select criteria to generate the report"
-          arrow
-          placement="bottom"
-        >
+          <Box
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            gap={2.5}
+            sx={{
+              flexGrow: 1,
+              px: 1,
+              overflowX: "auto",
+              scrollbarWidth: "none",
+              "&::-webkit-scrollbar": { display: "none" },
+            }}
+          >
+            {displayedItems.map((item, index) => (
+              <Box key={index} sx={premiumCardStyle}>
+                <Box sx={miniIconWrapper}>{item.icon}</Box>
+                <Box sx={{ overflow: "hidden", flexGrow: 1, minWidth: 0 }}>
+                  <Typography variant="caption" sx={topLabelStyle}>
+                    {item.label}
+                  </Typography>
+                  <Typography variant="body2" noWrap sx={bottomValueStyle}>
+                    {item.value}
+                  </Typography>
+                </Box>
+              </Box>
+            ))}
+          </Box>
+
+          {/* Solid Black Divider before action area */}
+          <Divider
+            orientation="vertical"
+            flexItem
+            sx={{ mx: 0.5, my: 0.5, borderColor: "#000000", opacity: 1 }}
+          />
+        </>
+      )}
+
+      {/* Right Module: Actions Area */}
+      <Box display="flex" alignItems="center" gap={1.5} sx={{ pr: 0.5 }}>
+        {/* Clear Active Filters Button */}
+        {filtersApplied && (
+          <Tooltip title="Clear Active Filters" arrow placement="bottom">
+            <IconButton
+              onClick={onClearFilters}
+              size="small"
+              sx={{
+                p: 1.3,
+                borderRadius: "12px",
+                border: "1px solid #fee2e2",
+                bgcolor: "#fff5f5",
+                color: "#ef4444",
+                boxShadow: "0 1px 2px rgba(239, 68, 68, 0.05)",
+                transition: "all 0.2s ease",
+                "&:hover": {
+                  bgcolor: "#ef4444",
+                  color: "#ffffff",
+                  borderColor: "#ef4444",
+                },
+              }}
+            >
+              <FilterAltOffIcon sx={{ fontSize: 19 }} />
+            </IconButton>
+          </Tooltip>
+        )}
+
+        {/* Modify Report Criteria Button */}
+        <Tooltip title="Modify Report Criteria" arrow placement="bottom">
           <IconButton
             onClick={onOpenFilter}
-            color="primary" // Makes the icon blue/prominent
-            size="medium"
+            size="small"
             sx={{
-              border: "1px solid",
-              borderColor: "divider",
-              bgcolor: "background.paper",
-              boxShadow: 1,
+              p: 1.3,
+              borderRadius: "12px",
+              border: "1px solid rgba(255, 255, 255, 0.6)",
+              bgcolor: "rgba(255, 255, 255, 0.45)",
+              backdropFilter: "blur(8px)",
+              color: "#475569",
+              boxShadow: "0 2px 6px rgba(0,0,0,0.03)",
+              transition: "all 0.2s ease",
               "&:hover": {
-                bgcolor: "primary.main",
-                color: "primary.contrastText",
-                boxShadow: 2,
+                bgcolor: "rgba(255, 255, 255, 0.75)",
+                borderColor: "#4f46e5",
+                color: "#4f46e5",
               },
             }}
           >
-            <TuneIcon />
+            <TuneIcon sx={{ fontSize: 19 }} />
           </IconButton>
         </Tooltip>
-
-        {/* Instructional Text */}
-        
-        <Box sx={{ display: "flex", flexDirection: "column" }}>
-          <Typography
-            variant="body2"
-            fontWeight="bold"
-            color={filtersApplied ? "text.secondary" : "primary.main"}
-          >
-            {filtersApplied ? "Filters Applied" : "Set Filters to Start"}
-          </Typography>
-          {!filtersApplied && (
-            <Typography variant="caption" color="text.secondary">
-              Required to view report
-            </Typography>
-          )}
-        </Box>
       </Box>
     </Paper>
   );
 }
+
 
 
 
@@ -1277,13 +1573,14 @@ import {
   Typography,
   CircularProgress,
   IconButton,
-  Button
+  Button,
 } from "@mui/material";
 import TuneIcon from "@mui/icons-material/Tune";
 import FilterAltOutlinedIcon from "@mui/icons-material/FilterAltOutlined";
 import DatasetIcon from "@mui/icons-material/Dataset";
 import { useTheme } from "@mui/material/styles";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { cacheNode } from "./analyticsCacheSlice";
 
 import {
   enterComponentFullscreen,
@@ -1367,7 +1664,7 @@ export default function ReportAnalysisScreen() {
       if (window.history.state?.isFullscreenOverlay) window.history.back();
     } else {
       dispatch(enterComponentFullscreen());
-      showSnackBar("To exit full screen press 'F' or 'Esc'", "info");
+      showSnackBar("To exit full screen press 'F9' ", "info");
       window.history.pushState({ isFullscreenOverlay: true }, "");
     }
   }, [isFullscreen, dispatch, showSnackBar]);
@@ -1381,12 +1678,16 @@ export default function ReportAnalysisScreen() {
 
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === "f") {
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") {
+        return;
+      }
+      if (e.key === "F9") {
         if (isFullscreen) {
           dispatch(exitComponentFullscreen());
           if (window.history.state?.isFullscreenOverlay) window.history.back();
         } else {
           dispatch(enterComponentFullscreen());
+          showSnackBar("To exit full screen press 'F9' ", "info");
           window.history.pushState({ isFullscreenOverlay: true }, "");
         }
       }
@@ -1404,7 +1705,6 @@ export default function ReportAnalysisScreen() {
           Array.isArray(response) ? response : response?.data || [],
         );
         console.log("Response: ", response);
-        
       } catch (error) {
         showSnackBar("Error fetching configuration", "error");
       }
@@ -1433,6 +1733,7 @@ export default function ReportAnalysisScreen() {
         targetHierarchyConfig.hierarchy,
         targetHierarchyConfig.availableMetrics,
       );
+      showSnackBar("Drill-Down data successfully fetched", "success");
 
       // If data is empty, DO NOT apply filters or close dialog. Path naturally stays hidden.
       if (!rootData || rootData.length === 0) {
@@ -1510,14 +1811,13 @@ export default function ReportAnalysisScreen() {
               setData((prevData) =>
                 appendChildrenToTree(prevData, node.id, children),
               );
-              dispatch({
-                type: "analyticsCache/cacheNode",
-                payload: {
+              dispatch(
+                cacheNode({
                   key: cacheKey,
                   data: children,
                   timestamp: Date.now(),
-                },
-              });
+                }),
+              );
             } catch (error) {
               console.error("Failed to fetch children", error);
             } finally {
@@ -1619,12 +1919,15 @@ export default function ReportAnalysisScreen() {
         toggleFullscreen={toggleFullscreen}
         onOpenFilter={() => setIsFilterDialogOpen(true)}
         filtersApplied={filtersApplied}
+        appliedFilters={appliedFilters}
+        onClearFilters={() => {setAppliedFilters(false);
+        }}
       />
 
       <FilterDialog
         open={isFilterDialogOpen}
         onClose={() => setIsFilterDialogOpen(false)}
-        onApply={handleApplyFilters}
+        onApply={(filters) => handleApplyFilters(filters)}
         reportsConfig={reportsConfig}
         currentFilters={appliedFilters}
         callApi={callApi}
@@ -1736,14 +2039,13 @@ export default function ReportAnalysisScreen() {
 
               {/* Text Elements */}
               <Typography
-                variant="h6"
+                variant="h5"
                 sx={{ color: "primary.main", fontWeight: "bold", mb: 1 }}
               >
                 No Data to Display
               </Typography>
               <Typography
-                variant="body2"
-                color="text.secondary"
+                color="primary.main"
                 sx={{ maxWidth: 350, mb: 3 }}
               >
                 Configure the database report, head, hierarchy and report date
@@ -1752,12 +2054,12 @@ export default function ReportAnalysisScreen() {
 
               {/* Action Button */}
               <Button
-                variant="outlined"
+                variant="contained"
                 color="primary"
                 startIcon={<TuneIcon />}
                 onClick={() => setIsFilterDialogOpen(true)}
                 sx={{
-                  borderRadius: 6, // Makes it pill-shaped
+                  borderRadius: 8, // Makes it pill-shaped
                   textTransform: "none",
                   fontWeight: 600,
                   px: 3,
@@ -1861,6 +2163,7 @@ export default function ReportAnalysisScreen() {
                       theme={theme}
                       ref={virtualizer.measureElement}
                       data-index={virtualRow.index}
+                      hierarchyLength={activeHierarchyConfig.hierarchy.length}
                       showSnackBar={showSnackBar}
                     />
                   );
@@ -1917,7 +2220,7 @@ export default function ReportAnalysisScreen() {
               color="text.secondary"
               sx={{ userSelect: "none" }}
             >
-              {isFullscreen ? "Exit Full Screen" : "Press F to Full Screen"}
+              {isFullscreen ? "Press 'F9' to Exit Full Screen" : "Press 'F9' to Full Screen"}
             </Typography>
           </Box>
         </Box>
@@ -1925,6 +2228,7 @@ export default function ReportAnalysisScreen() {
     </Box>
   );
 }
+
 
 
 
