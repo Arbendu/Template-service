@@ -132,3 +132,50 @@ export default ActualTreeTableRow;
               size="small"
               sx={{ minWidth: 1000, tableLayout: "fixed" }}
             >
+
+
+
+
+
+
+
+
+
+  // Configuration array for flexible, equal-width filtering items
+  const filterItems = [
+    {
+      label: "Report Type",
+      value: cleanReport,
+      icon: <AssignmentIcon sx={{ color: "#475569", fontSize: 17 }} />,
+    },
+    {
+      label: "Head Code",
+      value: cleanHead,
+      icon: <AccountBalanceIcon sx={{ color: "#475569", fontSize: 17 }} />,
+    },
+    {
+      label: "Scope",
+      value: cleanScope,
+      icon: <LayersIcon sx={{ color: "#475569", fontSize: 17 }} />,
+    },
+    {
+      // --- FIX 1: Use raw viewCode for logical checks, not the pretty display name ---
+      label: appliedFilters?.viewCode?.includes("CIRCLE") ? "Circle" : "Branch",
+      value: regionDisplay,
+      icon: <LocationOnIcon sx={{ color: "#475569", fontSize: 17 }} />,
+    },
+    {
+      label: "Report Date",
+      value: cleanDate,
+      icon: <CalendarMonthIcon sx={{ color: "#475569", fontSize: 17 }} />,
+    },
+  ];
+
+  // Filter out the 4th item (index 3) if scope contains 'BANK'
+  const displayedItems = filterItems.filter((item, index) => {
+    // --- FIX 2: Check the raw backend viewCode to safely hide the region box ---
+    if (index === 3 && appliedFilters?.viewCode?.includes("BANK")) {
+      return false; // Exclude the region box for Bank level
+    }
+    return true; // Keep all other items
+  });
