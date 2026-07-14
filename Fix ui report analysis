@@ -54,3 +54,81 @@ export default ActualTreeTableRow;
 
   const cleanDate = dateValue
     ? dayjs(dateValue).isValid()
+
+
+
+
+
+
+  const handleApplyFilters = async (newFilters) => {
+    setIsInitializing(true);
+    try {
+      const targetReport = reportsConfig.find(
+        (r) => r.reportCode === newFilters.reportCode,
+      );
+      const targetHierarchyConfig =
+        targetReport?.views.find((v) => v.viewCode === newFilters.viewCode) ||
+        DEFAULT_CONFIG;
+
+      const rootData = await fetchInitialData(
+        callApi,
+        showSnackBar,
+        newFilters,
+        targetHierarchyConfig.hierarchy,
+        targetHierarchyConfig.availableMetrics,
+      );
+
+      // --- 1. REMOVED THE SUCCESS SNACKBAR FROM HERE ---
+
+      // If data is empty, DO NOT apply filters or close dialog.
+      if (!rootData || rootData.length === 0) {
+        showSnackBar("No data found for the selected combination", "warning");
+      } else {
+        // --- 2. MOVED SUCCESS SNACKBAR HERE ---
+        showSnackBar("Drill-Down data successfully fetched", "success");
+        
+        // Success: Update main view state, inject data, and close dialog
+        setAppliedFilters(newFilters);
+        setData(rootData);
+        setExpandedIds(new Map());
+        setIsFilterDialogOpen(false);
+      }
+    } catch (error) {
+      console.error("Failed to load initial data", error);
+      showSnackBar("Error fetching data", "error");
+    } finally {
+      setIsInitializing(false);
+    }
+  };
+
+
+
+
+
+
+
+
+
+          {/* --- 3. REPLACE THIS CONDITION --- */}
+          {/* By adding data.length === 0, the table stays visible behind the dialog! */}
+          {isInitializing && data.length === 0 ? (
+            <Box
+              sx={{
+                height: "100%",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <CircularProgress size={32} color="primary" sx={{ mb: 1 }} />
+              <Typography variant="body2" color="text.secondary">
+                Executing Query ...
+              </Typography>
+            </Box>
+          ) : isSetupComplete && data.length > 0 ? (
+            <Table
+              stickyHeader
+              size="small"
+              sx={{ minWidth: 1000, tableLayout: "fixed" }}
+            >
