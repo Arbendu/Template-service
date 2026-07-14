@@ -2295,6 +2295,7 @@ export default function ReportAnalysisScreen() {
                       data-index={virtualRow.index}
                       hierarchyLength={activeHierarchyConfig.hierarchy.length}
                       showSnackBar={showSnackBar}
+                      expandedIds={expandedIds}
                     />
                   );
                 })}
@@ -2360,6 +2361,7 @@ export default function ReportAnalysisScreen() {
     </Box>
   );
 }
+
 
 
 
