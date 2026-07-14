@@ -1,1 +1,22 @@
 
+  (prevProps, nextProps) => {
+    return (
+      prevProps.isExpanded === nextProps.isExpanded &&
+      prevProps.isLoading === nextProps.isLoading &&
+      
+      // --- THE FIX IS HERE ---
+      // Changed from prevProps.node.id === nextProps.node.id
+      // This ensures the parent row gets the updated nested children data!
+      prevProps.node === nextProps.node && 
+      // -----------------------
+      
+      prevProps.maxVisibleLevel === nextProps.maxVisibleLevel &&
+      prevProps.index === nextProps.index &&
+      prevProps.theme === nextProps.theme
+      // prevProps.isFullscreen === nextProps.isFullscreen
+    );
+  },
+);
+
+ActualTreeTableRow.displayName = "ActualTreeTableRow";
+export default ActualTreeTableRow;
