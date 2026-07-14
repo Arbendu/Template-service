@@ -157,6 +157,7 @@ const ActualTreeTableRow = memo(
         node,
         isExpanded,
         isLoading,
+        expandedIds,
         onToggle,
         maxVisibleLevel,
         index,
@@ -298,20 +299,34 @@ const ActualTreeTableRow = memo(
                               const rows = [];
 
                               // 1. Get headers starting exactly from the clicked node's level downward
-                              const allHeaders = Array.from(document.querySelectorAll("th")).map(th => th.innerText.trim()).filter(Boolean);
-                              const hierarchyHeaders = allHeaders.slice(node.level, maxVisibleLevel + 1);
-                              const metricHeaders = activeMetrics.map((m) => m.displayName || m.logicalName);
-                              rows.push([...hierarchyHeaders, ...metricHeaders].join("\t"));
+                              const allHeaders = Array.from(
+                                document.querySelectorAll("th"),
+                              )
+                                .map((th) => th.innerText.trim())
+                                .filter(Boolean);
+                              const hierarchyHeaders = allHeaders.slice(
+                                node.level,
+                                maxVisibleLevel + 1,
+                              );
+                              const metricHeaders = activeMetrics.map(
+                                (m) => m.displayName || m.logicalName,
+                              );
+                              rows.push(
+                                [...hierarchyHeaders, ...metricHeaders].join(
+                                  "\t",
+                                ),
+                              );
 
                               // 2. Recursive function to traverse children and build Tab-Separated columns
                               const traverse = (currentNode) => {
                                 // Create an array of empty strings based on the max visible hierarchy depth
-                                const originalColumns = Array(maxVisibleLevel + 1).fill(
-                                  "",
-                                );
+                                const originalColumns = Array(
+                                  maxVisibleLevel + 1,
+                                ).fill("");
 
                                 // Place the current node's name in its specific column level (creates the diagonal alignment)
-                                originalColumns[currentNode.level] = currentNode.name;
+                                originalColumns[currentNode.level] =
+                                  currentNode.name;
 
                                 // Map over active metrics to grab amounts dynamically
                                 const metrics = activeMetrics.map((m) => {
@@ -328,16 +343,20 @@ const ActualTreeTableRow = memo(
                                 });
 
                                 // Slice the columns dynamically to match the header offset perfectly
-                                const shiftedColumns = originalColumns.slice(node.level);
+                                const shiftedColumns = originalColumns.slice(
+                                  node.level,
+                                );
 
                                 // Combine the hierarchy columns and the metric columns, separated by Tabs
-                                const rowString = [...shiftedColumns, ...metrics].join(
-                                  "\t",
-                                );
+                                const rowString = [
+                                  ...shiftedColumns,
+                                  ...metrics,
+                                ].join("\t");
                                 rows.push(rowString);
 
                                 // If this node has loaded children, recursively run them so they are included in the copy
                                 if (
+                                  expandedIds.has(currentNode.id) &&
                                   currentNode.children &&
                                   currentNode.children.length > 0
                                 ) {
@@ -491,6 +510,7 @@ const ActualTreeTableRow = memo(
 
 ActualTreeTableRow.displayName = "ActualTreeTableRow";
 export default ActualTreeTableRow;
+
 
 
 
