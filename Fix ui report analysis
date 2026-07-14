@@ -20,3 +20,37 @@
 
 ActualTreeTableRow.displayName = "ActualTreeTableRow";
 export default ActualTreeTableRow;
+
+
+
+
+
+
+
+
+
+
+  const cleanHead =
+    typeof headDisplay === "object"
+      ? `${headDisplay.headCode || ""} - ${headDisplay.headName || ""}`
+      : headDisplay;
+
+  // --- REPLACE YOUR EXISTING cleanScope VARIABLE WITH THIS BLOCK ---
+  let cleanScope = scopeDisplay;
+  if (typeof scopeDisplay === "object") {
+    // Fallback just in case an object gets passed
+    cleanScope = scopeDisplay?.displayName || scopeDisplay?.viewCode;
+  } else if (activeReport?.views && appliedFilters?.viewCode) {
+    // Look up the exact view object from the configuration dropdown list
+    const matchedView = activeReport.views.find(
+      (view) => view.viewCode === appliedFilters.viewCode
+    );
+    // If a match is found, use its human-readable displayName (e.g., "Bank Level")
+    if (matchedView) {
+      cleanScope = matchedView.displayName;
+    }
+  }
+  // ---------------------------------------------------------------
+
+  const cleanDate = dateValue
+    ? dayjs(dateValue).isValid()
