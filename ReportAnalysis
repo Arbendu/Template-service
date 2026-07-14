@@ -157,7 +157,8 @@ const ActualTreeTableRow = memo(
         node,
         isExpanded,
         isLoading,
-        expandedIds,
+        // expandedIds,
+        expandedIdsRef,
         onToggle,
         maxVisibleLevel,
         index,
@@ -355,8 +356,18 @@ const ActualTreeTableRow = memo(
                                 rows.push(rowString);
 
                                 // If this node has loaded children, recursively run them so they are included in the copy
+                                // if (
+                                //   expandedIds.has(currentNode.id) &&
+                                //   currentNode.children &&
+                                //   currentNode.children.length > 0
+                                // ) {
+                                //   currentNode.children.forEach((child) =>
+                                //     traverse(child),
+                                //   );
+                                // }
+
                                 if (
-                                  expandedIds.has(currentNode.id) &&
+                                  expandedIdsRef.current.has(currentNode.id) &&
                                   currentNode.children &&
                                   currentNode.children.length > 0
                                 ) {
@@ -499,7 +510,7 @@ const ActualTreeTableRow = memo(
     return (
       prevProps.isExpanded === nextProps.isExpanded &&
       prevProps.isLoading === nextProps.isLoading &&
-      prevProps.node.id === nextProps.node.id &&
+      prevProps.node === nextProps.node &&
       prevProps.maxVisibleLevel === nextProps.maxVisibleLevel &&
       prevProps.index === nextProps.index &&
       prevProps.theme === nextProps.theme
@@ -510,6 +521,7 @@ const ActualTreeTableRow = memo(
 
 ActualTreeTableRow.displayName = "ActualTreeTableRow";
 export default ActualTreeTableRow;
+
 
 
 
@@ -863,14 +875,14 @@ export default function FilterDialog({
   ]);
 
   return (
-      <Dialog
+    <Dialog
       open={open}
       onClose={(event, reason) => {
         // Prevent dialog from closing on backdrop click or ESC key.
         // Dialog should close only using the Close (X) icon.
         if (reason === "backdropClick") return;
         if (reason === "escapeKeyDown") return;
- 
+
         onClose();
       }}
       maxWidth="sm"
@@ -943,6 +955,11 @@ export default function FilterDialog({
           <Autocomplete
             size="small"
             options={headOptions}
+            noOptionsText={
+              !head
+                ? "Please enter at least 2 characters"
+                : `${head.headCode} - ${head.headName}`
+            }
             // 1. Explicitly control the input value
             inputValue={headInputValue}
             value={head}
@@ -1042,6 +1059,11 @@ export default function FilterDialog({
               key={isCircleScope ? "circle" : "branch"}
               size="small"
               options={entityOptions}
+              noOptionsText={
+                !entity
+                  ? "Please enter at least 2 characters"
+                  : `${entity.code} - ${entity.name}`
+              }
               // 1. CRITICAL: Bind the input value explicitly to state
               inputValue={entityInputValue}
               value={entity}
@@ -1206,6 +1228,7 @@ export default function FilterDialog({
 
 
 
+
 // ********************************************* HierarchyPath ********************************************* //
 
 import React from "react";
@@ -1316,6 +1339,7 @@ export default function HierarchyPath({
     </Box>
   );
 }
+
 
 
 
@@ -1568,7 +1592,7 @@ export default function ReportAnalysisHeader({
             {displayedItems.map((item, index) => (
               <Tooltip
                 key={index}
-                title={`${item.label}: ${item.value}`} // 2. Show label and full value on hover
+                title={`${item.value}`} // 2. Show label and full value on hover
                 arrow
                 placement="bottom"
               >
@@ -1652,6 +1676,7 @@ export default function ReportAnalysisHeader({
     </Paper>
   );
 }
+
 
 
 
@@ -1759,6 +1784,11 @@ export default function ReportAnalysisScreen() {
       null
     );
   }, [reportsConfig, appliedFilters.reportCode]);
+
+  const expandedIdsRef = useRef(expandedIds);
+  useEffect(() => {
+    expandedIdsRef.current = expandedIds;
+  }, [expandedIds]);
 
   // Dynamically resolve hierarchy based on the exact selected viewCode
   const activeHierarchyConfig = useMemo(() => {
@@ -2295,7 +2325,8 @@ export default function ReportAnalysisScreen() {
                       data-index={virtualRow.index}
                       hierarchyLength={activeHierarchyConfig.hierarchy.length}
                       showSnackBar={showSnackBar}
-                      expandedIds={expandedIds}
+                      //expandedIds={expandedIds}
+                      expandedIdsRef={expandedIdsRef}
                     />
                   );
                 })}
@@ -2361,6 +2392,7 @@ export default function ReportAnalysisScreen() {
     </Box>
   );
 }
+
 
 
 
