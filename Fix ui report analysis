@@ -1,181 +1,687 @@
+import React, { useState, useEffect, useMemo } from "react";
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  IconButton,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  TextField,
+  Autocomplete,
+  Box,
+  Typography,
+  CircularProgress,
+  FormHelperText,
+} from "@mui/material";
+import CloseIcon from "@mui/icons-material/Close";
+import InfoIcon from "@mui/icons-material/Info";
+import QueryStatsIcon from "@mui/icons-material/QueryStats";
+import { fetchHeads } from "../api/analyticsApi";
+import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
+import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
+import { DatePicker } from "@mui/x-date-pickers/DatePicker";
+import dayjs from "dayjs";
 
-  (prevProps, nextProps) => {
-    return (
-      prevProps.isExpanded === nextProps.isExpanded &&
-      prevProps.isLoading === nextProps.isLoading &&
-      
-      // --- THE FIX IS HERE ---
-      // Changed from prevProps.node.id === nextProps.node.id
-      // This ensures the parent row gets the updated nested children data!
-      prevProps.node === nextProps.node && 
-      // -----------------------
-      
-      prevProps.maxVisibleLevel === nextProps.maxVisibleLevel &&
-      prevProps.index === nextProps.index &&
-      prevProps.theme === nextProps.theme
-      // prevProps.isFullscreen === nextProps.isFullscreen
-    );
-  },
-);
+// Ensure 'en-gb' locale logic maps uniformly across the date components
+import "dayjs/locale/en-gb";
 
-ActualTreeTableRow.displayName = "ActualTreeTableRow";
-export default ActualTreeTableRow;
+export default function FilterDialog({
+  open,
+  onClose,
+  onApply,
+  reportsConfig = [],
+  currentFilters,
+  callApi,
+  user,
+  isApplying,
+}) {
+  // --- USER AUTH MAPPING ---
+  // Verify these keys match exactly what your Redis auth object returns
+  // const isAdmin = user?.role === 10 || user?.roleName === "ADMIN";
+  const userCircleCode = user?.circleCode;
+  const userCircleName = user?.circleName;
+  const userBranchCode = user?.branch;
+  const userBranchName = user?.branchName;
 
+  const [reportCode, setReportCode] = useState("");
+  const [viewCode, setViewCode] = useState("");
+  const [head, setHead] = useState(null);
+  const [reportDate, setReportDate] = useState("");
 
+  // Track the raw string typed by the user to catch incomplete masks like "DD/05/YYYY"
+  const [dateInputValue, setDateInputValue] = useState("");
+  // Unique dynamic key to explicitly force internal text component resets
+  const [datePickerKey, setDatePickerKey] = useState(0);
 
+  // Entity (Circle/Branch) State mapping
+  const [entity, setEntity] = useState(null); // Stores the selected object { code, name }
+  const [entityInputValue, setEntityInputValue] = useState("");
+  const [entityOptions, setEntityOptions] = useState([]);
+  const [isEntityLoading, setIsEntityLoading] = useState(false);
 
+  const [headInputValue, setHeadInputValue] = useState("");
+  const [headOptions, setHeadOptions] = useState([]);
+  const [isHeadsLoading, setIsHeadsLoading] = useState(false);
 
+  const isCircleScope = viewCode.includes("CIRCLE");
+  const isBranchScope = viewCode.includes("BRANCH");
+  const MIN_ALLOWED_DATE = dayjs("2026-03-31").startOf("day");
 
+  const [etlDate, setEtlDate] = useState(null);
 
+  // Sync state when dialog opens
+  useEffect(() => {
+    if (open) {
+      setReportCode(currentFilters?.reportCode || "");
+      setViewCode(currentFilters?.viewCode || "");
+      setHead(currentFilters?.head || null);
 
-
-
-  const cleanHead =
-    typeof headDisplay === "object"
-      ? `${headDisplay.headCode || ""} - ${headDisplay.headName || ""}`
-      : headDisplay;
-
-  // --- REPLACE YOUR EXISTING cleanScope VARIABLE WITH THIS BLOCK ---
-  let cleanScope = scopeDisplay;
-  if (typeof scopeDisplay === "object") {
-    // Fallback just in case an object gets passed
-    cleanScope = scopeDisplay?.displayName || scopeDisplay?.viewCode;
-  } else if (activeReport?.views && appliedFilters?.viewCode) {
-    // Look up the exact view object from the configuration dropdown list
-    const matchedView = activeReport.views.find(
-      (view) => view.viewCode === appliedFilters.viewCode
-    );
-    // If a match is found, use its human-readable displayName (e.g., "Bank Level")
-    if (matchedView) {
-      cleanScope = matchedView.displayName;
-    }
-  }
-  // ---------------------------------------------------------------
-
-  const cleanDate = dateValue
-    ? dayjs(dateValue).isValid()
-
-
-
-
-
-
-  const handleApplyFilters = async (newFilters) => {
-    setIsInitializing(true);
-    try {
-      const targetReport = reportsConfig.find(
-        (r) => r.reportCode === newFilters.reportCode,
+      const initialDate = currentFilters?.reportDate || "";
+      setReportDate(initialDate);
+      setDateInputValue(
+        initialDate ? dayjs(initialDate).format("DD/MM/YYYY") : "",
       );
-      const targetHierarchyConfig =
-        targetReport?.views.find((v) => v.viewCode === newFilters.viewCode) ||
-        DEFAULT_CONFIG;
 
-      const rootData = await fetchInitialData(
-        callApi,
-        showSnackBar,
-        newFilters,
-        targetHierarchyConfig.hierarchy,
-        targetHierarchyConfig.availableMetrics,
-      );
-
-      // --- 1. REMOVED THE SUCCESS SNACKBAR FROM HERE ---
-
-      // If data is empty, DO NOT apply filters or close dialog.
-      if (!rootData || rootData.length === 0) {
-        showSnackBar("No data found for the selected combination", "warning");
+      // Restore Head
+      if (currentFilters?.head) {
+        setHeadInputValue(
+          `${currentFilters.head.headCode} - ${currentFilters.head.headName}`,
+        );
+        setHeadOptions([currentFilters.head]);
       } else {
-        // --- 2. MOVED SUCCESS SNACKBAR HERE ---
-        showSnackBar("Drill-Down data successfully fetched", "success");
-        
-        // Success: Update main view state, inject data, and close dialog
-        setAppliedFilters(newFilters);
-        setData(rootData);
-        setExpandedIds(new Map());
-        setIsFilterDialogOpen(false);
+        setHeadInputValue("");
+        setHeadOptions([]);
       }
-    } catch (error) {
-      console.error("Failed to load initial data", error);
-      showSnackBar("Error fetching data", "error");
-    } finally {
-      setIsInitializing(false);
+
+      // Restore Entity
+      if (currentFilters?.entityCode && currentFilters?.entityName) {
+        setEntity({
+          code: currentFilters.entityCode,
+          name: currentFilters.entityName,
+        });
+        setEntityInputValue(
+          `${currentFilters.entityCode} - ${currentFilters.entityName}`,
+        );
+      } else {
+        setEntity(null);
+        setEntityInputValue("");
+        setEntityOptions([]);
+      }
     }
+  }, [open, currentFilters]);
+
+  // Derived available Scopes directly from Config Views
+  const availableViews = useMemo(() => {
+    if (!reportCode) return [];
+    const report = reportsConfig.find((r) => r.reportCode === reportCode);
+    return report?.views || [];
+  }, [reportCode, reportsConfig]);
+
+  // --- ENTITY FETCHING & AUTO-FILL LOGIC ---
+  useEffect(() => {
+    // 1. If not admin, auto-select their default entity and lock it
+    // if (!isAdmin) {
+    //   if (isCircleScope && userCircleCode) {
+    //     setEntity({
+    //       code: userCircleCode,
+    //       name: userCircleName || userCircleCode,
+    //     });
+    //   } else if (isBranchScope && userBranchCode) {
+    //     setEntity({
+    //       code: userBranchCode,
+    //       name: userBranchName || userBranchCode,
+    //     });
+    //   } else {
+    //     setEntity(null);
+    //   }
+    //   return; // Exit early so non-admins don't fetch data
+    // }
+
+    // 2. If Admin, fetch data dynamically on input change
+    const delayDebounceFn = setTimeout(async () => {
+      if (entityInputValue && entityInputValue.length >= 2) {
+        setIsEntityLoading(true);
+        try {
+          let response;
+          let mappedData = [];
+
+          if (isCircleScope) {
+            // Assuming the circle search API endpoint
+            response = await callApi(
+              `/CM/common-master/circle-codes`,
+              {},
+              "GET",
+            );
+            const data = response?.data || [];
+            // Map Circle response to a standard { code, name } format
+            mappedData = data.map((c) => ({
+              code: c.circleCode,
+              name: c.circleName,
+            }));
+          } else if (isBranchScope) {
+            // Branch API endpoint as requested
+            response = await callApi(
+              `/CM/common-master/branches-code-name-only?q=${entityInputValue}&circleCode=`,
+              {},
+              "GET",
+            );
+            const data = response?.data || [];
+            // Branch response is already in { code, name } format, but we ensure mapping
+            mappedData = data.map((b) => ({ code: b.code, name: b.name }));
+          }
+
+          setEntityOptions(mappedData);
+        } catch (error) {
+          console.error("Error fetching entities:", error);
+          setEntityOptions([]);
+        } finally {
+          setIsEntityLoading(false);
+        }
+      } else {
+        setEntityOptions(entity ? [entity] : []);
+      }
+    }, 500);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [
+    entityInputValue,
+    isCircleScope,
+    isBranchScope,
+    callApi,
+    entity,
+    userCircleCode,
+    userCircleName,
+    userBranchCode,
+    userBranchName,
+  ]);
+
+  // --- HEAD CODE FETCHING LOGIC ---
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(async () => {
+      if (headInputValue && headInputValue.length >= 2 && reportCode) {
+        setIsHeadsLoading(true);
+        const data = await fetchHeads(callApi, reportCode, headInputValue);
+        setHeadOptions(data);
+        setIsHeadsLoading(false);
+      } else {
+        setHeadOptions(head ? [head] : []);
+      }
+    }, 500);
+    return () => clearTimeout(delayDebounceFn);
+  }, [headInputValue, reportCode, callApi, head]);
+
+  // --- SYSTEM DATE FETCHING LOGIC ---
+  useEffect(() => {
+    const fetchSystemDate = async () => {
+      if (!open) return;
+      try {
+        const dateRes = await callApi("/PS/file/fincore-date", {}, "GET");
+        const etlRaw = dateRes?.data?.userDate;
+        const etl = etlRaw
+          ? dayjs(etlRaw.split("T")[0]).endOf("day")
+          : dayjs().endOf("day");
+        setEtlDate(etl);
+      } catch (e) {
+        console.error("Date error:", e);
+        setEtlDate(dayjs().endOf("day"));
+      }
+    };
+    fetchSystemDate();
+  }, [open, callApi]);
+
+  const handleReset = () => {
+    setReportCode("");
+    setViewCode("");
+    setHead(null);
+    setHeadInputValue("");
+    setHeadOptions([]);
+
+    setEntity(null);
+    setEntityInputValue("");
+    setEntityOptions([]);
+
+    setReportDate("");
+    setDateInputValue("");
+    // Incrementing the key cleanly forces the DatePicker input UI to completely reset its internal DOM state
+    setDatePickerKey((prev) => prev + 1);
   };
 
+  const handleApply = () => {
+    if (dateValidation.error) return;
+    onApply({
+      reportCode,
+      viewCode,
+      head,
+      entityCode: entity?.code || "",
+      entityName: entity?.name || "",
+      reportDate,
+    });
+  };
+  const handlePaste = (event) => {
+    event.preventDefault();
+  };
 
+  // Comprehensive validation metrics logic
+  const dateValidation = useMemo(() => {
+    const minDateStr = MIN_ALLOWED_DATE.format("DD/MM/YYYY");
+    const maxLimit = etlDate || dayjs().endOf("day");
+    const maxDateStr = maxLimit.format("DD/MM/YYYY");
 
+    if (!dateInputValue && !reportDate) {
+      return {
+        error: false,
+        text: `Allowed Range: ${minDateStr} - ${maxDateStr}`,
+      };
+    }
 
+    // Explicitly check for alpha-masked formats like "DD/05/YYYY" or "01/MM/2026"
+    const containsMaskCharacters = /[a-zA-Z]/.test(dateInputValue);
+    const selectedDate = dayjs(reportDate);
 
+    if (containsMaskCharacters || !selectedDate.isValid()) {
+      return {
+        error: true,
+        text: "Please enter a valid date.",
+      };
+    }
 
+    if (selectedDate.year() < 2000) {
+      return {
+        error: true,
+        text: `Date cannot be prior to ${minDateStr}`,
+      };
+    }
 
+    if (selectedDate.isBefore(MIN_ALLOWED_DATE, "day")) {
+      return {
+        error: true,
+        text: `Date cannot be prior to ${minDateStr}`,
+      };
+    }
 
+    if (selectedDate.isAfter(maxLimit, "day")) {
+      return {
+        error: true,
+        text: `Future dates beyond ${maxDateStr} are not allowed.`,
+      };
+    }
 
-          {/* --- 3. REPLACE THIS CONDITION --- */}
-          {/* By adding data.length === 0, the table stays visible behind the dialog! */}
-          {isInitializing && data.length === 0 ? (
-            <Box
-              sx={{
-                height: "100%",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
+    return {
+      error: false,
+      text: `Allowed Range: ${minDateStr} - ${maxDateStr}`,
+    };
+  }, [reportDate, dateInputValue, etlDate, MIN_ALLOWED_DATE]);
+
+  const isApplyEnabled = useMemo(() => {
+    if (
+      !reportCode ||
+      !viewCode ||
+      !head?.headCode ||
+      !reportDate ||
+      dateValidation.error
+    ) {
+      return false;
+    }
+    if (isCircleScope || isBranchScope) return !!entity?.code;
+    return true;
+  }, [
+    reportCode,
+    viewCode,
+    head,
+    entity,
+    reportDate,
+    isCircleScope,
+    isBranchScope,
+    dateValidation.error,
+  ]);
+
+  return (
+    <Dialog
+      open={open}
+      onClose={(event, reason) => {
+        // Prevent dialog from closing on backdrop click or ESC key.
+        // Dialog should close only using the Close (X) icon.
+        if (reason === "backdropClick") return;
+        if (reason === "escapeKeyDown") return;
+
+        onClose();
+      }}
+      maxWidth="sm"
+      fullwidth
+    >
+      <DialogTitle
+        sx={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 2,
+        }}
+      >
+        <Typography
+          variant="h6"
+          fontWeight="bold"
+          sx={{ display: "flex", alignItems: "center", gap: 2 }}
+        >
+          <QueryStatsIcon /> Drill Down Filters
+        </Typography>
+        <IconButton onClick={onClose} size="small" disabled={isApplying}>
+          <CloseIcon />
+        </IconButton>
+      </DialogTitle>
+
+      <DialogContent dividers>
+        <Box display="flex" flexDirection="column" gap={3} py={1}>
+          {/* Report Code Selection */}
+          <FormControl size="small" fullWidth>
+            <InputLabel id="dialog-report-label">Select Report</InputLabel>
+            <Select
+              labelId="dialog-report-label"
+              value={reportCode}
+              label="Select Report"
+              disabled={isApplying}
+              onChange={(e) => {
+                setReportCode(e.target.value);
+                setViewCode("");
+                setHead(null);
+                setHeadInputValue("");
+                setHeadOptions([]);
+                setEntity(null);
+                setEntityInputValue("");
+                setEntityOptions([]);
               }}
             >
-              <CircularProgress size={32} color="primary" sx={{ mb: 1 }} />
-              <Typography variant="body2" color="text.secondary">
-                Executing Query ...
-              </Typography>
-            </Box>
-          ) : isSetupComplete && data.length > 0 ? (
-            <Table
-              stickyHeader
-              size="small"
-              sx={{ minWidth: 1000, tableLayout: "fixed" }}
+              {reportsConfig.map((report) => (
+                <MenuItem key={report.reportCode} value={report.reportCode}>
+                  {report.displayName}
+                </MenuItem>
+              ))}
+            </Select>
+            <FormHelperText
+              id="scope-helper-text"
+              sx={{
+                fontStyle: "italic",
+                fontSize: "0.75rem",
+                display: "flex",
+                alignItems: "center",
+                gap: "4px",
+                lineHeight: 1.5,
+              }}
             >
+              <InfoIcon sx={{ fontSize: "0.625rem" }} />
+              Please select a report to initiate drill-down analysis.
+            </FormHelperText>
+          </FormControl>
 
+          {/* Head Code Autocomplete */}
+          <Autocomplete
+            size="small"
+            options={headOptions}
+            noOptionsText={
+              headInputValue.length >= 2 && !isHeadsLoading
+                ? "No match found"
+                : "Type at least 2 characters..."
+            }
+            // 1. Explicitly control the input value
+            inputValue={headInputValue}
+            value={head}
+            getOptionLabel={(option) =>
+              option ? `${option.headCode} - ${option.headName}` : ""
+            }
+            onChange={(event, newValue) => setHead(newValue)}
+            onInputChange={(event, newInputValue, reason) => {
+              // 2. Ignore 'reset' events (happens when selecting an option)
+              if (reason === "reset") return;
 
+              // 3. Filter special characters immediately
+              const filteredValue = newInputValue.replace(/[^a-zA-Z0-9 ]/g, "");
 
+              // Update state only if the value actually changed to prevent unnecessary renders
+              if (filteredValue !== headInputValue) {
+                setHeadInputValue(filteredValue);
+              }
+            }}
+            loading={isHeadsLoading}
+            disabled={!reportCode || isApplying}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Search Head Code"
+                variant="outlined"
+                inputProps={{ ...params.inputProps, maxLength: 50 }}
+                InputProps={{
+                  ...params.InputProps,
+                  onPaste: handlePaste,
+                  endAdornment: (
+                    <React.Fragment>
+                      {isHeadsLoading ? (
+                        <CircularProgress color="inherit" size={20} />
+                      ) : null}
+                      {params.InputProps.endAdornment}
+                    </React.Fragment>
+                  ),
+                }}
+                helperText={
+                  <span
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "4px",
+                    }}
+                  >
+                    <InfoIcon sx={{ fontSize: "0.625rem" }} />
+                    <em>Enter at least 2 letters or numbers to search.</em>
+                  </span>
+                }
+              />
+            )}
+          />
 
+          {/* Scope Selection */}
+          <FormControl
+            size="small"
+            fullWidth
+            disabled={!reportCode || isApplying}
+          >
+            <InputLabel id="dialog-scope-label">Scope</InputLabel>
+            <Select
+              labelId="dialog-scope-label"
+              value={viewCode}
+              label="Scope"
+              onChange={(e) => {
+                setViewCode(e.target.value);
+                setEntity(null); // Clear entity when switching scope
+                setEntityInputValue("");
+                setEntityOptions([]);
+              }}
+            >
+              {availableViews.map((view) => (
+                <MenuItem key={view.viewCode} value={view.viewCode}>
+                  {view.displayName}
+                </MenuItem>
+              ))}
+            </Select>
+            <FormHelperText
+              id="scope-helper-text"
+              sx={{
+                fontStyle: "italic",
+                fontSize: "0.75rem",
+                display: "flex",
+                alignItems: "center",
+                gap: "4px",
+                lineHeight: 1.5,
+              }}
+            >
+              <InfoIcon sx={{ fontSize: "0.625rem" }} />
+              View scope is determined by your authorized access level.
+            </FormHelperText>
+          </FormControl>
 
+          {/* Conditional Autocomplete for Circle/Branch */}
+          {(isCircleScope || isBranchScope) && (
+            <Autocomplete
+              key={isCircleScope ? "circle" : "branch"}
+              size="small"
+              options={entityOptions}
+              noOptionsText={
+                entityInputValue.length >= 2 && !isEntityLoading
+                  ? "No match found"
+                  : "Type at least 2 characters..."
+              }
+              // 1. CRITICAL: Bind the input value explicitly to state
+              inputValue={entityInputValue}
+              value={entity}
+              getOptionLabel={(option) =>
+                option ? `${option.code} - ${option.name}` : ""
+              }
+              onChange={(event, newValue) => setEntity(newValue)}
+              onInputChange={(event, newInputValue, reason) => {
+                // 2. Ignore 'reset' events (occurs when selecting an option or clearing)
+                if (reason === "reset") return;
 
+                // 3. Filter out special characters immediately
+                // Allows only letters, numbers, and spaces.
+                // Add '-' or '_' inside the brackets if needed: [^a-zA-Z0-9 _-]
+                const filteredValue = newInputValue.replace(
+                  /[^a-zA-Z0-9 ]/g,
+                  "",
+                );
 
+                // Update state only if the value differs to prevent render loops
+                if (filteredValue !== entityInputValue) {
+                  setEntityInputValue(filteredValue);
+                }
+              }}
+              loading={isEntityLoading}
+              disabled={isApplying}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label={`Search ${isCircleScope ? "Circle" : "Branch"}`}
+                  variant="outlined"
+                  // 4. Ensure no conflicting value/onChange props are passed here
+                  inputProps={{
+                    ...params.inputProps,
+                    onPaste: handlePaste,
+                    autoComplete: "off",
+                    maxLength: 50,
+                  }}
+                  InputProps={{
+                    ...params.InputProps,
+                    endAdornment: (
+                      <React.Fragment>
+                        {isEntityLoading ? (
+                          <CircularProgress color="inherit" size={20} />
+                        ) : null}
+                        {params.InputProps.endAdornment}
+                      </React.Fragment>
+                    ),
+                  }}
+                  helperText={
+                    <span
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "4px",
+                      }}
+                    >
+                      <InfoIcon sx={{ fontSize: "0.625rem" }} />
+                      <em>
+                        Type at least 2 alphanumeric characters to find a{" "}
+                        {isCircleScope ? "circle" : "branch"}.
+                      </em>
+                    </span>
+                  }
+                />
+              )}
+            />
+          )}
 
+          {/* Report Date Picker */}
+          <LocalizationProvider
+            dateAdapter={AdapterDayjs}
+            adapterLocale="en-gb"
+          >
+            <DatePicker
+              key={`picker-key-${datePickerKey}`}
+              label="Select report date *"
+              format="DD/MM/YYYY"
+              value={reportDate ? dayjs(reportDate) : null}
+              minDate={MIN_ALLOWED_DATE}
+              maxDate={etlDate || dayjs().endOf("day")}
+              disabled={!reportCode || isApplying}
+              onInputChange={(e) => {
+                setDateInputValue(e.target.value);
+              }}
+              onChange={(newValue) => {
+                if (newValue && newValue.isValid()) {
+                  let correctedValue = newValue;
+                  if (correctedValue.year() < 100) {
+                    correctedValue = correctedValue.set(
+                      "year",
+                      correctedValue.year() + 2000,
+                    );
+                  }
+                  setReportDate(correctedValue.format("YYYY-MM-DD"));
+                  setDateInputValue(correctedValue.format("DD/MM/YYYY"));
+                } else {
+                  setReportDate("");
+                }
+              }}
+              slotProps={{
+                textField: {
+                  size: "small",
+                  fullWidth: true,
+                  placeholder: "DD/MM/YYYY",
+                  error: dateValidation.error,
+                  helperText: (
+                    <span
+                      style={{
+                        fontStyle: "italic",
+                        fontSize: "0.75rem",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        marginTop: "4px",
+                        color: dateValidation.error ? "#d32f2f" : "inherit",
+                        fontWeight: dateValidation.error ? 600 : "normal",
+                      }}
+                    >
+                      <InfoIcon sx={{ fontSize: "0.625rem" }} />
+                      {dateValidation.text}
+                    </span>
+                  ),
+                },
+                day: {
+                  showDaysOutsideCurrentMonth: true,
+                },
+              }}
+            />
+          </LocalizationProvider>
+        </Box>
+      </DialogContent>
 
-  // Configuration array for flexible, equal-width filtering items
-  const filterItems = [
-    {
-      label: "Report Type",
-      value: cleanReport,
-      icon: <AssignmentIcon sx={{ color: "#475569", fontSize: 17 }} />,
-    },
-    {
-      label: "Head Code",
-      value: cleanHead,
-      icon: <AccountBalanceIcon sx={{ color: "#475569", fontSize: 17 }} />,
-    },
-    {
-      label: "Scope",
-      value: cleanScope,
-      icon: <LayersIcon sx={{ color: "#475569", fontSize: 17 }} />,
-    },
-    {
-      // --- FIX 1: Use raw viewCode for logical checks, not the pretty display name ---
-      label: appliedFilters?.viewCode?.includes("CIRCLE") ? "Circle" : "Branch",
-      value: regionDisplay,
-      icon: <LocationOnIcon sx={{ color: "#475569", fontSize: 17 }} />,
-    },
-    {
-      label: "Report Date",
-      value: cleanDate,
-      icon: <CalendarMonthIcon sx={{ color: "#475569", fontSize: 17 }} />,
-    },
-  ];
-
-  // Filter out the 4th item (index 3) if scope contains 'BANK'
-  const displayedItems = filterItems.filter((item, index) => {
-    // --- FIX 2: Check the raw backend viewCode to safely hide the region box ---
-    if (index === 3 && appliedFilters?.viewCode?.includes("BANK")) {
-      return false; // Exclude the region box for Bank level
-    }
-    return true; // Keep all other items
-  });
+      <DialogActions sx={{ p: 2, px: 3 }}>
+        <Button
+          onClick={handleReset}
+          color="inherit"
+          variant="outlined"
+          disabled={isApplying}
+        >
+          Reset Form
+        </Button>
+        <Button
+          onClick={handleApply}
+          color="primary"
+          variant="contained"
+          disabled={!isApplyEnabled || isApplying}
+        >
+          {isApplying ? "Applying..." : "Apply"}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
