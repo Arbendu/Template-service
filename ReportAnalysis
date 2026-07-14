@@ -799,6 +799,7 @@ export default function FilterDialog({
       reportDate,
     });
   };
+  const handlePaste = (event) => { event.preventDefault();};
 
   // Comprehensive validation metrics logic
   const dateValidation = useMemo(() => {
@@ -986,8 +987,10 @@ export default function FilterDialog({
                 {...params}
                 label="Search Head Code"
                 variant="outlined"
+                inputProps={{ ...params.inputProps, maxLength:50 }}
                 InputProps={{
                   ...params.InputProps,
+                  onPaste: handlePaste,
                   endAdornment: (
                     <React.Fragment>
                       {isHeadsLoading ? (
@@ -1098,7 +1101,9 @@ export default function FilterDialog({
                   // 4. Ensure no conflicting value/onChange props are passed here
                   inputProps={{
                     ...params.inputProps,
-                    autoComplete: "off", // Prevent browser autofill bypass
+                    onPaste: handlePaste,
+                    autoComplete: "off",
+                    maxLength: 50,
                   }}
                   InputProps={{
                     ...params.InputProps,
@@ -1216,6 +1221,7 @@ export default function FilterDialog({
     </Dialog>
   );
 }
+
 
 
 
