@@ -685,3 +685,32 @@ export default function FilterDialog({
     </Dialog>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  // Derived available Scopes directly from Config Views
+  const availableViews = useMemo(() => {
+    if (!reportCode) return [];
+    const report = reportsConfig.find((r) => r.reportCode === reportCode);
+    
+    if (!report?.views) return [];
+
+    // Create a shallow copy of the views array and sort it alphabetically by displayName
+    return [...report.views].sort((a, b) =>
+      a.displayName.localeCompare(b.displayName)
+    );
+  }, [reportCode, reportsConfig]);
