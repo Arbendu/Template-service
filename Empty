@@ -432,3 +432,59 @@ export default function FilterDialog({
   </Tooltip>
 )}
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+CREATE OR REPLACE VIEW INT_CAP AS
+SELECT
+    R.HEAD_CODE AS REPORT_HEAD,
+    R.HEAD_DESC,
+
+    SUM(
+        CASE
+            WHEN TO_CHAR(R.CGL) NOT LIKE '5%'
+            THEN NVL(G.INR_BALANCE, 0)
+            ELSE 0
+        END
+    ) AS PRINCIPLE_AMOUNT,
+
+    SUM(
+        CASE
+            WHEN TO_CHAR(R.CGL) LIKE '5%'
+            THEN NVL(G.INR_BALANCE, 0)
+            ELSE 0
+        END
+    ) AS CAPITALIZED_AMOUNT,
+
+    SUM(NVL(G.INR_BALANCE, 0)) AS TOTAL_AMOUNT
+
+FROM RB_PARSED_TEMPLATE R
+LEFT JOIN GL_BALANCE G
+       ON R.CGL = G.CGL
+
+GROUP BY
+    R.HEAD_CODE,
+    R.HEAD_DESC
+
+ORDER BY
+    R.HEAD_CODE;
