@@ -1,0 +1,143 @@
+// ==============================================================================================================================================================================
+// /CompareTemplate/DiffText
+// ===============================================================================================================================================================================
+
+import React, { memo } from "react";
+import { Typography, Box } from "@mui/material";
+import { alpha } from "@mui/material/styles";
+
+export const DiffText = memo(({ value, otherValue, type }) => {
+  if (value === null || value === undefined) {
+    return <Typography variant="body2" color="text.secondary">—</Typography>;
+  }
+
+  // 1. Handle Arrays (e.g., Array of Filter Objects)
+  if (Array.isArray(value)) {
+    const otherArr = Array.isArray(otherValue) ? otherValue : [];
+    return (
+      <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+        {value.map((item, idx) => {
+          // If the array contains objects, recursively diff them by their index
+          if (typeof item === "object" && item !== null) {
+            const otherItem = otherArr[idx];
+            return (
+              <Box key={idx} sx={{ pl: 1, borderLeft: (theme) => `2px solid ${theme.palette.divider}`, mb: 1 }}>
+                <DiffText value={item} otherValue={otherItem} type={type} />
+              </Box>
+            );
+          }
+
+          // If the array contains primitives, highlight only the missing/added items
+          const existsInOther = otherArr.includes(item);
+          const isRemoved = type === "old" && !existsInOther;
+          const isAdded = type === "new" && !existsInOther;
+
+          return (
+            <Typography
+              key={idx}
+              variant="body2"
+              sx={(theme) => ({
+                textDecoration: isRemoved ? "line-through" : "none",
+                color: isRemoved ? "error.main" : isAdded ? "success.main" : "text.primary",
+                fontWeight: isAdded ? "bold" : "normal",
+                bgcolor: isAdded
+                  ? alpha(theme.palette.success.main, 0.15)
+                  : isRemoved
+                    ? alpha(theme.palette.error.main, 0.15)
+                    : "transparent",
+                px: 0.5, borderRadius: 1, display: "inline-block", mr: 0.5, mb: 0.5, fontSize: "0.75rem", fontFamily: "monospace",
+              })}
+            >
+              • {item}
+            </Typography>
+          );
+        })}
+      </Box>
+    );
+  }
+
+  // 2. Handle Objects (Recursively diff each key)
+  if (typeof value === "object" && value !== null) {
+    return (
+      <Box sx={{ pl: 1, borderLeft: (theme) => `1px solid ${theme.palette.divider}` }}>
+        {Object.entries(value).map(([key, val]) => (
+          <Box key={key} sx={{ mb: 1 }}>
+            <Typography variant="caption" sx={{ fontWeight: "bold", color: "text.secondary", display: "block" }}>
+              {key.toUpperCase()}:
+            </Typography>
+            <DiffText value={val} otherValue={otherValue ? otherValue[key] : undefined} type={type} />
+          </Box>
+        ))}
+      </Box>
+    );
+  }
+
+  // 3. Handle Primitives (Strings, Numbers)
+  const isChanged = value !== otherValue;
+
+  // SPECIAL FIX: Handle stringified arrays (e.g., "[1001, 1002]") individually so the whole block doesn't turn red/green
+  if (
+    isChanged &&
+    typeof value === "string" && typeof otherValue === "string" &&
+    value.trim().startsWith("[") && value.trim().endsWith("]") &&
+    otherValue.trim().startsWith("[") && otherValue.trim().endsWith("]")
+  ) {
+    try {
+      const valArr = JSON.parse(value);
+      const otherArr = JSON.parse(otherValue);
+
+      if (Array.isArray(valArr) && Array.isArray(otherArr)) {
+        return (
+          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5, alignItems: "center" }}>
+            <Typography variant="body2" sx={{ fontFamily: "monospace" }}>[</Typography>
+            {valArr.map((v, i) => {
+              // Check if specific array value was added or removed
+              const existsInOther = otherArr.includes(v);
+              const isRemoved = type === "old" && !existsInOther;
+              const isAdded = type === "new" && !existsInOther;
+
+              return (
+                <Typography
+                  key={i}
+                  variant="body2"
+                  component="span"
+                  sx={(theme) => ({
+                    textDecoration: isRemoved ? "line-through" : "none",
+                    color: isRemoved ? "error.main" : isAdded ? "success.main" : "text.primary",
+                    fontWeight: isAdded ? "bold" : "normal",
+                    bgcolor: isAdded
+                      ? alpha(theme.palette.success.main, 0.15)
+                      : isRemoved
+                        ? alpha(theme.palette.error.main, 0.15)
+                        : "transparent",
+                    px: 0.5, borderRadius: 1, fontSize: "0.8rem", fontFamily: "monospace"
+                  })}
+                >
+                  {typeof v === 'string' ? `"${v}"` : v}{i < valArr.length - 1 ? "," : ""}
+                </Typography>
+              );
+            })}
+            <Typography variant="body2" sx={{ fontFamily: "monospace" }}>]</Typography>
+          </Box>
+        );
+      }
+    } catch (e) {
+      // Silently fail and fallback to standard primitive rendering if JSON.parse fails
+    }
+  }
+
+  // Default rendering for normal strings and numbers
+  return (
+    <Typography
+      variant="body2"
+      sx={(theme) => ({
+        color: isChanged ? (type === "old" ? "error.main" : "success.main") : "text.primary",
+        textDecoration: isChanged && type === "old" ? "line-through" : "none",
+        fontWeight: isChanged && type === "new" ? "bold" : "normal",
+        wordBreak: "break-all",
+      })}
+    >
+      {String(value)}
+    </Typography>
+  );
+});
