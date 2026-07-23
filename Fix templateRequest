@@ -299,3 +299,47 @@ TemplatePayload
         return dtos;
     }
 
+
+
+
+
+
+
+
+
+
+
+
+        // ====================================================================================================
+        // NEW CODE START: Block UPDATE request if no structural changes are detected
+        // ====================================================================================================
+        if (dto.getChangeType() == ChangeType.UPDATE) {
+            ReportTemplate activeTemplate = reportTemplateRepository.findFirstByReportIdAndStatus(targetId, "ACTIVE")
+                    .orElseThrow(() -> new BadRequestException("Active template not found for reportId: " + targetId));
+
+            // Reconstruct the old active template payload
+            TemplatePayload oldPayload = parseOldTemplate(activeTemplate.getTemplateJson());
+            oldPayload.setVariants(fetchVariantsAsDtos(activeTemplate.getTemplateId()));
+
+            // Capture the diffs into variables
+            Map<String, Map<String, ValueDiff>> cellDiffs = jsonCompareUtil.compareCells(oldPayload, dto.getPayload());
+            Map<String, Map<String, ValueDiff>> colDiffs = jsonCompareUtil.compareColumns(oldPayload, dto.getPayload());
+            Map<String, Map<String, ValueDiff>> variantDiffs = jsonCompareUtil.compareVariants(oldPayload.getVariants(), dto.getPayload().getVariants());
+            Map<String, Map<String, ValueDiff>> paramDiffs = jsonCompareUtil.compareGlobalParams(oldPayload.getTemplate().getGlobalParams(), dto.getPayload().getTemplate().getGlobalParams());
+
+            // LOG THE EXACT DIFFERENCES TO THE CONSOLE
+            if (!cellDiffs.isEmpty()) log.info("DETECTED CELL CHANGES: {}", cellDiffs);
+            if (!colDiffs.isEmpty()) log.info("DETECTED COLUMN CHANGES: {}", colDiffs);
+            if (!variantDiffs.isEmpty()) log.info("DETECTED VARIANT CHANGES: {}", variantDiffs);
+            if (!paramDiffs.isEmpty()) log.info("DETECTED PARAM CHANGES: {}", paramDiffs);
+
+            boolean hasChanges = !cellDiffs.isEmpty() || !colDiffs.isEmpty() || !variantDiffs.isEmpty() || !paramDiffs.isEmpty();
+
+            // If everything is empty, there are no changes
+            if (!hasChanges) {
+                throw new BadRequestException("No changes detected. Update request cannot be saved.");
+            }
+        }
+        // ====================================================================================================
+        // NEW CODE END
+        // ====================================================================================================
