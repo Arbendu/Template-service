@@ -205,3 +205,9 @@ const GridCell = memo(({ cell, cellKey, hasDiff, isSelected, onCellClick, side }
 
 
 keytool -list -keystore "F:\Arbendu's-Workspace\Software\jdk-22\lib\security\cacerts" -storepass changeit | findstr jfrog
+
+
+
+
+set JAVA_HOME=F:\Arbendu's-Workspace\Software\jdk-21.0.9
+set PATH=%JAVA_HOME%\bin;%PATH%
