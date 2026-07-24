@@ -1,1 +1,74 @@
 
+    // ========================================================================
+    // JsonCompareUtil.java
+    // ========================================================================
+
+    // 1. Add the ObjectMapper at the top of your helper methods section
+    private static final com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+
+    // 2. REPLACE your existing compareField method with this one:
+    private void compareField(String field, Object oldVal, Object newVal, Map<String, ValueDiff> diffs) {
+        // Step 1: Standard Java equals check (handles nulls and exact primitive matches)
+        if (Objects.equals(oldVal, newVal)) {
+            return;
+        }
+
+        // Step 2: Deep JSON Structural check
+        // This solves false positives for Lists, Maps, DTOs without equals(), and Enum/String mismatches
+        try {
+            com.fasterxml.jackson.databind.JsonNode oldNode = oldVal != null ? mapper.valueToTree(oldVal) : mapper.nullNode();
+            com.fasterxml.jackson.databind.JsonNode newNode = newVal != null ? mapper.valueToTree(newVal) : mapper.nullNode();
+
+            if (oldNode.equals(newNode)) {
+                return; // The data is structurally identical, ignore the change!
+            }
+        } catch (Exception e) {
+            // Silently fallback to recording the difference if serialization fails
+        }
+
+        // Step 3: If they are truly different, record the difference
+        diffs.put(field, new ValueDiff(oldVal, newVal));
+    }
+
+
+
+
+
+
+
+
+
+
+    // ========================================================================
+    // TemplateDiffServiceImpl.java
+    // ========================================================================
+
+    private TemplatePayload parseTemplate(String json, String source) {
+        try {
+            TemplatePayload dto = objectMapper.readValue(json, TemplatePayload.class);
+            if (dto.getTemplate() != null) {
+                return dto;
+            }
+
+            // Fallback: wrap flat JSON into Template structure
+            Map<String, Object> raw = objectMapper.readValue(json, Map.class);
+            TemplatePayload.Template template = TemplatePayload.Template.builder()
+                    .templateMeta(objectMapper.convertValue(raw.get("templateMeta"), TemplatePayload.TemplateMeta.class))
+                    .reportMeta(objectMapper.convertValue(raw.get("reportMeta"), TemplatePayload.ReportMeta.class))
+                    .reportData(objectMapper.convertValue(raw.get("reportData"), TemplatePayload.ReportData.class))
+                    
+                    // ---> ADD THIS NEW LINE TO FIX GLOBAL PARAMS <---
+                    .globalParams(raw.get("globalParams") != null ? 
+                            objectMapper.convertValue(raw.get("globalParams"), 
+                            objectMapper.getTypeFactory().constructCollectionType(List.class, TemplatePayload.GlobalParamDef.class)) : null)
+                    
+                    .build();
+
+            return TemplatePayload.builder()
+                    .template(template)
+                    .variants(List.of())
+                    .build();
+        } catch (Exception e) {
+            throw new IllegalStateException("Invalid " + source + " JSON", e);
+        }
+    }
