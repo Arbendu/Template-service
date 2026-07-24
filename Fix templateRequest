@@ -72,3 +72,59 @@
             throw new IllegalStateException("Invalid " + source + " JSON", e);
         }
     }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ========================================================================
+// JsonCompareUtil.java
+// ========================================================================
+
+    // 1. ADD THIS NEW HELPER METHOD inside JsonCompareUtil
+    // This safely checks if any object is null, an empty string, or an empty collection
+    private boolean isBlank(Object obj) {
+        if (obj == null) return true;
+        if (obj instanceof String) return ((String) obj).trim().isEmpty();
+        if (obj instanceof Collection) return ((Collection<?>) obj).isEmpty();
+        if (obj instanceof Map) return ((Map<?, ?>) obj).isEmpty();
+        return false;
+    }
+
+    // 2. UPDATE your existing compareField method
+    private void compareField(String field, Object oldVal, Object newVal, Map<String, ValueDiff> diffs) {
+        
+        // ---> NEW LOGIC: Treat null, "", [], and {} as structurally identical <---
+        if (isBlank(oldVal) && isBlank(newVal)) {
+            return; // Ignore the change!
+        }
+
+        // Step 1: Standard Java equals check
+        if (Objects.equals(oldVal, newVal)) {
+            return;
+        }
+
+        // Step 2: Deep JSON Structural check
+        try {
+            com.fasterxml.jackson.databind.JsonNode oldNode = oldVal != null ? mapper.valueToTree(oldVal) : mapper.nullNode();
+            com.fasterxml.jackson.databind.JsonNode newNode = newVal != null ? mapper.valueToTree(newVal) : mapper.nullNode();
+
+            if (oldNode.equals(newNode)) {
+                return; 
+            }
+        } catch (Exception e) {
+            // Silently fallback 
+        }
+
+        // Step 3: If they are truly different, record the difference
+        diffs.put(field, new ValueDiff(oldVal, newVal));
+    }
