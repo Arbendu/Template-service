@@ -128,3 +128,70 @@
         // Step 3: If they are truly different, record the difference
         diffs.put(field, new ValueDiff(oldVal, newVal));
     }
+
+
+
+
+
+
+
+
+
+
+
+// ==============================================================================================================================================================================
+// /CompareTemplate/TemplateGrid (Update the GridCell component)
+// ===============================================================================================================================================================================
+
+const GridCell = memo(({ cell, cellKey, hasDiff, isSelected, onCellClick, side }) => {
+  const cellStyle = cell?.style || {};
+  
+  // ---> CHANGED: Smartly determine what to display based on the cell type <---
+  let rawValue = "";
+  if (cell?.value !== null && cell?.value !== undefined && cell?.value !== "") {
+    rawValue = cell.value; // For standard TEXT cells
+  } else if (cell?.expression) {
+    rawValue = cell.expression; // For FORMULA cells
+  } else if (cell?.source) {
+    // For DB_SUM, DB_VALUE, etc., show a summary like "[DB_SUM] INR_BALANCE"
+    rawValue = `[${cell.type || 'DB'}] ${cell.source.column || ''}`.trim();
+  } else if (cell?.type && cell.type !== "TEXT") {
+    // Fallback for any other complex type without a value
+    rawValue = `[${cell.type}]`; 
+  }
+
+  const displayValue = typeof rawValue === "object" && rawValue !== null ? JSON.stringify(rawValue) : String(rawValue);
+
+  return (
+    <TableCell
+      onClick={() => hasDiff && onCellClick(cellKey)}
+      colSpan={cell?.colSpan || 1}
+      align={cell?.align?.toLowerCase() || "center"}
+      id={isSelected ? "selected-cell-scroll-target" : undefined}
+      sx={(theme) => ({
+        border: `1px solid ${theme.palette.divider}`,
+        cursor: hasDiff ? "pointer" : "default",
+        bgcolor: isSelected
+          ? alpha(theme.palette.secondary.main, 0.2)
+          : hasDiff
+            ? side === "OLD"
+              ? alpha(theme.palette.error.main, 0.1)
+              : alpha(theme.palette.success.main, 0.1)
+            : cellStyle.backgroundColor || theme.palette.background.paper,
+        color: cellStyle.color || "inherit",
+        fontWeight: cellStyle.bold || isSelected ? "bold" : "normal",
+        fontStyle: cellStyle.italic ? "italic" : "normal",
+        fontSize: "0.72rem", height: 38, minWidth: 100, maxWidth: 150,
+        boxShadow: isSelected ? `inset 0 0 0 2px ${theme.palette.secondary.main}` : "none",
+        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", p: 0.5, transition: "background-color 0.2s",
+      })}
+    >
+      <Tooltip title={displayValue} placement="left-start" arrow>
+        <span>{displayValue}</span>
+      </Tooltip>
+      {hasDiff && !displayValue && (
+        <Typography variant="caption" color="text.disabled" sx={{ fontStyle: "italic" }}>(empty)</Typography>
+      )}
+    </TableCell>
+  );
+}, (prev, next) => prev.isSelected === next.isSelected && prev.hasDiff === next.hasDiff && prev.cell === next.cell);
