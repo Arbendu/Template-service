@@ -195,3 +195,13 @@ const GridCell = memo(({ cell, cellKey, hasDiff, isSelected, onCellClick, side }
     </TableCell>
   );
 }, (prev, next) => prev.isSelected === next.isSelected && prev.hasDiff === next.hasDiff && prev.cell === next.cell);
+
+
+
+
+
+
+
+
+
+keytool -list -keystore "F:\Arbendu's-Workspace\Software\jdk-22\lib\security\cacerts" -storepass changeit | findstr jfrog
