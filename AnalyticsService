@@ -7,7 +7,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.3.0</version>
+        <version>4.1.0</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>com.tcs.fincore</groupId>
@@ -94,6 +94,11 @@
             <scope>runtime</scope>
         </dependency>
 
+<!--        <dependency>-->
+<!--            <groupId>org.springframework.boot</groupId>-->
+<!--            <artifactId>spring-boot-starter-restclient</artifactId>-->
+<!--        </dependency>-->
+
     </dependencies>
 
     <build>
@@ -103,10 +108,17 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+            </plugin>
         </plugins>
     </build>
 
 </project>
+
 
 
 
@@ -153,6 +165,8 @@ spring.jpa.database-platform=org.hibernate.dialect.OracleDialect
 spring.jpa.hibernate.ddl-auto=none
 spring.jpa.open-in-view=false
 
+spring.autoconfigure.exclude=org.springframework.boot.restclient.autoconfigure.RestClientAutoConfiguration
+
 
 
 
@@ -198,16 +212,14 @@ public class DruidRestClient {
     private static final Logger log = LoggerFactory.getLogger(DruidRestClient.class);
     private final RestClient restClient;
 
-    public DruidRestClient(
-            RestClient.Builder restClientBuilder,
-            @Value("${druid.router.url:https://10.177.103.194:8282}") String druidUrl) {
+    public DruidRestClient(@Value("${druid.router.url:https://10.177.103.194:8282}") String druidUrl) {
 
         log.info("Initializing Druid REST Client targeting secure endpoint: [{}]", druidUrl);
 
         // Build a secure Java 21 request factory that accepts internal corporate self-signed SSL certificates
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(createSslConfiguredHttpClient());
 
-        this.restClient = restClientBuilder
+        this.restClient = RestClient.builder()
                 .requestFactory(requestFactory)
                 .baseUrl(druidUrl)
                 .defaultHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
@@ -403,10 +415,11 @@ import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
-import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
+//import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.GenericJacksonJsonRedisSerializer;
 import org.springframework.data.redis.serializer.RedisSerializationContext;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
-
+import tools.jackson.databind.ObjectMapper;
 import java.time.Duration;
 
 @Configuration
@@ -414,12 +427,12 @@ import java.time.Duration;
 public class RedisConfig {
 
     @Bean
-    public RedisCacheConfiguration cacheConfiguration() {
+    public RedisCacheConfiguration cacheConfiguration(ObjectMapper objectMapper) {
         return RedisCacheConfiguration.defaultCacheConfig()
                 .entryTtl(Duration.ofMinutes(30)) // Adjust TTL based on your data freshness SLA
                 .disableCachingNullValues()
                 .serializeKeysWith(RedisSerializationContext.SerializationPair.fromSerializer(new StringRedisSerializer()))
-                .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(new GenericJackson2JsonRedisSerializer()));
+                .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(new GenericJacksonJsonRedisSerializer(objectMapper)));
     }
 }
 
@@ -539,7 +552,8 @@ public class SecurityConfig {
 
 package com.fincore.analyticsservice.controller;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+//import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import com.fincore.analyticsservice.dto.DrillDownRequest;
 import com.fincore.analyticsservice.dto.DrillDownResponse;
 import com.fincore.analyticsservice.dto.HeadSearchResponse;
@@ -574,7 +588,7 @@ public class AnalyticsController {
     private final ReportConfigService configService;
 
     public AnalyticsController(SemanticDrillDownService semanticDrillDownService, JwtUtil jwtUtil,
-                               ReportConfigService configService, ObjectMapper objectMapper,
+                               ReportConfigService configService, JsonMapper jsonMapper,
                                RbParsedTemplateRepository templateRepository) {
         this.semanticDrillDownService = semanticDrillDownService;
         this.jwtUtil = jwtUtil;
@@ -938,9 +952,10 @@ public class GlobalExceptionHandler {
 
 package com.fincore.analyticsservice.mock;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.JsonNode;
+//import com.fasterxml.jackson.databind.JsonMapper;
+import tools.jackson.databind.json.JsonMapper;
 import com.fincore.analyticsservice.dto.DrillDownRequest;
 import com.fincore.analyticsservice.dto.DrillDownResponse;
 import com.fincore.analyticsservice.dto.FilterDto;
@@ -964,13 +979,13 @@ import java.util.stream.Collectors;
 @Service
 public class MockDruidEngine {
 
-    private final ObjectMapper objectMapper;
+    private final JsonMapper jsonMapper;
     @Value("${app.mock.druid.enabled:false}")
     private boolean mockEnabled;
     private List<Map<String, Object>> mockData = new ArrayList<>();
 
-    public MockDruidEngine(ObjectMapper objectMapper) {
-        this.objectMapper = objectMapper;
+    public MockDruidEngine(JsonMapper jsonMapper) {
+        this.jsonMapper = jsonMapper;
     }
 
     @PostConstruct
@@ -984,12 +999,12 @@ public class MockDruidEngine {
             log.warn("⏳ ST ENVIRONMENT MOCK DETECTED: Loading mock_druid_data.json into memory...");
             InputStream is = new ClassPathResource("report.json").getInputStream();
 
-            JsonNode rootNode = objectMapper.readTree(is);
+            JsonNode rootNode = jsonMapper.readTree(is);
             if (rootNode.isObject() && rootNode.has("rows")) {
-                mockData = objectMapper.convertValue(rootNode.get("rows"), new TypeReference<List<Map<String, Object>>>() {
+                mockData = jsonMapper.convertValue(rootNode.get("rows"), new TypeReference<List<Map<String, Object>>>() {
                 });
             } else if (rootNode.isArray()) {
-                mockData = objectMapper.convertValue(rootNode, new TypeReference<List<Map<String, Object>>>() {
+                mockData = jsonMapper.convertValue(rootNode, new TypeReference<List<Map<String, Object>>>() {
                 });
             }
 
@@ -2006,8 +2021,10 @@ package com.fincore.analyticsservice;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration;
-import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
+//import org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration;
+import org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration;
+//import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
+import org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration;
 import org.springframework.cache.annotation.EnableCaching;
 
 @EnableCaching
@@ -2018,3 +2035,4 @@ public class AnalyticsServiceApplication {
         SpringApplication.run(AnalyticsServiceApplication.class, args);
     }
 }
+
