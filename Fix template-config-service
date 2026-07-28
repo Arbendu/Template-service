@@ -108,3 +108,152 @@
                 throw new BadRequestException("No changes detected. Update request cannot be saved.");
             }
         }
+
+
+
+
+
+
+
+
+
+
+
+    // ========================================================================
+    // JsonCompareUtil.java (Add this helper method)
+    // ========================================================================
+
+    /**
+     * Recursively cleans a JsonNode. It removes any fields that are null, 
+     * empty strings (""), empty arrays ([]), or empty objects ({}).
+     */
+    private com.fasterxml.jackson.databind.JsonNode cleanNode(com.fasterxml.jackson.databind.JsonNode node) {
+        if (node == null || node.isNull()) return null;
+        
+        if (node.isObject()) {
+            com.fasterxml.jackson.databind.node.ObjectNode obj = mapper.createObjectNode();
+            node.fields().forEachRemaining(entry -> {
+                com.fasterxml.jackson.databind.JsonNode cleaned = cleanNode(entry.getValue());
+                if (cleaned != null) {
+                    obj.set(entry.getKey(), cleaned);
+                }
+            });
+            return obj.isEmpty() ? null : obj;
+        } else if (node.isArray()) {
+            com.fasterxml.jackson.databind.node.ArrayNode arr = mapper.createArrayNode();
+            node.forEach(item -> {
+                com.fasterxml.jackson.databind.JsonNode cleaned = cleanNode(item);
+                if (cleaned != null) {
+                    arr.add(cleaned);
+                }
+            });
+            return arr.isEmpty() ? null : arr;
+        } else if (node.isTextual()) {
+            return node.asText().trim().isEmpty() ? null : node;
+        }
+        return node;
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+    // ========================================================================
+    // JsonCompareUtil.java (Update this method)
+    // ========================================================================
+
+    private void compareField(String field, Object oldVal, Object newVal, Map<String, ValueDiff> diffs) {
+        // Step 1: Check top-level blanks
+        if (isBlank(oldVal) && isBlank(newVal)) return;
+        
+        // Step 2: Standard Java equals
+        if (Objects.equals(oldVal, newVal)) return;
+
+        // Step 3: Deep Structural JSON check using the cleaner
+        try {
+            com.fasterxml.jackson.databind.JsonNode oldNode = oldVal != null ? mapper.valueToTree(oldVal) : mapper.nullNode();
+            com.fasterxml.jackson.databind.JsonNode newNode = newVal != null ? mapper.valueToTree(newVal) : mapper.nullNode();
+
+            // Apply the deep cleaner to ignore nested nulls vs empty strings
+            com.fasterxml.jackson.databind.JsonNode oldClean = cleanNode(oldNode);
+            com.fasterxml.jackson.databind.JsonNode newClean = cleanNode(newNode);
+
+            if (oldClean == null && newClean == null) return;
+            if (oldClean != null && oldClean.equals(newClean)) return;
+        } catch (Exception e) {
+            // Silently fallback if Jackson parsing fails
+        }
+
+        // Step 4: Record actual difference
+        diffs.put(field, new ValueDiff(oldVal, newVal));
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    // ========================================================================
+    // JsonCompareUtil.java (Update compareVariants)
+    // ========================================================================
+
+    public Map<String, Map<String, ValueDiff>> compareVariants(
+            List<VariantDto> oldVariants,
+            List<VariantDto> newVariants
+    ) {
+        Map<String, Map<String, ValueDiff>> diffs = new LinkedHashMap<>();
+
+        Set<String> allCodes = new LinkedHashSet<>();
+        if (oldVariants != null) oldVariants.forEach(v -> allCodes.add(v.getVariantCode()));
+        if (newVariants != null) newVariants.forEach(v -> allCodes.add(v.getVariantCode()));
+
+        for (String code : allCodes) {
+            VariantDto oldV = findVariantByCode(oldVariants, code);
+            VariantDto newV = findVariantByCode(newVariants, code);
+
+            // ---- NEW: Sort inner lists to prevent order-based false positives ----
+            if (oldV != null) {
+                if (oldV.getParams() != null) 
+                    oldV.getParams().sort(java.util.Comparator.comparing(p -> p.getParamName() != null ? p.getParamName() : ""));
+                if (oldV.getFilterRules() != null) 
+                    oldV.getFilterRules().sort(java.util.Comparator.comparing(r -> (r.getDbColumn() != null ? r.getDbColumn() : "") + "_" + (r.getParamName() != null ? r.getParamName() : "")));
+            }
+            if (newV != null) {
+                if (newV.getParams() != null) 
+                    newV.getParams().sort(java.util.Comparator.comparing(p -> p.getParamName() != null ? p.getParamName() : ""));
+                if (newV.getFilterRules() != null) 
+                    newV.getFilterRules().sort(java.util.Comparator.comparing(r -> (r.getDbColumn() != null ? r.getDbColumn() : "") + "_" + (r.getParamName() != null ? r.getParamName() : "")));
+            }
+            // ----------------------------------------------------------------------
+
+            Map<String, ValueDiff> fieldDiffs = new LinkedHashMap<>();
+
+            compareField("variantName", oldV != null ? oldV.getVariantName() : null, newV != null ? newV.getVariantName() : null, fieldDiffs);
+            compareField("description", oldV != null ? oldV.getDescription() : null, newV != null ? newV.getDescription() : null, fieldDiffs);
+            compareField("status", oldV != null ? oldV.getStatus() : null, newV != null ? newV.getStatus() : null, fieldDiffs);
+            compareField("params", oldV != null ? oldV.getParams() : null, newV != null ? newV.getParams() : null, fieldDiffs);
+            compareField("filterRules", oldV != null ? oldV.getFilterRules() : null, newV != null ? newV.getFilterRules() : null, fieldDiffs);
+
+            if (!fieldDiffs.isEmpty()) {
+                diffs.put(code, fieldDiffs);
+            }
+        }
+        return diffs;
+    }
