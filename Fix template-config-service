@@ -2,6 +2,63 @@
 // /JsonCompareUtill
 // ===============================================================================================================================================================================
 
+    // ========================================================================
+    // JsonCompareUtil.java (Add this new method)
+    // ========================================================================
+
+    /**
+     * Compare Template Meta, Report Meta, and Row-Level Configs (e.g. Dynamic Filters)
+     */
+    public Map<String, Map<String, ValueDiff>> compareTemplateLevel(TemplatePayload oldTemplate, TemplatePayload newTemplate) {
+        Map<String, Map<String, ValueDiff>> diffs = new LinkedHashMap<>();
+
+        // 1. Compare Meta Fields (Report Name, Description, etc.)
+        Map<String, ValueDiff> metaDiffs = new LinkedHashMap<>();
+        if (oldTemplate != null && newTemplate != null && oldTemplate.getTemplate() != null && newTemplate.getTemplate() != null) {
+            TemplatePayload.TemplateMeta oldTM = oldTemplate.getTemplate().getTemplateMeta();
+            TemplatePayload.TemplateMeta newTM = newTemplate.getTemplate().getTemplateMeta();
+            if (oldTM != null || newTM != null) {
+                compareField("description", oldTM != null ? oldTM.getDescription() : null, newTM != null ? newTM.getDescription() : null, metaDiffs);
+                compareField("pageSize", oldTM != null ? oldTM.getPageSize() : null, newTM != null ? newTM.getPageSize() : null, metaDiffs);
+                compareField("pageOrientation", oldTM != null ? oldTM.getPageOrientation() : null, newTM != null ? newTM.getPageOrientation() : null, metaDiffs);
+            }
+
+            TemplatePayload.ReportMeta oldRM = oldTemplate.getTemplate().getReportMeta();
+            TemplatePayload.ReportMeta newRM = newTemplate.getTemplate().getReportMeta();
+            if (oldRM != null || newRM != null) {
+                compareField("reportName", oldRM != null ? oldRM.getReportName() : null, newRM != null ? newRM.getReportName() : null, metaDiffs);
+            }
+        }
+        if (!metaDiffs.isEmpty()) {
+            diffs.put("TEMPLATE_META", metaDiffs);
+        }
+
+        // 2. Compare Row-Level Configurations (Dynamic Configs, Row Types)
+        List<TemplatePayload.Row> oldRows = getRowsSafe(oldTemplate);
+        List<TemplatePayload.Row> newRows = getRowsSafe(newTemplate);
+        int maxRows = Math.max(oldRows.size(), newRows.size());
+
+        for (int r = 0; r < maxRows; r++) {
+            TemplatePayload.Row oldRow = r < oldRows.size() ? oldRows.get(r) : null;
+            TemplatePayload.Row newRow = r < newRows.size() ? newRows.get(r) : null;
+
+            if (oldRow == null && newRow == null) continue;
+
+            Map<String, ValueDiff> rowDiffs = new LinkedHashMap<>();
+            compareField("rowType", oldRow != null ? oldRow.getRowType() : null, newRow != null ? newRow.getRowType() : null, rowDiffs);
+            compareField("rowTitle", oldRow != null ? oldRow.getRowTitle() : null, newRow != null ? newRow.getRowTitle() : null, rowDiffs);
+            
+            // ---> THIS IS THE MISSING PIECE THAT HOLDS DYNAMIC FILTERS <---
+            compareField("dynamicConfig", oldRow != null ? oldRow.getDynamicConfig() : null, newRow != null ? newRow.getDynamicConfig() : null, rowDiffs);
+
+            if (!rowDiffs.isEmpty()) {
+                String rowKey = (newRow != null && newRow.getId() != null) ? newRow.getId() : (oldRow != null ? oldRow.getId() : "ROW_" + r);
+                diffs.put(rowKey + "_CONFIG", rowDiffs);
+            }
+        }
+
+        return diffs;
+    }
 
 
 
@@ -17,3 +74,37 @@
 
 
 // TemplateRequestServiceImpl
+
+
+        // ====================================================================================================
+        // TemplateRequestServiceImpl.java (Update the UPDATE block inside createRequest)
+        // ====================================================================================================
+        if (dto.getChangeType() == ChangeType.UPDATE) {
+            ReportTemplate activeTemplate = reportTemplateRepository.findFirstByReportIdAndStatus(targetId, "ACTIVE")
+                    .orElseThrow(() -> new BadRequestException("Active template not found for reportId: " + targetId));
+
+            // Reconstruct the old active template payload
+            TemplatePayload oldPayload = parseOldTemplate(activeTemplate.getTemplateJson());
+            oldPayload.setVariants(fetchVariantsAsDtos(activeTemplate.getTemplateId()));
+
+            // Capture all diffs including the new Meta and Row level diffs
+            Map<String, Map<String, ValueDiff>> cellDiffs = jsonCompareUtil.compareCells(oldPayload, dto.getPayload());
+            Map<String, Map<String, ValueDiff>> colDiffs = jsonCompareUtil.compareColumns(oldPayload, dto.getPayload());
+            Map<String, Map<String, ValueDiff>> variantDiffs = jsonCompareUtil.compareVariants(oldPayload.getVariants(), dto.getPayload().getVariants());
+            Map<String, Map<String, ValueDiff>> paramDiffs = jsonCompareUtil.compareGlobalParams(oldPayload.getTemplate().getGlobalParams(), dto.getPayload().getTemplate().getGlobalParams());
+            
+            // ---> CALL NEW COMPARISON HERE <---
+            Map<String, Map<String, ValueDiff>> metaAndRowDiffs = jsonCompareUtil.compareTemplateLevel(oldPayload, dto.getPayload());
+
+            // Check if ANY of the maps have changes
+            boolean hasChanges = !cellDiffs.isEmpty() 
+                              || !colDiffs.isEmpty() 
+                              || !variantDiffs.isEmpty() 
+                              || !paramDiffs.isEmpty() 
+                              || !metaAndRowDiffs.isEmpty(); // Added check here
+
+            // If everything is empty, there are no changes
+            if (!hasChanges) {
+                throw new BadRequestException("No changes detected. Update request cannot be saved.");
+            }
+        }
