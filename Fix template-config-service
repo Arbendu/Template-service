@@ -257,3 +257,68 @@
         }
         return diffs;
     }
+
+
+
+
+
+
+
+
+
+    // ========================================================================
+    // JsonCompareUtil.java (Update compareVariants and add 2 small helpers)
+    // ========================================================================
+
+    public Map<String, Map<String, ValueDiff>> compareVariants(
+            List<VariantDto> oldVariants,
+            List<VariantDto> newVariants
+    ) {
+        Map<String, Map<String, ValueDiff>> diffs = new LinkedHashMap<>();
+
+        Set<String> allCodes = new LinkedHashSet<>();
+        if (oldVariants != null) oldVariants.forEach(v -> allCodes.add(v.getVariantCode()));
+        if (newVariants != null) newVariants.forEach(v -> allCodes.add(v.getVariantCode()));
+
+        for (String code : allCodes) {
+            VariantDto oldV = findVariantByCode(oldVariants, code);
+            VariantDto newV = findVariantByCode(newVariants, code);
+
+            Map<String, ValueDiff> fieldDiffs = new LinkedHashMap<>();
+
+            compareField("variantName", oldV != null ? oldV.getVariantName() : null, newV != null ? newV.getVariantName() : null, fieldDiffs);
+            compareField("description", oldV != null ? oldV.getDescription() : null, newV != null ? newV.getDescription() : null, fieldDiffs);
+            compareField("status", oldV != null ? oldV.getStatus() : null, newV != null ? newV.getStatus() : null, fieldDiffs);
+            
+            // ---- FIX: Use safe sorting methods instead of in-place .sort() ----
+            compareField("params", 
+                    oldV != null ? sortParamsSafe(oldV.getParams()) : null, 
+                    newV != null ? sortParamsSafe(newV.getParams()) : null, fieldDiffs);
+            
+            compareField("filterRules", 
+                    oldV != null ? sortRulesSafe(oldV.getFilterRules()) : null, 
+                    newV != null ? sortRulesSafe(newV.getFilterRules()) : null, fieldDiffs);
+
+            if (!fieldDiffs.isEmpty()) {
+                diffs.put(code, fieldDiffs);
+            }
+        }
+        return diffs;
+    }
+
+    // Helper to safely sort params without modifying original immutable lists
+    private List<VariantParamDto> sortParamsSafe(List<VariantParamDto> params) {
+        if (params == null) return null;
+        return params.stream()
+                .sorted(java.util.Comparator.comparing(p -> p.getParamName() != null ? p.getParamName() : ""))
+                .collect(java.util.stream.Collectors.toList());
+    }
+
+    // Helper to safely sort rules without modifying original immutable lists
+    private List<FilterRuleDto> sortRulesSafe(List<FilterRuleDto> rules) {
+        if (rules == null) return null;
+        return rules.stream()
+                .sorted(java.util.Comparator.comparing(r -> (r.getDbColumn() != null ? r.getDbColumn() : "") + "_" + (r.getParamName() != null ? r.getParamName() : "")))
+                .collect(java.util.stream.Collectors.toList());
+    }
+
