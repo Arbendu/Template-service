@@ -1,1 +1,378 @@
+package com.fincore.TemplateConfigurationService.util;
+
+import com.fincore.TemplateConfigurationService.dto.*;
+import org.springframework.stereotype.Component;
+
+// Jackson 3.x Imports
+import com.fasterxml.jackson.annotation.JsonInclude;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.core.JacksonException;
+
+import java.util.*;
+import java.util.stream.Collectors;
+
+@Component
+public class JsonCompareUtil {
+
+    // ========================================================================
+    // Static Mappers (Strictly using JsonMapper for Jackson 3)
+    // ========================================================================
+    
+    // Standard mapper for general JSON operations
+    private static final JsonMapper mapper = JsonMapper.builder().build();
+
+    // Dedicated diff mapper that automatically strips nulls, "", [], and {}
+    private static final JsonMapper diffMapper = JsonMapper.builder()
+            .serializationInclusion(JsonInclude.Include.NON_EMPTY)
+            .build();
+
+
+    // ========================================================================
+    // Main Comparison Methods
+    // ========================================================================
+
+    /**
+     * Compare Rows and Cells
+     */
+    public Map<String, Map<String, ValueDiff>> compareCells(
+            TemplatePayload oldTemplate,
+            TemplatePayload newTemplate
+    ) {
+        Map<String, Map<String, ValueDiff>> diffs = new LinkedHashMap<>();
+
+        List<TemplatePayload.Row> oldRows = getRowsSafe(oldTemplate);
+        List<TemplatePayload.Row> newRows = getRowsSafe(newTemplate);
+
+        int maxRows = Math.max(oldRows.size(), newRows.size());
+
+        for (int r = 0; r < maxRows; r++) {
+            TemplatePayload.Row oldRow = r < oldRows.size() ? oldRows.get(r) : null;
+            TemplatePayload.Row newRow = r < newRows.size() ? newRows.get(r) : null;
+
+            List<TemplatePayload.Cell> oldCells = (oldRow != null) ? oldRow.getCells() : Collections.emptyList();
+            List<TemplatePayload.Cell> newCells = (newRow != null) ? newRow.getCells() : Collections.emptyList();
+
+            int maxCells = Math.max(oldCells.size(), newCells.size());
+
+            for (int c = 0; c < maxCells; c++) {
+                TemplatePayload.Cell oldCell = c < oldCells.size() ? oldCells.get(c) : null;
+                TemplatePayload.Cell newCell = c < newCells.size() ? newCells.get(c) : null;
+
+                if (oldCell == null && newCell == null) continue;
+
+                String cellKey = buildCellKey(oldCell, newCell, r, c);
+                Map<String, ValueDiff> fieldDiffs = compareCellFields(oldCell, newCell);
+
+                if (!fieldDiffs.isEmpty()) {
+                    diffs.put(cellKey, fieldDiffs);
+                }
+            }
+        }
+        return diffs;
+    }
+
+    /**
+     * Compare Column Definitions
+     */
+    public Map<String, Map<String, ValueDiff>> compareColumns(
+            TemplatePayload oldTemplate,
+            TemplatePayload newTemplate
+    ) {
+        Map<String, Map<String, ValueDiff>> diffs = new LinkedHashMap<>();
+
+        List<TemplatePayload.ColumnDefinition> oldCols = getColumnsSafe(oldTemplate);
+        List<TemplatePayload.ColumnDefinition> newCols = getColumnsSafe(newTemplate);
+
+        int maxCols = Math.max(oldCols.size(), newCols.size());
+
+        for (int i = 0; i < maxCols; i++) {
+            TemplatePayload.ColumnDefinition oldCol = i < oldCols.size() ? oldCols.get(i) : null;
+            TemplatePayload.ColumnDefinition newCol = i < newCols.size() ? newCols.get(i) : null;
+
+            if (oldCol == null && newCol == null) continue;
+
+            String colKey = buildColumnKey(oldCol, newCol, i);
+            Map<String, ValueDiff> fieldDiffs = compareColumnFields(oldCol, newCol);
+
+            if (!fieldDiffs.isEmpty()) {
+                diffs.put(colKey, fieldDiffs);
+            }
+        }
+        return diffs;
+    }
+
+    /**
+     * Compare variants
+     */
+    public Map<String, Map<String, ValueDiff>> compareVariants(
+            List<VariantDto> oldVariants,
+            List<VariantDto> newVariants
+    ) {
+        Map<String, Map<String, ValueDiff>> diffs = new LinkedHashMap<>();
+
+        Set<String> allCodes = new LinkedHashSet<>();
+        if (oldVariants != null) oldVariants.forEach(v -> allCodes.add(v.getVariantCode()));
+        if (newVariants != null) newVariants.forEach(v -> allCodes.add(v.getVariantCode()));
+
+        for (String code : allCodes) {
+            VariantDto oldV = findVariantByCode(oldVariants, code);
+            VariantDto newV = findVariantByCode(newVariants, code);
+
+            Map<String, ValueDiff> fieldDiffs = new LinkedHashMap<>();
+
+            compareField("variantName", oldV != null ? oldV.getVariantName() : null, newV != null ? newV.getVariantName() : null, fieldDiffs);
+            compareField("description", oldV != null ? oldV.getDescription() : null, newV != null ? newV.getDescription() : null, fieldDiffs);
+            compareField("status", oldV != null ? oldV.getStatus() : null, newV != null ? newV.getStatus() : null, fieldDiffs);
+            compareField("params", oldV != null ? sortParamsSafe(oldV.getParams()) : null, newV != null ? sortParamsSafe(newV.getParams()) : null, fieldDiffs);
+            compareField("filterRules", oldV != null ? sortRulesSafe(oldV.getFilterRules()) : null, newV != null ? sortRulesSafe(newV.getFilterRules()) : null, fieldDiffs);
+
+            if (!fieldDiffs.isEmpty()) {
+                diffs.put(code, fieldDiffs);
+            }
+        }
+        return diffs;
+    }
+
+    /**
+     * Compare Global Params
+     */
+    public Map<String, Map<String, ValueDiff>> compareGlobalParams(
+            List<TemplatePayload.GlobalParamDef> oldParams,
+            List<TemplatePayload.GlobalParamDef> newParams
+    ) {
+        Map<String, Map<String, ValueDiff>> diffs = new LinkedHashMap<>();
+        Set<String> allNames = new LinkedHashSet<>();
+        
+        if (oldParams != null) oldParams.forEach(p -> allNames.add(p.getName()));
+        if (newParams != null) newParams.forEach(p -> allNames.add(p.getName()));
+
+        for (String name : allNames) {
+            TemplatePayload.GlobalParamDef oldP = findParam(oldParams, name);
+            TemplatePayload.GlobalParamDef newP = findParam(newParams, name);
+
+            Map<String, ValueDiff> fieldDiffs = new LinkedHashMap<>();
+
+            compareField("name", oldP != null ? oldP.getName() : null, newP != null ? newP.getName() : null, fieldDiffs);
+            compareField("label", oldP != null ? oldP.getLabel() : null, newP != null ? newP.getLabel() : null, fieldDiffs);
+            compareField("dataType", oldP != null ? oldP.getDataType() : null, newP != null ? newP.getDataType() : null, fieldDiffs);
+            compareField("mode", oldP != null ? oldP.getMode() : null, newP != null ? newP.getMode() : null, fieldDiffs);
+            compareField("expression", oldP != null ? oldP.getExpression() : null, newP != null ? newP.getExpression() : null, fieldDiffs);
+            compareField("defaultValue", oldP != null ? oldP.getDefaultValue() : null, newP != null ? newP.getDefaultValue() : null, fieldDiffs);
+            compareField("source", oldP != null ? oldP.getSource() : null, newP != null ? newP.getSource() : null, fieldDiffs);
+
+            if (!fieldDiffs.isEmpty()) {
+                diffs.put(name, fieldDiffs);
+            }
+        }
+        return diffs;
+    }
+
+    /**
+     * Compare Template Meta, Report Meta, and Row-Level Configs
+     */
+    public Map<String, Map<String, ValueDiff>> compareTemplateLevel(TemplatePayload oldTemplate, TemplatePayload newTemplate) {
+        Map<String, Map<String, ValueDiff>> diffs = new LinkedHashMap<>();
+
+        // 1. Compare Meta Fields
+        Map<String, ValueDiff> metaDiffs = new LinkedHashMap<>();
+        if (oldTemplate != null && newTemplate != null && oldTemplate.getTemplate() != null && newTemplate.getTemplate() != null) {
+            TemplatePayload.TemplateMeta oldTM = oldTemplate.getTemplate().getTemplateMeta();
+            TemplatePayload.TemplateMeta newTM = newTemplate.getTemplate().getTemplateMeta();
+            
+            if (oldTM != null || newTM != null) {
+                compareField("description", oldTM != null ? oldTM.getDescription() : null, newTM != null ? newTM.getDescription() : null, metaDiffs);
+                compareField("pageSize", oldTM != null ? oldTM.getPageSize() : null, newTM != null ? newTM.getPageSize() : null, metaDiffs);
+                compareField("pageOrientation", oldTM != null ? oldTM.getPageOrientation() : null, newTM != null ? newTM.getPageOrientation() : null, metaDiffs);
+            }
+
+            TemplatePayload.ReportMeta oldRM = oldTemplate.getTemplate().getReportMeta();
+            TemplatePayload.ReportMeta newRM = newTemplate.getTemplate().getReportMeta();
+            if (oldRM != null || newRM != null) {
+                compareField("reportName", oldRM != null ? oldRM.getReportName() : null, newRM != null ? newRM.getReportName() : null, metaDiffs);
+            }
+        }
+        if (!metaDiffs.isEmpty()) {
+            diffs.put("TEMPLATE_META", metaDiffs);
+        }
+
+        // 2. Compare Row-Level Configurations
+        List<TemplatePayload.Row> oldRows = getRowsSafe(oldTemplate);
+        List<TemplatePayload.Row> newRows = getRowsSafe(newTemplate);
+        int maxRows = Math.max(oldRows.size(), newRows.size());
+
+        for (int r = 0; r < maxRows; r++) {
+            TemplatePayload.Row oldRow = r < oldRows.size() ? oldRows.get(r) : null;
+            TemplatePayload.Row newRow = r < newRows.size() ? newRows.get(r) : null;
+
+            if (oldRow == null && newRow == null) continue;
+
+            Map<String, ValueDiff> rowDiffs = new LinkedHashMap<>();
+            compareField("rowType", oldRow != null ? oldRow.getRowType() : null, newRow != null ? newRow.getRowType() : null, rowDiffs);
+            compareField("rowTitle", oldRow != null ? oldRow.getRowTitle() : null, newRow != null ? newRow.getRowTitle() : null, rowDiffs);
+            compareField("dynamicConfig", oldRow != null ? oldRow.getDynamicConfig() : null, newRow != null ? newRow.getDynamicConfig() : null, rowDiffs);
+
+            if (!rowDiffs.isEmpty()) {
+                String rowKey = (newRow != null && newRow.getId() != null) ? newRow.getId() : (oldRow != null ? oldRow.getId() : "ROW_" + r);
+                diffs.put(rowKey + "_CONFIG", rowDiffs);
+            }
+        }
+
+        return diffs;
+    }
+
+    // ========================================================================
+    // Core Evaluation Logic
+    // ========================================================================
+
+    /**
+     * Highly robust JSON structural comparison with exhaustive error boundaries.
+     */
+    private void compareField(String field, Object oldVal, Object newVal, Map<String, ValueDiff> diffs) {
+        
+        // Check for empty boundaries 
+        if (isBlank(oldVal) && isBlank(newVal)) {
+            return;
+        }
+        
+        // Fast-path: Standard object/primitive equality check
+        if (Objects.equals(oldVal, newVal)) {
+            return;
+        }
+
+        // Deep JSON structural comparison
+        try {
+            JsonNode oldNode = oldVal != null ? diffMapper.valueToTree(oldVal) : diffMapper.nullNode();
+            JsonNode newNode = newVal != null ? diffMapper.valueToTree(newVal) : diffMapper.nullNode();
+
+            boolean oldIsEmpty = oldNode.isNull() || (oldNode.isContainerNode() && oldNode.isEmpty());
+            boolean newIsEmpty = newNode.isNull() || (newNode.isContainerNode() && newNode.isEmpty());
+
+            if (oldIsEmpty && newIsEmpty) {
+                return;
+            }
+
+            if (oldNode.equals(newNode)) {
+                return;
+            }
+            
+        } catch (IllegalArgumentException e) {
+            // Thrown by valueToTree if the object data shape is entirely incompatible with Jackson
+            // We swallow this intentionally to default to recording the ValueDiff below
+        } catch (JacksonException e) {
+            // Catches any underlying Jackson 3 processing, streaming, or databind exceptions
+            // Ensures a corrupted JSON node won't crash the entire transaction
+        } catch (Exception e) {
+            // Ultimate fallback for JVM-level exceptions (e.g. OutOfMemory handling edge cases)
+            // Safety net to guarantee the business logic continues
+        }
+
+        // If all checks conclude they are different (or if mapping throws), record the difference
+        diffs.put(field, new ValueDiff(oldVal, newVal));
+    }
+
+    // ========================================================================
+    // Helper Methods
+    // ========================================================================
+
+    private Map<String, ValueDiff> compareCellFields(TemplatePayload.Cell oldCell, TemplatePayload.Cell newCell) {
+        Map<String, ValueDiff> diffs = new LinkedHashMap<>();
+
+        if (oldCell == null && newCell != null) {
+            compareField("value", null, newCell.getValue(), diffs);
+            return diffs;
+        }
+        if (oldCell != null && newCell == null) {
+            compareField("value", oldCell.getValue(), null, diffs);
+            return diffs;
+        }
+
+        compareField("type", oldCell.getType(), newCell.getType(), diffs);
+        compareField("value", oldCell.getValue(), newCell.getValue(), diffs);
+        compareField("expression", oldCell.getExpression(), newCell.getExpression(), diffs);
+        compareField("variables", oldCell.getVariables(), newCell.getVariables(), diffs);
+        compareField("source", oldCell.getSource(), newCell.getSource(), diffs);
+        compareField("render", oldCell.getRender(), newCell.getRender(), diffs);
+        return diffs;
+    }
+
+    private Map<String, ValueDiff> compareColumnFields(TemplatePayload.ColumnDefinition oldCol, TemplatePayload.ColumnDefinition newCol) {
+        Map<String, ValueDiff> diffs = new LinkedHashMap<>();
+
+        if (oldCol == null && newCol != null) {
+            compareField("name", null, newCol.getName(), diffs);
+            return diffs;
+        }
+        if (oldCol != null && newCol == null) {
+            compareField("name", oldCol.getName(), null, diffs);
+            return diffs;
+        }
+
+        assert oldCol != null;
+        compareField("id", oldCol.getId(), newCol.getId(), diffs);
+        compareField("name", oldCol.getName(), newCol.getName(), diffs);
+        compareField("format", oldCol.getFormat(), newCol.getFormat(), diffs);
+        compareField("filters", oldCol.getTemplateColumnFilters(), newCol.getTemplateColumnFilters(), diffs);
+
+        return diffs;
+    }
+
+    private boolean isBlank(Object obj) {
+        if (obj == null) return true;
+        if (obj instanceof String) return ((String) obj).trim().isEmpty();
+        if (obj instanceof Collection) return ((Collection<?>) obj).isEmpty();
+        if (obj instanceof Map) return ((Map<?, ?>) obj).isEmpty();
+        return false;
+    }
+
+    private TemplatePayload.GlobalParamDef findParam(List<TemplatePayload.GlobalParamDef> list, String name) {
+        if (list == null) return null;
+        return list.stream().filter(p -> name.equals(p.getName())).findFirst().orElse(null);
+    }
+
+    private VariantDto findVariantByCode(List<VariantDto> list, String code) {
+        if (list == null || code == null) return null;
+        return list.stream().filter(v -> code.equals(v.getVariantCode())).findFirst().orElse(null);
+    }
+
+    private List<VariantParamDto> sortParamsSafe(List<VariantParamDto> params) {
+        if (params == null) return null;
+        return params.stream()
+                .sorted(Comparator.comparing(p -> p.getParamName() != null ? p.getParamName() : ""))
+                .collect(Collectors.toList());
+    }
+
+    private List<FilterRuleDto> sortRulesSafe(List<FilterRuleDto> rules) {
+        if (rules == null) return null;
+        return rules.stream()
+                .sorted(Comparator.comparing(r -> (r.getDbColumn() != null ? r.getDbColumn() : "") + "_" + (r.getParamName() != null ? r.getParamName() : "")))
+                .collect(Collectors.toList());
+    }
+
+    private String buildCellKey(TemplatePayload.Cell oldCell, TemplatePayload.Cell newCell, int r, int c) {
+        if (newCell != null && newCell.getId() != null) return newCell.getId();
+        if (oldCell != null && oldCell.getId() != null) return oldCell.getId();
+        return "R" + r + "C" + c;
+    }
+
+    private String buildColumnKey(TemplatePayload.ColumnDefinition oldCol, TemplatePayload.ColumnDefinition newCol, int index) {
+        if (newCol != null && newCol.getId() != null) return newCol.getId();
+        if (oldCol != null && oldCol.getId() != null) return oldCol.getId();
+        return "C" + index;
+    }
+
+    private List<TemplatePayload.Row> getRowsSafe(TemplatePayload t) {
+        if (t == null || t.getTemplate() == null || t.getTemplate().getReportData() == null || t.getTemplate().getReportData().getRows() == null) {
+            return Collections.emptyList();
+        }
+        return t.getTemplate().getReportData().getRows();
+    }
+
+    private List<TemplatePayload.ColumnDefinition> getColumnsSafe(TemplatePayload t) {
+        if (t == null || t.getTemplate() == null || t.getTemplate().getReportData() == null || t.getTemplate().getReportData().getColumns() == null) {
+            return Collections.emptyList();
+        }
+        return t.getTemplate().getReportData().getColumns();
+    }
+}
 
