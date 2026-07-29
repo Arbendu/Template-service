@@ -1,1 +1,210 @@
 
+import { useState, useEffect, useMemo } from "react";
+import Dialog from "@mui/material/Dialog";
+import DialogTitle from "@mui/material/DialogTitle";
+import DialogContent from "@mui/material/DialogContent";
+import DialogActions from "@mui/material/DialogActions";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
+import Typography from "@mui/material/Typography";
+import Box from "@mui/material/Box";
+import Alert from "@mui/material/Alert";
+import { IconButton } from "@mui/material";
+import CloseIcon from "@mui/icons-material/Close";
+
+export const AddRowDialog = ({
+  open,
+  rowType,
+  existingRowIds,
+  onClose,
+  onConfirm,
+}) => {
+  const [customId, setCustomId] = useState("");
+  const [error, setError] = useState("");
+  const [generatedId, setGeneratedId] = useState("");
+
+  // O(1) lookup table for instant collision detection
+  const existingIdsSet = useMemo(() => {
+    return new Set(existingRowIds);
+  }, [existingRowIds]);
+
+  const generateUniqueID = () => {
+    let newId;
+    let isUnique = false;
+    let numAttempts = 0;
+    
+    // Saturation threshold: If we fail 15 times, the 100k space is effectively exhausted.
+    const MAX_NUMERIC_ATTEMPTS = 15; 
+    
+    // Create an array to hold secure random values
+    const randomBuffer = new Uint32Array(1);
+
+    // Phase 1: Exhaust 5-Digit Numerical IDs
+    while (!isUnique && numAttempts < MAX_NUMERIC_ATTEMPTS) {
+      // Generate a cryptographically secure random number
+      window.crypto.getRandomValues(randomBuffer);
+      
+      // Convert to a number between 0 and 99999, padded to 5 digits
+      const numericPart = (randomBuffer[0] % 100000).toString().padStart(5, "0");
+      newId = `R__${numericPart}`;
+
+      if (!existingIdsSet.has(newId)) {
+        isUnique = true;
+      }
+      numAttempts++;
+    }
+
+    // Phase 2: Numerical Exhausted -> Fallback to 5-Character Alphanumeric
+    if (!isUnique) {
+      let alphaAttempts = 0;
+      const MAX_ALPHA_ATTEMPTS = 20;
+
+      while (!isUnique && alphaAttempts < MAX_ALPHA_ATTEMPTS) {
+        // Base36 provides a-z, 0-9. 
+        // We generate a secure string of 5 characters.
+        window.crypto.getRandomValues(randomBuffer);
+        const alphaPart = randomBuffer[0]
+          .toString(36)
+          .substring(0, 5)
+          .padEnd(5, "0");
+          
+        newId = `R__${alphaPart}`;
+
+        if (!existingIdsSet.has(newId)) {
+          isUnique = true;
+        }
+        alphaAttempts++;
+      }
+    }
+
+    // Phase 3: Absolute Fallback (Prevents infinite loops in catastrophic collisions)
+    if (!isUnique) {
+      let counter = 0;
+      do {
+        const fallbackPart = (Date.now() + counter)
+          .toString(36)
+          .slice(-5)
+          .padStart(5, "0");
+        newId = `R__${fallbackPart}`;
+        counter++;
+      } while (existingIdsSet.has(newId));
+    }
+
+    return newId;
+  };
+
+  useEffect(() => {
+    if (open) {
+      const newId = generateUniqueID();
+      setGeneratedId(newId);
+      setCustomId("");
+      setError("");
+    }
+  }, [open, existingIdsSet]);
+
+  const validateId = (id) => {
+    if (!id.trim() || id === "R__") return null;
+
+    if (/\s/.test(id)) {
+      return "Row ID cannot contain spaces";
+    }
+
+    if (!/^R__[a-zA-Z0-9_]+$/.test(id)) {
+      return "Row ID can only contain letters, numbers, and underscores";
+    }
+
+    if (existingIdsSet.has(id)) {
+      return "This Row ID already exists";
+    }
+
+    return null;
+  };
+
+  const handleIdChange = (value) => {
+    setCustomId(value);
+    const idToValidate = value.startsWith("R__") ? value : "R__" + value;
+    const validationError = validateId(idToValidate);
+    setError(validationError || "");
+  };
+
+  const handleConfirm = () => {
+    const trimmedId = customId.trim();
+    let finalId = "";
+
+    if (trimmedId) {
+      finalId = trimmedId.startsWith("R__") ? trimmedId : "R__" + trimmedId;
+      const validationError = validateId(finalId);
+      if (validationError) {
+        setError(validationError);
+        return;
+      }
+    } else {
+      finalId = generatedId;
+    }
+
+    onConfirm(finalId);
+    handleClose();
+  };
+
+  const handleClose = () => {
+    setCustomId("");
+    setError("");
+    onClose();
+  };
+
+  const displayedId = customId.trim()
+    ? customId.trim().startsWith("R__")
+      ? customId.trim()
+      : `R__${customId.trim()}`
+    : generatedId;
+
+  return (
+    <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
+      <DialogTitle sx={{ p: 2, position: "relative" }}>
+        <IconButton
+          onClick={handleClose}
+          sx={{ position: "absolute", right: 16, top: 10 }}
+        >
+          <CloseIcon />
+        </IconButton>
+        <Typography>Add {rowType} Row</Typography>
+      </DialogTitle>
+      <DialogContent>
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
+          <Typography variant="body2" color="text.secondary">
+            Enter a custom Row ID or leave empty to use the suggested ID.
+          </Typography>
+
+          <TextField
+            label="Row ID (optional)"
+            value={customId}
+            onChange={(e) => handleIdChange(e.target.value)}
+            placeholder="e.g., 04512, alpha_row"
+            error={!!error}
+            helperText={error || "Letters, numbers, and underscores only"}
+            fullWidth
+            autoFocus
+          />
+
+          {!customId.trim() && !error && (
+            <Alert severity="info" sx={{ py: 0.5 }}>
+              A unique ID will be used: <strong>{generatedId}</strong>
+            </Alert>
+          )}
+
+          {customId.trim() && !error && (
+            <Alert severity="success" sx={{ py: 0.5 }}>
+              Row will be created with ID: <strong>{displayedId}</strong>
+            </Alert>
+          )}
+        </Box>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={handleClose}>Cancel</Button>
+        <Button onClick={handleConfirm} variant="contained" disabled={!!error}>
+          Add Row
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
