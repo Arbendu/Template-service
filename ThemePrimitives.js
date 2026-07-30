@@ -5,7 +5,7 @@ const purple = {
   100: "#D8CCFF",
   200: "#A28DF0", // light
   300: "#7C63E6",
-  400: "#5D3FD3", // main
+  400: "#58469f", // main
   500: "#4F30C1",
   600: "#3E2C70", // dark
   700: "#2F2157",
@@ -92,19 +92,19 @@ export const colorSchemes = {
       },
       success: {
         light: "#81C784",
-        main: "#43A047",
+        main: "#006304",
         dark: "#2E7D32",
         contrastText: "#fff",
       },
       warning: {
-        light: "#FFB74D",
+        light: "#ffcb95",
         main: "#F57C00",
         dark: "#E65100",
         contrastText: "#fff",
       },
       error: {
         light: "#EF5350",
-        main: "#E53935",
+        main: "#9f0400",
         dark: "#B71C1C",
         contrastText: "#fff",
       },
@@ -119,13 +119,14 @@ export const colorSchemes = {
       // },
 
       grey: { ...gray },
+      purple: { ...purple },
       divider: alpha(purple[400], 0.2),
       background: {
         default: glass.panel(0.25),
         paper: glass.panel(0.25),
         glass: glass.panel(0.18),
       },
-      text: { primary: "#2A1E4F", secondary: "#3E2C70", disabled: gray[400] },
+      text: { primary: "#402b7f", secondary: "#3E2C70", disabled: gray[400] },
       baseShadow: "0 8px 25px rgba(0,0,0,0.1)",
     },
   },
@@ -146,7 +147,7 @@ export const colorSchemes = {
       },
       success: {
         light: "#66BB6A",
-        main: "#43A047",
+        main: "#006304",
         dark: "#1B5E20",
         contrastText: "#fff",
       },
@@ -158,7 +159,7 @@ export const colorSchemes = {
       },
       error: {
         light: "#EF5350",
-        main: "#E53935",
+        main: "#9f0400",
         dark: "#B71C1C",
         contrastText: "#fff",
       },
@@ -169,6 +170,7 @@ export const colorSchemes = {
         contrastText: "#fff",
       },
       grey: { ...gray },
+      purple: { ...purple },
       divider: alpha(gray[700], 0.5),
       background: {
         default: "#0E0E12",
@@ -183,77 +185,6 @@ export const colorSchemes = {
       baseShadow: "0 8px 40px rgba(0,0,0,0.35)",
     },
   },
-
-//   leaf: {
-//     palette: {
-//       mode: "light",
-
-//       primary: {
-//         light: "#A5F5B2",  // soft mint
-//         main:  "#4EC96F",  // main green
-//         dark:  "#1E7C3A",
-//         contrastText: "#ffffff",
-//       },
-
-//       secondary: {
-//         light: "#D4FFD6",
-//         main:  "#8DE19A",
-//         dark:  "#3E8A4E",
-//         contrastText: "#003300",
-//       },
-
-//       success: {
-//         light: "#B6F6C0",
-//         main:  "#4CAF50",
-//         dark:  "#1E7C3A",
-//         contrastText: "#ffffff",
-//       },
-
-//       warning: {
-//         light: "#FFE7B5",
-//         main:  "#FFC047",
-//         dark:  "#B77706",
-//         contrastText: "#3B2800",
-//       },
-
-//       error: {
-//         light: "#FFB3B3",
-//         main:  "#F44336",
-//         dark:  "#AA2017",
-//         contrastText: "#ffffff",
-//       },
-
-//       info: {
-//         light: "#B3E5FC",
-//         main:  "#29B6F6",
-//         dark:  "#0277BD",
-//         contrastText: "#ffffff",
-//       },
-
-//       // use the same grey + alpha helpers you already import
-//       grey: {
-//         ...grey,
-//       },
-
-//       background: {
-//         // light green base similar to your image
-//         default: "#E6FBD9",
-//         paper:   "rgba(255,255,255,0.88)",
-//         glass:   "rgba(230,251,217,0.7)",   // if you use 'glass' in your layouts
-//       },
-
-//       text: {
-//         primary:   "#103B1B",
-//         secondary: alpha("#103B1B", 0.7),
-//         disabled:  alpha("#103B1B", 0.4),
-//       },
-
-//       baseShadow: "0 8px 40px rgba(0, 0, 0, 0.18)",
-//     },
- 
-// },
-
-
 };
 
 // Shadows: keep default but use palette.baseShadow for level 1 like your prior approach
