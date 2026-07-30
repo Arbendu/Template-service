@@ -1,1 +1,745 @@
+import { useRef, useMemo, useCallback, memo, useEffect, useState } from "react";
+import Box from "@mui/material/Box";
+import Paper from "@mui/material/Paper";
+import Typography from "@mui/material/Typography";
+import Chip from "@mui/material/Chip";
+import { keyframes } from "@emotion/react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { useAppDispatch, useAppSelector } from "../../store";
+import { setSelectedCell } from "../../store/templateSlice";
+import {
+  selectRowOrder,
+  selectColumns,
+  selectSelectedCell,
+  selectFormulaMode,
+  selectReportMeta,
+  selectHiddenCells,
+} from "../../store/selectors";
+
+// Brief highlight pulse played once when a row is newly added/restored.
+// Ends fully transparent so it never permanently changes the row's look.
+const newRowHighlight = keyframes`
+  0% {
+    background-color: rgba(25, 118, 210, 0.28);
+    box-shadow: inset 0 0 0 2px rgba(25, 118, 210, 0.55);
+  }
+  70% {
+    background-color: rgba(25, 118, 210, 0.16);
+    box-shadow: inset 0 0 0 2px rgba(25, 118, 210, 0.35);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: inset 0 0 0 2px rgba(25, 118, 210, 0);
+  }
+`;
+
+const getRowTypeColor = (type) => {
+  const colors = {
+    HEADER: "#1976d2",
+    DATA: "#2c8aa8",
+    SEPARATOR: "#757575",
+    DYNAMIC: "#388e3c",
+    FOOTER: "#f57c00",
+  };
+  return colors[type] || "#757575";
+};
+
+const getCellValue = (cell) => {
+  if (cell.type === "TEXT") return cell.value || "Click to edit";
+  if (cell.type === "FORMULA") return `= ${cell.expression || "formula"}`;
+  if (cell.type?.startsWith("DB_")) {
+    const table = cell.source?.table || "";
+    const column = cell.source?.column || "";
+    if (!table || !column) return `${cell.type}(?)`;
+    const aggType = cell.type.replace("DB_", "");
+    if (cell.type === "DB_VALUE") {
+      return `${table}.${column}`;
+    }
+    return `${aggType}(${table}.${column})`;
+  }
+  return "Empty cell";
+};
+
+const CellComponent = memo(
+  ({
+    cellId,
+    rowId,
+    colId,
+    cellIndex,
+    isSelected,
+    formulaMode,
+    columnWidths,
+    columnAlign,
+    isHidden,
+    onCellClick,
+  }) => {
+    const cell = useAppSelector(
+      (state) => state.template.present.cells[cellId],
+      (a, b) => {
+        if (!a && !b) return true;
+        if (!a || !b) return false;
+        return (
+          a.id === b.id &&
+          a.type === b.type &&
+          a.value === b.value &&
+          a.expression === b.expression &&
+          a.source?.table === b.source?.table &&
+          a.source?.column === b.source?.column &&
+          a.render?.colspan === b.render?.colspan &&
+          a.render?.rowspan === b.render?.rowspan &&
+          a.render?.bold === b.render?.bold &&
+          a.render?.align === b.render?.align &&
+          a.format?.bgColor === b.format?.bgColor
+        );
+      }
+    );
+
+    const handleClick = useCallback(() => {
+      onCellClick(rowId, cellId, colId);
+    }, [rowId, cellId, colId, onCellClick]);
+
+    const colspan = cell?.render?.colspan || 1;
+    const rowspan = cell?.render?.rowspan || 1;
+
+    const cellWidth = useMemo(() => {
+      let totalWidth = 0;
+      for (let i = 0; i < colspan && cellIndex + i < columnWidths.length; i++) {
+        totalWidth += columnWidths[cellIndex + i];
+      }
+      return totalWidth;
+    }, [colspan, cellIndex, columnWidths]);
+
+    if (isHidden || !cell) return null;
+
+    return (
+      <Box
+        onClick={handleClick}
+        sx={{
+          cursor: formulaMode ? "crosshair" : "pointer",
+          position: "relative",
+          bgcolor:
+            cell.format?.bgColor && cell.format.bgColor !== "#ffffff"
+              ? cell.format.bgColor
+              : isSelected
+              ? "#e3f2fd"
+              : formulaMode
+              ? "#fff9c4"
+              : "white",
+          border: isSelected ? "2px solid #1976d2" : "1px solid #e0e0e0",
+          boxSizing: "border-box",
+          fontWeight: cell.render?.bold ? 600 : 400,
+          textAlign: cell.render?.align || columnAlign || "left",
+          width: `${cellWidth}px`,
+          minWidth: `${cellWidth}px`,
+          gridColumn: colspan > 1 ? `span ${colspan}` : undefined,
+          gridRow: rowspan > 1 ? `span ${rowspan}` : undefined,
+          p: 1,
+          zIndex: isSelected ? 10 : 1,
+          overflow: "hidden",
+          "&:hover": {
+            bgcolor: isSelected
+              ? "#e3f2fd"
+              : formulaMode
+              ? "#fff59d"
+              : "#f5f5f5",
+            zIndex: isSelected ? 10 : 2,
+          },
+        }}
+      >
+        <Typography
+          variant="body2"
+          sx={{
+            fontSize: "0.8rem",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            wordBreak: "break-all",
+          }}
+        >
+          {getCellValue(cell)}
+        </Typography>
+        {colspan > 1 && (
+          <Chip
+            label={`cs:${colspan}`}
+            size="small"
+            sx={{
+              position: "absolute",
+              top: 2,
+              right: 2,
+              height: 16,
+              fontSize: "0.6rem",
+            }}
+          />
+        )}
+        {rowspan > 1 && (
+          <Chip
+            label={`rs:${rowspan}`}
+            size="small"
+            color="secondary"
+            sx={{
+              position: "absolute",
+              top: colspan > 1 ? 20 : 2,
+              right: 2,
+              height: 16,
+              fontSize: "0.6rem",
+            }}
+          />
+        )}
+      </Box>
+    );
+  },
+  (prevProps, nextProps) => {
+    return (
+      prevProps.cellId === nextProps.cellId &&
+      prevProps.isSelected === nextProps.isSelected &&
+      prevProps.formulaMode === nextProps.formulaMode &&
+      prevProps.isHidden === nextProps.isHidden &&
+      prevProps.columnWidths === nextProps.columnWidths &&
+      prevProps.columnAlign === nextProps.columnAlign
+    );
+  }
+);
+
+CellComponent.displayName = "CellComponent";
+
+const RowContent = memo(
+  ({
+    rowId,
+    gridTemplateColumns,
+    columnWidths,
+    selectedCellId,
+    formulaMode,
+    hiddenCellsMap,
+    isHighlighted,
+    onCellClick,
+    onDynamicRowClick,
+  }) => {
+    const row = useAppSelector((state) => state.template.present.rows[rowId]);
+    const columns = useAppSelector(selectColumns);
+
+    const handleDynamicClick = useCallback(() => {
+      onDynamicRowClick(rowId);
+    }, [rowId, onDynamicRowClick]);
+
+    if (!row) return null;
+
+    return (
+      <Box
+        sx={{
+          display: "flex",
+          borderLeft: `3px solid ${getRowTypeColor(row.rowType)}`,
+          "&:hover": { bgcolor: "#f9f9f9" },
+          minHeight: 60,
+          position: "relative",
+          animation: isHighlighted
+            ? `${newRowHighlight} 1.8s ease-out`
+            : "none",
+        }}
+      >
+        <Box
+          sx={{
+            bgcolor: "#fafafa",
+            borderRight: "1px solid #e0e0e0",
+            textAlign: "center",
+            width: 80,
+            minWidth: 80,
+            flexShrink: 0,
+            p: 0.5,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "flex-start",
+            paddingTop: 1,
+          }}
+        >
+          <Typography
+            variant="caption"
+            display="block"
+            color="text.secondary"
+            sx={{ fontSize: "0.65rem" }}
+          >
+            {row.id}
+          </Typography>
+          <Chip
+            label={row.rowType}
+            size="small"
+            sx={{
+              fontSize: "0.6rem",
+              height: 18,
+              bgcolor: getRowTypeColor(row.rowType),
+              color: "white",
+              fontWeight: 600,
+              mt: 0.5,
+            }}
+          />
+        </Box>
+
+        {row.rowType === "DYNAMIC" ? (
+          <Box
+            onClick={handleDynamicClick}
+            sx={{
+              flex: 1,
+              bgcolor: selectedCellId === null ? "#c8e6c9" : "#e8f5e9",
+              fontStyle: "italic",
+              color: "text.secondary",
+              cursor: formulaMode ? "not-allowed" : "pointer",
+              border:
+                selectedCellId === null
+                  ? "2px solid #388e3c"
+                  : "1px solid #e0e0e0",
+              opacity: formulaMode ? 0.6 : 1,
+              p: 1,
+              "&:hover": { bgcolor: formulaMode ? "#e8f5e9" : "#c8e6c9" },
+            }}
+          >
+            Dynamic rows from {row.dynamicConfig?.table || "database"} - Click
+            to configure
+            {formulaMode && (
+              <Typography variant="caption" display="block" color="error">
+                (Cannot use in formulas)
+              </Typography>
+            )}
+          </Box>
+        ) : (
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns,
+              flex: 1,
+            }}
+          >
+            {row.cellIds?.map((cellId, cellIndex) => {
+              const column = columns[cellIndex];
+              if (!column) return null;
+
+              return (
+                <CellComponent
+                  key={cellId}
+                  cellId={cellId}
+                  rowId={rowId}
+                  colId={column.id}
+                  cellIndex={cellIndex}
+                  isSelected={selectedCellId === cellId}
+                  formulaMode={formulaMode}
+                  columnWidths={columnWidths}
+                  columnAlign={column.format?.align || "left"}
+                  isHidden={hiddenCellsMap.get(`${rowId}-${cellId}`) || false}
+                  onCellClick={onCellClick}
+                />
+              );
+            })}
+          </Box>
+        )}
+      </Box>
+    );
+  },
+  (prevProps, nextProps) => {
+    return (
+      prevProps.rowId === nextProps.rowId &&
+      prevProps.selectedCellId === nextProps.selectedCellId &&
+      prevProps.formulaMode === nextProps.formulaMode &&
+      prevProps.hiddenCellsMap === nextProps.hiddenCellsMap &&
+      prevProps.isHighlighted === nextProps.isHighlighted &&
+      prevProps.gridTemplateColumns === nextProps.gridTemplateColumns &&
+      prevProps.columnWidths === nextProps.columnWidths
+    );
+  }
+);
+
+RowContent.displayName = "RowContent";
+
+export const ReportCanvas = memo(() => {
+  const dispatch = useAppDispatch();
+  const parentRef = useRef(null);
+  const headerScrollRef = useRef(null);
+
+  const rowOrder = useAppSelector(selectRowOrder);
+  const columns = useAppSelector(selectColumns);
+  const selectedCell = useAppSelector(selectSelectedCell);
+  const formulaMode = useAppSelector(selectFormulaMode);
+  const reportMeta = useAppSelector(selectReportMeta);
+  const hiddenCells = useAppSelector(selectHiddenCells);
+  const rows = useAppSelector((state) => state.template.present.rows);
+
+  const hiddenCellsMap = useMemo(() => {
+    const map = new Map();
+    hiddenCells.forEach((key) => map.set(key, true));
+    return map;
+  }, [hiddenCells]);
+
+  const calculateColumnWidths = useMemo(() => {
+    if (!parentRef.current) return columns.map(() => 150);
+
+    const containerWidth = parentRef.current.clientWidth - 80;
+    const hasAnyWidth = columns.some((col) => col.format?.width);
+
+    if (!hasAnyWidth) {
+      const equalWidth = Math.floor(containerWidth / columns.length);
+      return columns.map(() => equalWidth);
+    }
+
+    const totalSpecifiedWidth = columns.reduce(
+      (sum, col) => sum + (col.format?.width || 1),
+      0
+    );
+    return columns.map((col) => {
+      const colWidth = col.format?.width || 1;
+      return Math.floor((colWidth / totalSpecifiedWidth) * containerWidth);
+    });
+  }, [columns, parentRef.current?.clientWidth]);
+
+  const gridTemplateColumns = useMemo(
+    () => calculateColumnWidths.map((width) => `${width}px`).join(" "),
+    [calculateColumnWidths]
+  );
+
+  const rowVirtualizer = useVirtualizer({
+    count: rowOrder.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: useCallback(() => 60, []),
+    overscan: 20,
+  });
+
+  // ---- Scroll-to & highlight a newly added row ----
+  // Detected by diffing rowOrder against its previous value rather than a
+  // dedicated Redux action, so this works regardless of which flow added
+  // the row (Add Row dialog, duplicate, undo of a delete, etc).
+  const [highlightedRowId, setHighlightedRowId] = useState(null);
+  const prevRowOrderRef = useRef(rowOrder);
+  const highlightTimeoutRef = useRef(null);
+
+  useEffect(() => {
+    const prevOrder = prevRowOrderRef.current;
+    prevRowOrderRef.current = rowOrder;
+
+    if (prevOrder === rowOrder || rowOrder.length <= prevOrder.length) {
+      return;
+    }
+
+    const prevIds = new Set(prevOrder);
+    const addedRowId = rowOrder.find((id) => !prevIds.has(id));
+    if (!addedRowId) return;
+
+    const addedIndex = rowOrder.indexOf(addedRowId);
+
+    // Defer to the next frame so the virtualizer has re-measured the new
+    // (longer) list before we ask it to scroll.
+    requestAnimationFrame(() => {
+      rowVirtualizer.scrollToIndex(addedIndex, {
+        align: "center",
+        behavior: "smooth",
+      });
+    });
+
+    setHighlightedRowId(addedRowId);
+    if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
+    highlightTimeoutRef.current = setTimeout(() => {
+      setHighlightedRowId(null);
+    }, 1800);
+  }, [rowOrder, rowVirtualizer]);
+
+  useEffect(() => {
+    return () => {
+      if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
+    };
+  }, []);
+
+  const handleCellClick = useCallback(
+    (rowId, cellId, colId) => {
+      const row = rows[rowId];
+
+      if (formulaMode) {
+        // console.log("Ok inside", `cell_${rowId}_${colId}`);
+        if (row?.rowType === "DYNAMIC") return;
+        const cellRef = `cell_${rowId}_${colId}`;
+        window.dispatchEvent(
+          new CustomEvent("formula-cell-selected", { detail: cellRef })
+        );
+      } else {
+        dispatch(setSelectedCell({ rowId, cellId }));
+      }
+    },
+    [rows, dispatch, formulaMode]
+  );
+
+  const handleDynamicRowClick = useCallback(
+    (rowId) => {
+      if (!formulaMode) {
+        dispatch(setSelectedCell({ rowId, cellId: "" }));
+      }
+    },
+    [dispatch, formulaMode]
+  );
+
+  // useEffect(() => {
+  //   const handleKeyDown = (e) => {
+  //     if (!selectedCell || formulaMode) return;
+
+  //     const { rowId, cellId } = selectedCell;
+  //     const currentRow = rows[rowId];
+  //     if (!currentRow || currentRow.rowType === "DYNAMIC") return;
+
+  //     const currentRowIndex = rowOrder.indexOf(rowId);
+  //     const currentCellIndex = currentRow.cellIds.indexOf(cellId);
+
+  //     let newRowIndex = currentRowIndex;
+  //     let newCellIndex = currentCellIndex;
+
+  //     if (e.key === "ArrowUp") {
+  //       e.preventDefault();
+  //       newRowIndex = Math.max(0, currentRowIndex - 1);
+  //     } else if (e.key === "ArrowDown") {
+  //       e.preventDefault();
+  //       newRowIndex = Math.min(rowOrder.length - 1, currentRowIndex + 1);
+  //     } else if (e.key === "ArrowLeft") {
+  //       e.preventDefault();
+  //       newCellIndex = Math.max(0, currentCellIndex - 1);
+  //     } else if (e.key === "ArrowRight") {
+  //       e.preventDefault();
+  //       newCellIndex = Math.min(
+  //         currentRow.cellIds.length - 1,
+  //         currentCellIndex + 1
+  //       );
+  //     } else {
+  //       return;
+  //     }
+
+  //     const newRowId = rowOrder[newRowIndex];
+  //     const newRow = rows[newRowId];
+
+  //     if (newRow && newRow.rowType !== "DYNAMIC") {
+  //       const validCellIndex = Math.min(
+  //         newCellIndex,
+  //         newRow.cellIds.length - 1
+  //       );
+  //       const newCellId = newRow.cellIds[validCellIndex];
+
+  //       if (newCellId) {
+  //         dispatch(setSelectedCell({ rowId: newRowId, cellId: newCellId }));
+  //       }
+  //     }
+  //   };
+
+  //   window.addEventListener("keydown", handleKeyDown);
+  //   return () => window.removeEventListener("keydown", handleKeyDown);
+  // }, [selectedCell, rows, rowOrder, dispatch, formulaMode]);
+
+  const handleScroll = useCallback(() => {
+    if (parentRef.current && headerScrollRef.current) {
+      headerScrollRef.current.scrollLeft = parentRef.current.scrollLeft;
+    }
+  }, []);
+
+  const virtualItems = rowVirtualizer.getVirtualItems();
+
+  return (
+    <Box
+      sx={{
+        flex: 1,
+        // bgcolor: formulaMode ? "#fff3e0" : "#f5f7fa",
+        p: 3,
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+        cursor: formulaMode ? "crosshair" : "default",
+      }}
+    >
+      <Paper
+        elevation={3}
+        sx={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          bgcolor: "white",
+          p: 2,
+          overflow: "hidden",
+          boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
+        }}
+      >
+        {formulaMode && (
+          <Box
+            sx={{
+              mb: 2,
+              p: 1.5,
+              bgcolor: "#ff9800",
+              color: "white",
+              borderRadius: 1,
+              textAlign: "center",
+            }}
+          >
+            <Typography variant="body2" fontWeight={600}>
+              Formula Building Mode - Click cells to add to formula (Dynamic
+              rows excluded)
+            </Typography>
+          </Box>
+        )}
+
+        <Box
+          sx={{
+            mb: 2,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <Typography variant="h6" fontWeight={600}>
+            {reportMeta.reportName || "Untitled Report"}
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            {columns.length} cols × {rowOrder.length} rows
+          </Typography>
+        </Box>
+
+        {columns.length === 0 ? (
+          <Box sx={{ textAlign: "center", py: 8, color: "text.secondary" }}>
+            <Typography variant="body1" gutterBottom>
+              Add columns from the left panel to get started
+            </Typography>
+          </Box>
+        ) : (
+          <Box
+            sx={{
+              flex: 1,
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <Box
+              sx={{
+                flexShrink: 0,
+                display: "flex",
+                bgcolor: "#f5f5f5",
+                borderBottom: "2px solid #e0e0e0",
+                overflow: "hidden",
+                position: "sticky",
+                top: 0,
+                zIndex: 100,
+              }}
+            >
+              <Box
+                sx={{
+                  width: 83,
+                  minWidth: 80,
+                  fontWeight: 600,
+                  fontSize: "0.75rem",
+                  color: "text.secondary",
+                  borderRight: "1px solid #e0e0e0",
+                  // borderLeft: `3px solid ${getRowTypeColor("HEADER")}`,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  p: 1,
+                  flexShrink: 0,
+                  // position: "sticky",
+                  // left: 0,
+                  bgcolor: "#f5f5f5",
+                  zIndex: 101,
+                }}
+              >
+                #
+              </Box>
+              <Box
+                ref={headerScrollRef}
+                sx={{
+                  flex: 1,
+                  overflowX: "hidden",
+                  overflowY: "hidden",
+                }}
+              >
+                <Box
+                  sx={{
+                    display: "grid",
+                    gridTemplateColumns,
+                  }}
+                >
+                  {columns.map((col) => (
+                    <Box
+                      key={col.id}
+                      sx={{
+                        fontWeight: 600,
+                        fontSize: "0.8rem",
+                        p: 1,
+                        borderRight: "1px solid #e0e0e0",
+                      }}
+                    >
+                      {col.name}
+                      <Typography
+                        variant="caption"
+                        display="block"
+                        color="text.secondary"
+                        sx={{ fontSize: "0.65rem" }}
+                      >
+                        {col.id} {/* ({col.format?.width || 150}px) */}
+                      </Typography>
+                    </Box>
+                  ))}
+                </Box>
+              </Box>
+            </Box>
+
+            <Box
+              ref={parentRef}
+              onScroll={handleScroll}
+              sx={{
+                flex: 1,
+                overflow: "auto",
+                position: "relative",
+                willChange: "transform",
+              }}
+            >
+              <Box
+                sx={{
+                  height: `${rowVirtualizer.getTotalSize()}px`,
+                  width: "100%",
+                  position: "relative",
+                }}
+              >
+                {virtualItems.map((virtualRow) => {
+                  const rowId = rowOrder[virtualRow.index];
+
+                  return (
+                    <Box
+                      key={virtualRow.key}
+                      data-index={virtualRow.index}
+                      sx={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width: "100%",
+                        transform: `translateY(${virtualRow.start}px)`,
+                      }}
+                    >
+                      <RowContent
+                        rowId={rowId}
+                        gridTemplateColumns={gridTemplateColumns}
+                        columnWidths={calculateColumnWidths}
+                        selectedCellId={selectedCell?.cellId || null}
+                        formulaMode={formulaMode}
+                        hiddenCellsMap={hiddenCellsMap}
+                        isHighlighted={rowId === highlightedRowId}
+                        onCellClick={handleCellClick}
+                        onDynamicRowClick={handleDynamicRowClick}
+                      />
+                    </Box>
+                  );
+                })}
+              </Box>
+            </Box>
+          </Box>
+        )}
+
+        {rowOrder.length === 0 && columns.length > 0 && (
+          <Box sx={{ textAlign: "center", py: 8, color: "text.secondary" }}>
+            <Typography variant="body1" gutterBottom>
+              Add rows from the left panel
+            </Typography>
+          </Box>
+        )}
+      </Paper>
+    </Box>
+  );
+});
+
+ReportCanvas.displayName = "ReportCanvas";
 
