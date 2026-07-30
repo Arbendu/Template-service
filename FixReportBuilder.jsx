@@ -1,671 +1,675 @@
-
-// AddRowDialog.jsx
-//
-// Lets the user:
-//   1. Choose a Row ID (custom or auto-generated, still guaranteed unique)
-//   2. Choose WHERE to insert it: Top / Bottom / Above <row> / Below <row>
-//   3. Optionally copy the contents of an existing row of the same type
-//
-// No external virtualization library. Performance at large row counts
-// (thousands+) comes from a different, dependency-free strategy:
-// the two row-pickers never render more than CAPPED_OPTION_COUNT <li>
-// elements at once. The full row list is only ever scanned inside a
-// plain useMemo (cheap — a substring check over a few thousand short
-// strings is sub-millisecond); it is never mounted to the DOM.
-
-import { useState, useEffect, useMemo, useCallback } from "react";
-
-import Dialog from "@mui/material/Dialog";
-import DialogTitle from "@mui/material/DialogTitle";
-import DialogContent from "@mui/material/DialogContent";
-import DialogActions from "@mui/material/DialogActions";
-import Button from "@mui/material/Button";
-import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
+import { useRef, useMemo, useCallback, memo, useEffect } from "react";
 import Box from "@mui/material/Box";
-import Alert from "@mui/material/Alert";
-import Divider from "@mui/material/Divider";
+import Paper from "@mui/material/Paper";
+import Typography from "@mui/material/Typography";
 import Chip from "@mui/material/Chip";
-import Autocomplete from "@mui/material/Autocomplete";
-import ToggleButton from "@mui/material/ToggleButton";
-import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
-import Checkbox from "@mui/material/Checkbox";
-import Tooltip from "@mui/material/Tooltip";
-import { IconButton } from "@mui/material";
-import CloseIcon from "@mui/icons-material/Close";
-import VerticalAlignTopIcon from "@mui/icons-material/VerticalAlignTop";
-import VerticalAlignBottomIcon from "@mui/icons-material/VerticalAlignBottom";
-import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
-import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
-import ContentCopyIcon from "@mui/icons-material/ContentCopy";
-import SearchIcon from "@mui/icons-material/Search";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { useAppDispatch, useAppSelector } from "../../store";
+import { setSelectedCell } from "../../store/templateSlice";
+import {
+  selectRowOrder,
+  selectColumns,
+  selectSelectedCell,
+  selectFormulaMode,
+  selectReportMeta,
+  selectHiddenCells,
+} from "../../store/selectors";
 
-/* ============================================================
-   Constants
-   ============================================================ */
-
-// Hard cap on how many <li> options are ever mounted for a single
-// dropdown. This is the entire "performance strategy" — keep the
-// rendered DOM small regardless of how many thousand rows exist.
-const CAPPED_OPTION_COUNT = 50;
-
-const POSITION_OPTIONS = [
-  { value: "top", label: "Top", icon: <VerticalAlignTopIcon fontSize="small" /> },
-  { value: "above", label: "Above a row", icon: <ArrowUpwardIcon fontSize="small" /> },
-  { value: "below", label: "Below a row", icon: <ArrowDownwardIcon fontSize="small" /> },
-  { value: "bottom", label: "Bottom", icon: <VerticalAlignBottomIcon fontSize="small" /> },
-];
-
-/* ============================================================
-   Helper: capped, case-insensitive substring search over a row list.
-   Returns at most CAPPED_OPTION_COUNT matches. Never mutates input.
-   ============================================================ */
-function searchRows(rows, query) {
-  const q = query.trim().toLowerCase();
-  if (!q) return rows.slice(0, CAPPED_OPTION_COUNT);
-
-  const matches = [];
-  for (let i = 0; i < rows.length && matches.length < CAPPED_OPTION_COUNT; i++) {
-    if (rows[i].id.toLowerCase().includes(q)) {
-      matches.push(rows[i]);
-    }
-  }
-  return matches;
-}
-
-/* ============================================================
-   Reusable row-picker: an Autocomplete pre-bound to the capped
-   search above, with a small "type to narrow down" hint when the
-   source list is larger than what's currently shown.
-   ============================================================ */
-function RowPickerAutocomplete({
-  label,
-  placeholder,
-  sourceRows,
-  value,
-  onChange,
-  error,
-  helperText,
-}) {
-  const [query, setQuery] = useState("");
-
-  const options = useMemo(() => searchRows(sourceRows, query), [sourceRows, query]);
-  const isTruncated = sourceRows.length > options.length;
-
-  return (
-    <Autocomplete
-      options={options}
-      value={value}
-      onChange={(_, newValue) => onChange(newValue)}
-      inputValue={query}
-      onInputChange={(_, newInputValue, reason) => {
-        // Keep the field's displayed text as the row id when a value is
-        // selected; only track free typing as the search query.
-        if (reason === "input") setQuery(newInputValue);
-        if (reason === "clear") setQuery("");
-      }}
-      getOptionLabel={(option) => option?.id ?? ""}
-      isOptionEqualToValue={(option, val) => option.id === val.id}
-      filterOptions={(x) => x} // filtering already done in searchRows
-      autoHighlight
-      selectOnFocus
-      handleHomeEndKeys
-      renderOption={(props, option) => (
-        <li {...props} key={option.id}>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1, width: "100%" }}>
-            <Typography
-              variant="body2"
-              sx={{ fontFamily: "monospace", flexGrow: 1 }}
-              noWrap
-            >
-              {option.id}
-            </Typography>
-            <Chip
-              label={option.rowType}
-              size="small"
-              variant="outlined"
-              sx={{ height: 20, fontSize: 11 }}
-            />
-          </Box>
-        </li>
-      )}
-      noOptionsText="No matching rows"
-      ListboxProps={{ style: { maxHeight: 300 } }}
-      renderInput={(params) => (
-        <TextField
-          {...params}
-          label={label}
-          placeholder={placeholder}
-          error={error}
-          helperText={
-            error
-              ? helperText
-              : isTruncated
-                ? `Showing first ${options.length} of ${sourceRows.length} rows — keep typing to narrow down`
-                : helperText || " "
-          }
-          InputProps={{
-            ...params.InputProps,
-            startAdornment: (
-              <>
-                <SearchIcon fontSize="small" sx={{ color: "text.disabled", ml: 0.5, mr: -0.5 }} />
-                {params.InputProps.startAdornment}
-              </>
-            ),
-          }}
-        />
-      )}
-    />
-  );
-}
-
-/* ============================================================
-   Main dialog
-   ============================================================ */
-
-/**
- * @param {boolean} open
- * @param {string} rowType - "DATA" | "DYNAMIC" (row type being created)
- * @param {Array<{id: string, rowType: string}>} rows - full ordered row list (from selectRows)
- * @param {string=} anchorRowId - optional row id to preselect as the position anchor
- *                                (e.g. the row the user clicked "insert" next to)
- * @param {() => void} onClose
- * @param {(result: { id: string, insertAt: number, copyFromRowId: string|null }) => void} onConfirm
- */
-export const AddRowDialog = ({
-  open,
-  rowType,
-  rows,
-  anchorRowId,
-  onClose,
-  onConfirm,
-}) => {
-  /* ---------------- ROW ID ---------------- */
-
-  const [customId, setCustomId] = useState("");
-  const [error, setError] = useState("");
-  const [generatedId, setGeneratedId] = useState("");
-
-  const existingIdsSet = useMemo(() => new Set(rows.map((r) => r.id)), [rows]);
-
-  const generateUniqueID = useCallback(() => {
-    let newId;
-    let isUnique = false;
-    let numAttempts = 0;
-
-    const MAX_NUMERIC_ATTEMPTS = 15;
-    const randomBuffer = new Uint32Array(1);
-
-    // Phase 1: 5-digit numeric IDs
-    while (!isUnique && numAttempts < MAX_NUMERIC_ATTEMPTS) {
-      window.crypto.getRandomValues(randomBuffer);
-      const numericPart = (randomBuffer[0] % 100000).toString().padStart(5, "0");
-      newId = `R__${numericPart}`;
-      if (!existingIdsSet.has(newId)) isUnique = true;
-      numAttempts++;
-    }
-
-    // Phase 2: alphanumeric fallback
-    if (!isUnique) {
-      let alphaAttempts = 0;
-      const MAX_ALPHA_ATTEMPTS = 20;
-      while (!isUnique && alphaAttempts < MAX_ALPHA_ATTEMPTS) {
-        window.crypto.getRandomValues(randomBuffer);
-        const alphaPart = randomBuffer[0].toString(36).substring(0, 5).padEnd(5, "0");
-        newId = `R__${alphaPart}`;
-        if (!existingIdsSet.has(newId)) isUnique = true;
-        alphaAttempts++;
-      }
-    }
-
-    // Phase 3: absolute fallback, cannot loop forever
-    if (!isUnique) {
-      let counter = 0;
-      do {
-        const fallbackPart = (Date.now() + counter).toString(36).slice(-5).padStart(5, "0");
-        newId = `R__${fallbackPart}`;
-        counter++;
-      } while (existingIdsSet.has(newId));
-    }
-
-    return newId;
-  }, [existingIdsSet]);
-
-  const validateId = useCallback(
-    (id) => {
-      if (!id.trim() || id === "R__") return null;
-      if (/\s/.test(id)) return "Row ID cannot contain spaces";
-      if (!/^R__[a-zA-Z0-9_]+$/.test(id)) {
-        return "Row ID can only contain letters, numbers, and underscores";
-      }
-      if (existingIdsSet.has(id)) return "This Row ID already exists";
-      return null;
-    },
-    [existingIdsSet],
-  );
-
-  const handleIdChange = (value) => {
-    setCustomId(value);
-    const idToValidate = value.startsWith("R__") ? value : "R__" + value;
-    setError(validateId(idToValidate) || "");
+const getRowTypeColor = (type) => {
+  const colors = {
+    HEADER: "#1976d2",
+    DATA: "#2c8aa8",
+    SEPARATOR: "#757575",
+    DYNAMIC: "#388e3c",
+    FOOTER: "#f57c00",
   };
-
-  /* ---------------- POSITION ---------------- */
-
-  const [position, setPosition] = useState("bottom");
-  const [referenceRow, setReferenceRow] = useState(null);
-
-  /* ---------------- COPY FROM ---------------- */
-
-  const [copyEnabled, setCopyEnabled] = useState(false);
-  const [copySourceRow, setCopySourceRow] = useState(null);
-
-  const copySourceOptions = useMemo(
-    () => rows.filter((r) => r.rowType === rowType),
-    [rows, rowType],
-  );
-
-  /* ---------------- RESET ON OPEN ---------------- */
-
-  useEffect(() => {
-    if (!open) return;
-
-    setCustomId("");
-    setError("");
-    setGeneratedId(generateUniqueID());
-    setCopyEnabled(false);
-    setCopySourceRow(null);
-
-    const anchor = anchorRowId ? rows.find((r) => r.id === anchorRowId) : null;
-    if (anchor) {
-      setPosition("above");
-      setReferenceRow(anchor);
-    } else {
-      setPosition("bottom");
-      setReferenceRow(null);
-    }
-    // Only re-run when the dialog opens or the anchor target changes,
-    // not on every `rows`/`generateUniqueID` reference change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, anchorRowId]);
-
-  /* ---------------- DERIVED ---------------- */
-
-  const displayedId = customId.trim()
-    ? customId.trim().startsWith("R__")
-      ? customId.trim()
-      : `R__${customId.trim()}`
-    : generatedId;
-
-  const needsReference = position === "above" || position === "below";
-  const referenceMissing = needsReference && !referenceRow;
-  const copySourceMissing = copyEnabled && !copySourceRow;
-  const canSubmit = !error && !referenceMissing && !copySourceMissing;
-
-  const computeInsertAt = useCallback(() => {
-    const total = rows.length;
-    if (position === "top") return 0;
-    if (position === "bottom") return total;
-    if (!referenceRow) return total;
-    const refIndex = rows.findIndex((r) => r.id === referenceRow.id);
-    if (refIndex === -1) return total;
-    return position === "above" ? refIndex : refIndex + 1;
-  }, [position, referenceRow, rows]);
-
-  /* ---------------- ACTIONS ---------------- */
-
-  const handleClose = () => {
-    setCustomId("");
-    setError("");
-    setCopyEnabled(false);
-    setCopySourceRow(null);
-    onClose();
-  };
-
-  const handleConfirm = () => {
-    if (!canSubmit) return;
-
-    const trimmedId = customId.trim();
-    let finalId = "";
-
-    if (trimmedId) {
-      finalId = trimmedId.startsWith("R__") ? trimmedId : "R__" + trimmedId;
-      const validationError = validateId(finalId);
-      if (validationError) {
-        setError(validationError);
-        return;
-      }
-    } else {
-      finalId = generatedId;
-    }
-
-    onConfirm({
-      id: finalId,
-      insertAt: computeInsertAt(),
-      copyFromRowId: copyEnabled && copySourceRow ? copySourceRow.id : null,
-    });
-    handleClose();
-  };
-
-  /* ---------------- RENDER ---------------- */
-
-  return (
-    <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
-      <DialogTitle sx={{ p: 2, position: "relative" }}>
-        <IconButton
-          onClick={handleClose}
-          sx={{ position: "absolute", right: 16, top: 10 }}
-          aria-label="Close dialog"
-        >
-          <CloseIcon />
-        </IconButton>
-        <Typography>Add {rowType} Row</Typography>
-      </DialogTitle>
-
-      <DialogContent>
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5, mt: 1 }}>
-          {/* ---------------- ROW ID ---------------- */}
-          <Box>
-            <Typography variant="body2" color="text.secondary" gutterBottom>
-              Enter a custom Row ID or leave empty to use the suggested ID.
-            </Typography>
-            <TextField
-              label="Row ID (optional)"
-              value={customId}
-              onChange={(e) => handleIdChange(e.target.value)}
-              placeholder="e.g., 04512, alpha_row"
-              error={!!error}
-              helperText={error || "Letters, numbers, and underscores only"}
-              fullWidth
-              autoFocus
-            />
-            {!customId.trim() && !error && (
-              <Alert severity="info" sx={{ py: 0.5, mt: 1 }}>
-                A unique ID will be used: <strong>{generatedId}</strong>
-              </Alert>
-            )}
-            {customId.trim() && !error && (
-              <Alert severity="success" sx={{ py: 0.5, mt: 1 }}>
-                Row will be created with ID: <strong>{displayedId}</strong>
-              </Alert>
-            )}
-          </Box>
-
-          <Divider />
-
-          {/* ---------------- POSITION ---------------- */}
-          <Box>
-            <Typography variant="body2" color="text.secondary" gutterBottom>
-              Where should this row be added?
-            </Typography>
-            <ToggleButtonGroup
-              value={position}
-              exclusive
-              onChange={(_, value) => {
-                if (value !== null) setPosition(value);
-              }}
-              size="small"
-              fullWidth
-            >
-              {POSITION_OPTIONS.map((opt) => (
-                <ToggleButton
-                  key={opt.value}
-                  value={opt.value}
-                  disabled={
-                    (opt.value === "above" || opt.value === "below") &&
-                    rows.length === 0
-                  }
-                >
-                  <Tooltip title={opt.label}>
-                    <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                      {opt.icon}
-                      <Typography
-                        variant="caption"
-                        sx={{ display: { xs: "none", sm: "inline" } }}
-                      >
-                        {opt.label}
-                      </Typography>
-                    </Box>
-                  </Tooltip>
-                </ToggleButton>
-              ))}
-            </ToggleButtonGroup>
-
-            {needsReference && (
-              <Box sx={{ mt: 1.5 }}>
-                <RowPickerAutocomplete
-                  label={position === "above" ? "Row to insert above" : "Row to insert below"}
-                  placeholder="Search by Row ID…"
-                  sourceRows={rows}
-                  value={referenceRow}
-                  onChange={setReferenceRow}
-                  error={referenceMissing}
-                  helperText="Select a row to continue"
-                />
-              </Box>
-            )}
-          </Box>
-
-          <Divider />
-
-          {/* ---------------- COPY FROM ---------------- */}
-          <Box>
-            <Box
-              sx={{ display: "flex", alignItems: "center", gap: 1, cursor: "pointer" }}
-              onClick={() => copySourceOptions.length > 0 && setCopyEnabled((v) => !v)}
-            >
-              <Checkbox
-                checked={copyEnabled}
-                disabled={copySourceOptions.length === 0}
-                onChange={(e) => setCopyEnabled(e.target.checked)}
-                onClick={(e) => e.stopPropagation()}
-              />
-              <ContentCopyIcon fontSize="small" color={copyEnabled ? "primary" : "disabled"} />
-              <Typography variant="body2">
-                Copy content from an existing {rowType} row
-              </Typography>
-            </Box>
-
-            {copySourceOptions.length === 0 && (
-              <Typography variant="caption" color="text.secondary" sx={{ ml: 5 }}>
-                No existing {rowType} rows to copy from yet.
-              </Typography>
-            )}
-
-            {copyEnabled && (
-              <Box sx={{ mt: 1.5 }}>
-                <RowPickerAutocomplete
-                  label="Copy from row"
-                  placeholder="Search by Row ID…"
-                  sourceRows={copySourceOptions}
-                  value={copySourceRow}
-                  onChange={setCopySourceRow}
-                  error={copySourceMissing}
-                  helperText="Select a row to copy, or uncheck the box above"
-                />
-                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
-                  The new row keeps its own ID — only its content is copied.
-                </Typography>
-              </Box>
-            )}
-          </Box>
-        </Box>
-      </DialogContent>
-
-      <DialogActions>
-        <Button onClick={handleClose}>Cancel</Button>
-        <Button onClick={handleConfirm} variant="contained" disabled={!canSubmit}>
-          Add Row
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
+  return colors[type] || "#757575";
 };
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-# Wiring up the new AddRowDialog
-
-Two files need small, targeted edits. Nothing else in your app changes.
-
----
-
-## 1. `templateSlice.js` — let `addRow` accept copied cell data
-
-Your current `addRow` reducer always creates blank cells and ignores
-`row.cells` / `row.dynamicConfig` if they're passed in. Update it so that
-when the dialog supplies copied content, it's actually used:
-
-```js
-addRow: (state, action) => {
-  const { row, insertAt } = action.payload;
-  const rowId = row.id;
-
-  const cellIds = [];
-  if (row.rowType !== "DYNAMIC") {
-    state.columns.forEach((_, colIndex) => {
-      const cellId = nanoid();
-      cellIds.push(cellId);
-
-      // If copying from another row, reuse that column's cell content
-      // (minus its old id/rowId, which must stay unique per cell).
-      const sourceCell = row.cells?.[colIndex];
-      state.cells[cellId] = sourceCell
-        ? { ...sourceCell, id: cellId }
-        : { id: cellId, type: "TEXT", value: "" };
-    });
+const getCellValue = (cell) => {
+  if (cell.type === "TEXT") return cell.value || "Click to edit";
+  if (cell.type === "FORMULA") return `= ${cell.expression || "formula"}`;
+  if (cell.type?.startsWith("DB_")) {
+    const table = cell.source?.table || "";
+    const column = cell.source?.column || "";
+    if (!table || !column) return `${cell.type}(?)`;
+    const aggType = cell.type.replace("DB_", "");
+    if (cell.type === "DB_VALUE") {
+      return `${table}.${column}`;
+    }
+    return `${aggType}(${table}.${column})`;
   }
+  return "Empty cell";
+};
 
-  state.rows[rowId] = {
-    id: rowId,
-    rowType: row.rowType,
-    cellIds,
-    dynamicConfig: row.dynamicConfig,
-    height: 60,
-  };
+const CellComponent = memo(
+  ({
+    cellId,
+    rowId,
+    colId,
+    cellIndex,
+    isSelected,
+    formulaMode,
+    columnWidths,
+    columnAlign,
+    isHidden,
+    onCellClick,
+  }) => {
+    const cell = useAppSelector(
+      (state) => state.template.present.cells[cellId],
+      (a, b) => {
+        if (!a && !b) return true;
+        if (!a || !b) return false;
+        return (
+          a.id === b.id &&
+          a.type === b.type &&
+          a.value === b.value &&
+          a.expression === b.expression &&
+          a.source?.table === b.source?.table &&
+          a.source?.column === b.source?.column &&
+          a.render?.colspan === b.render?.colspan &&
+          a.render?.rowspan === b.render?.rowspan &&
+          a.render?.bold === b.render?.bold &&
+          a.render?.align === b.render?.align &&
+          a.format?.bgColor === b.format?.bgColor
+        );
+      }
+    );
 
-  if (insertAt !== undefined) {
-    state.rowOrder.splice(insertAt, 0, rowId);
-  } else {
-    state.rowOrder.push(rowId);
-  }
-},
-```
+    const handleClick = useCallback(() => {
+      onCellClick(rowId, cellId, colId);
+    }, [rowId, cellId, colId, onCellClick]);
 
-This is the only reducer change. Everything else in the slice is untouched.
+    const colspan = cell?.render?.colspan || 1;
+    const rowspan = cell?.render?.rowspan || 1;
 
----
+    const cellWidth = useMemo(() => {
+      let totalWidth = 0;
+      for (let i = 0; i < colspan && cellIndex + i < columnWidths.length; i++) {
+        totalWidth += columnWidths[cellIndex + i];
+      }
+      return totalWidth;
+    }, [colspan, cellIndex, columnWidths]);
 
-## 2. `LeftPanel.jsx` — pass full rows, build the copy payload
+    if (isHidden || !cell) return null;
 
-### a) Dialog state: store an anchor row id, not a raw index
-
-```js
-const [addRowDialogState, setAddRowDialogState] = useState({
-  open: false,
-  rowType: "",
-  anchorRowId: null, // row the user right-clicked "insert" next to, if any
-});
-
-const openAddRowDialog = useCallback(
-  (type, insertAtIndex) => {
-    const anchorRowId =
-      insertAtIndex !== undefined ? rows[insertAtIndex]?.id ?? null : null;
-    setAddRowDialogState({ open: true, rowType: type, anchorRowId });
-    setInsertMenuAnchor(null);
+    return (
+      <Box
+        onClick={handleClick}
+        sx={{
+          cursor: formulaMode ? "crosshair" : "pointer",
+          position: "relative",
+          bgcolor:
+            cell.format?.bgColor && cell.format.bgColor !== "#ffffff"
+              ? cell.format.bgColor
+              : isSelected
+              ? "#e3f2fd"
+              : formulaMode
+              ? "#fff9c4"
+              : "white",
+          border: isSelected ? "2px solid #1976d2" : "1px solid #e0e0e0",
+          boxSizing: "border-box",
+          fontWeight: cell.render?.bold ? 600 : 400,
+          textAlign: cell.render?.align || columnAlign || "left",
+          width: `${cellWidth}px`,
+          minWidth: `${cellWidth}px`,
+          gridColumn: colspan > 1 ? `span ${colspan}` : undefined,
+          gridRow: rowspan > 1 ? `span ${rowspan}` : undefined,
+          p: 1,
+          zIndex: isSelected ? 10 : 1,
+          overflow: "hidden",
+          "&:hover": {
+            bgcolor: isSelected
+              ? "#e3f2fd"
+              : formulaMode
+              ? "#fff59d"
+              : "#f5f5f5",
+            zIndex: isSelected ? 10 : 2,
+          },
+        }}
+      >
+        <Typography
+          variant="body2"
+          sx={{
+            fontSize: "0.8rem",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            wordBreak: "break-all",
+          }}
+        >
+          {getCellValue(cell)}
+        </Typography>
+        {colspan > 1 && (
+          <Chip
+            label={`cs:${colspan}`}
+            size="small"
+            sx={{
+              position: "absolute",
+              top: 2,
+              right: 2,
+              height: 16,
+              fontSize: "0.6rem",
+            }}
+          />
+        )}
+        {rowspan > 1 && (
+          <Chip
+            label={`rs:${rowspan}`}
+            size="small"
+            color="secondary"
+            sx={{
+              position: "absolute",
+              top: colspan > 1 ? 20 : 2,
+              right: 2,
+              height: 16,
+              fontSize: "0.6rem",
+            }}
+          />
+        )}
+      </Box>
+    );
   },
-  [rows],
+  (prevProps, nextProps) => {
+    return (
+      prevProps.cellId === nextProps.cellId &&
+      prevProps.isSelected === nextProps.isSelected &&
+      prevProps.formulaMode === nextProps.formulaMode &&
+      prevProps.isHidden === nextProps.isHidden &&
+      prevProps.columnWidths === nextProps.columnWidths &&
+      prevProps.columnAlign === nextProps.columnAlign
+    );
+  }
 );
-```
 
-### b) `handleAddRow` — build the new row from the dialog's result
+CellComponent.displayName = "CellComponent";
 
-The dialog now calls `onConfirm({ id, insertAt, copyFromRowId })` instead of
-just a row id string:
+const RowContent = memo(
+  ({
+    rowId,
+    gridTemplateColumns,
+    columnWidths,
+    selectedCellId,
+    formulaMode,
+    hiddenCellsMap,
+    onCellClick,
+    onDynamicRowClick,
+  }) => {
+    const row = useAppSelector((state) => state.template.present.rows[rowId]);
+    const columns = useAppSelector(selectColumns);
 
-```js
-const handleAddRow = useCallback(
-  (result) => {
-    const { id, insertAt, copyFromRowId } = result;
-    const { rowType } = addRowDialogState;
+    const handleDynamicClick = useCallback(() => {
+      onDynamicRowClick(rowId);
+    }, [rowId, onDynamicRowClick]);
 
-    const newRow = { id, rowType };
+    if (!row) return null;
 
-    const sourceRow = copyFromRowId
-      ? rows.find((r) => r.id === copyFromRowId)
-      : null;
+    return (
+      <Box
+        sx={{
+          display: "flex",
+          borderLeft: `3px solid ${getRowTypeColor(row.rowType)}`,
+          "&:hover": { bgcolor: "#f9f9f9" },
+          minHeight: 60,
+        }}
+      >
+        <Box
+          sx={{
+            bgcolor: "#fafafa",
+            borderRight: "1px solid #e0e0e0",
+            textAlign: "center",
+            width: 80,
+            minWidth: 80,
+            flexShrink: 0,
+            p: 0.5,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "flex-start",
+            paddingTop: 1,
+          }}
+        >
+          <Typography
+            variant="caption"
+            display="block"
+            color="text.secondary"
+            sx={{ fontSize: "0.65rem" }}
+          >
+            {row.id}
+          </Typography>
+          <Chip
+            label={row.rowType}
+            size="small"
+            sx={{
+              fontSize: "0.6rem",
+              height: 18,
+              bgcolor: getRowTypeColor(row.rowType),
+              color: "white",
+              fontWeight: 600,
+              mt: 0.5,
+            }}
+          />
+        </Box>
 
-    if (rowType === "DYNAMIC") {
-      newRow.dynamicConfig =
-        sourceRow?.rowType === "DYNAMIC" && sourceRow.dynamicConfig
-          ? structuredClone(sourceRow.dynamicConfig)
-          : {
-              type: "DB_LIST",
-              table: "",
-              select: [],
-              filters: {},
-              columnMappings: [],
-            };
-    } else if (sourceRow?.rowType === rowType && sourceRow.cells) {
-      // Pass the source cells through; the reducer copies their values
-      // into freshly generated cell ids for the new row.
-      newRow.cells = sourceRow.cells;
+        {row.rowType === "DYNAMIC" ? (
+          <Box
+            onClick={handleDynamicClick}
+            sx={{
+              flex: 1,
+              bgcolor: selectedCellId === null ? "#c8e6c9" : "#e8f5e9",
+              fontStyle: "italic",
+              color: "text.secondary",
+              cursor: formulaMode ? "not-allowed" : "pointer",
+              border:
+                selectedCellId === null
+                  ? "2px solid #388e3c"
+                  : "1px solid #e0e0e0",
+              opacity: formulaMode ? 0.6 : 1,
+              p: 1,
+              "&:hover": { bgcolor: formulaMode ? "#e8f5e9" : "#c8e6c9" },
+            }}
+          >
+            Dynamic rows from {row.dynamicConfig?.table || "database"} - Click
+            to configure
+            {formulaMode && (
+              <Typography variant="caption" display="block" color="error">
+                (Cannot use in formulas)
+              </Typography>
+            )}
+          </Box>
+        ) : (
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns,
+              flex: 1,
+            }}
+          >
+            {row.cellIds?.map((cellId, cellIndex) => {
+              const column = columns[cellIndex];
+              if (!column) return null;
+
+              return (
+                <CellComponent
+                  key={cellId}
+                  cellId={cellId}
+                  rowId={rowId}
+                  colId={column.id}
+                  cellIndex={cellIndex}
+                  isSelected={selectedCellId === cellId}
+                  formulaMode={formulaMode}
+                  columnWidths={columnWidths}
+                  columnAlign={column.format?.align || "left"}
+                  isHidden={hiddenCellsMap.get(`${rowId}-${cellId}`) || false}
+                  onCellClick={onCellClick}
+                />
+              );
+            })}
+          </Box>
+        )}
+      </Box>
+    );
+  },
+  (prevProps, nextProps) => {
+    return (
+      prevProps.rowId === nextProps.rowId &&
+      prevProps.selectedCellId === nextProps.selectedCellId &&
+      prevProps.formulaMode === nextProps.formulaMode &&
+      prevProps.hiddenCellsMap === nextProps.hiddenCellsMap &&
+      prevProps.gridTemplateColumns === nextProps.gridTemplateColumns &&
+      prevProps.columnWidths === nextProps.columnWidths
+    );
+  }
+);
+
+RowContent.displayName = "RowContent";
+
+export const ReportCanvas = memo(() => {
+  const dispatch = useAppDispatch();
+  const parentRef = useRef(null);
+  const headerScrollRef = useRef(null);
+
+  const rowOrder = useAppSelector(selectRowOrder);
+  const columns = useAppSelector(selectColumns);
+  const selectedCell = useAppSelector(selectSelectedCell);
+  const formulaMode = useAppSelector(selectFormulaMode);
+  const reportMeta = useAppSelector(selectReportMeta);
+  const hiddenCells = useAppSelector(selectHiddenCells);
+  const rows = useAppSelector((state) => state.template.present.rows);
+
+  const hiddenCellsMap = useMemo(() => {
+    const map = new Map();
+    hiddenCells.forEach((key) => map.set(key, true));
+    return map;
+  }, [hiddenCells]);
+
+  const calculateColumnWidths = useMemo(() => {
+    if (!parentRef.current) return columns.map(() => 150);
+
+    const containerWidth = parentRef.current.clientWidth - 80;
+    const hasAnyWidth = columns.some((col) => col.format?.width);
+
+    if (!hasAnyWidth) {
+      const equalWidth = Math.floor(containerWidth / columns.length);
+      return columns.map(() => equalWidth);
     }
 
-    dispatch(addRow({ row: newRow, insertAt }));
-    setAddRowDialogState({ open: false, rowType: "", anchorRowId: null });
-  },
-  [dispatch, addRowDialogState, rows],
-);
-```
+    const totalSpecifiedWidth = columns.reduce(
+      (sum, col) => sum + (col.format?.width || 1),
+      0
+    );
+    return columns.map((col) => {
+      const colWidth = col.format?.width || 1;
+      return Math.floor((colWidth / totalSpecifiedWidth) * containerWidth);
+    });
+  }, [columns, parentRef.current?.clientWidth]);
 
-### c) Dialog invocation — pass `rows`, not `existingRowIds`
+  const gridTemplateColumns = useMemo(
+    () => calculateColumnWidths.map((width) => `${width}px`).join(" "),
+    [calculateColumnWidths]
+  );
 
-```jsx
-<AddRowDialog
-  open={addRowDialogState.open}
-  rowType={addRowDialogState.rowType}
-  rows={rows}
-  anchorRowId={addRowDialogState.anchorRowId}
-  onClose={() =>
-    setAddRowDialogState({ open: false, rowType: "", anchorRowId: null })
-  }
-  onConfirm={handleAddRow}
-/>
-```
+  const rowVirtualizer = useVirtualizer({
+    count: rowOrder.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: useCallback(() => 60, []),
+    overscan: 20,
+  });
 
-You can now remove the `selectExistingRowIds` import/selector usage in
-`LeftPanel.jsx` if nothing else uses it — `rows` (already selected) is a
-superset of that data.
+  const handleCellClick = useCallback(
+    (rowId, cellId, colId) => {
+      const row = rows[rowId];
 
-### d) Close button on the generic "+ Add Row" entry point
+      if (formulaMode) {
+        // console.log("Ok inside", `cell_${rowId}_${colId}`);
+        if (row?.rowType === "DYNAMIC") return;
+        const cellRef = `cell_${rowId}_${colId}`;
+        window.dispatchEvent(
+          new CustomEvent("formula-cell-selected", { detail: cellRef })
+        );
+      } else {
+        dispatch(setSelectedCell({ rowId, cellId }));
+      }
+    },
+    [rows, dispatch, formulaMode]
+  );
 
-If you have a button that opens the dialog without a specific row context
-(e.g. an "Add Row" button at the bottom of the panel, not the per-row insert
-icon), just call `openAddRowDialog("DATA")` with no index — `anchorRowId`
-will be `null` and the dialog will default to **Bottom**.
+  const handleDynamicRowClick = useCallback(
+    (rowId) => {
+      if (!formulaMode) {
+        dispatch(setSelectedCell({ rowId, cellId: "" }));
+      }
+    },
+    [dispatch, formulaMode]
+  );
 
----
+  // useEffect(() => {
+  //   const handleKeyDown = (e) => {
+  //     if (!selectedCell || formulaMode) return;
 
-## 3. No new dependencies
+  //     const { rowId, cellId } = selectedCell;
+  //     const currentRow = rows[rowId];
+  //     if (!currentRow || currentRow.rowType === "DYNAMIC") return;
 
-This version uses only `@mui/material` (already in your project) — no
-`react-window` or any other virtualization package. Large row counts are
-handled by capping how many options the two row-pickers render at once
-(50 by default, see `CAPPED_OPTION_COUNT` in `AddRowDialog.jsx`), not by
-virtualizing the DOM. Nothing to install.
+  //     const currentRowIndex = rowOrder.indexOf(rowId);
+  //     const currentCellIndex = currentRow.cellIds.indexOf(cellId);
 
-That's it — everything else (Fortify TLS/CORS work, Spring Boot migration,
-`ReportAnalysisScreen` virtualization) is unrelated to this change and
-untouched.
+  //     let newRowIndex = currentRowIndex;
+  //     let newCellIndex = currentCellIndex;
+
+  //     if (e.key === "ArrowUp") {
+  //       e.preventDefault();
+  //       newRowIndex = Math.max(0, currentRowIndex - 1);
+  //     } else if (e.key === "ArrowDown") {
+  //       e.preventDefault();
+  //       newRowIndex = Math.min(rowOrder.length - 1, currentRowIndex + 1);
+  //     } else if (e.key === "ArrowLeft") {
+  //       e.preventDefault();
+  //       newCellIndex = Math.max(0, currentCellIndex - 1);
+  //     } else if (e.key === "ArrowRight") {
+  //       e.preventDefault();
+  //       newCellIndex = Math.min(
+  //         currentRow.cellIds.length - 1,
+  //         currentCellIndex + 1
+  //       );
+  //     } else {
+  //       return;
+  //     }
+
+  //     const newRowId = rowOrder[newRowIndex];
+  //     const newRow = rows[newRowId];
+
+  //     if (newRow && newRow.rowType !== "DYNAMIC") {
+  //       const validCellIndex = Math.min(
+  //         newCellIndex,
+  //         newRow.cellIds.length - 1
+  //       );
+  //       const newCellId = newRow.cellIds[validCellIndex];
+
+  //       if (newCellId) {
+  //         dispatch(setSelectedCell({ rowId: newRowId, cellId: newCellId }));
+  //       }
+  //     }
+  //   };
+
+  //   window.addEventListener("keydown", handleKeyDown);
+  //   return () => window.removeEventListener("keydown", handleKeyDown);
+  // }, [selectedCell, rows, rowOrder, dispatch, formulaMode]);
+
+  const handleScroll = useCallback(() => {
+    if (parentRef.current && headerScrollRef.current) {
+      headerScrollRef.current.scrollLeft = parentRef.current.scrollLeft;
+    }
+  }, []);
+
+  const virtualItems = rowVirtualizer.getVirtualItems();
+
+  return (
+    <Box
+      sx={{
+        flex: 1,
+        // bgcolor: formulaMode ? "#fff3e0" : "#f5f7fa",
+        p: 3,
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+        cursor: formulaMode ? "crosshair" : "default",
+      }}
+    >
+      <Paper
+        elevation={3}
+        sx={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          bgcolor: "white",
+          p: 2,
+          overflow: "hidden",
+          boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
+        }}
+      >
+        {formulaMode && (
+          <Box
+            sx={{
+              mb: 2,
+              p: 1.5,
+              bgcolor: "#ff9800",
+              color: "white",
+              borderRadius: 1,
+              textAlign: "center",
+            }}
+          >
+            <Typography variant="body2" fontWeight={600}>
+              Formula Building Mode - Click cells to add to formula (Dynamic
+              rows excluded)
+            </Typography>
+          </Box>
+        )}
+
+        <Box
+          sx={{
+            mb: 2,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <Typography variant="h6" fontWeight={600}>
+            {reportMeta.reportName || "Untitled Report"}
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            {columns.length} cols × {rowOrder.length} rows
+          </Typography>
+        </Box>
+
+        {columns.length === 0 ? (
+          <Box sx={{ textAlign: "center", py: 8, color: "text.secondary" }}>
+            <Typography variant="body1" gutterBottom>
+              Add columns from the left panel to get started
+            </Typography>
+          </Box>
+        ) : (
+          <Box
+            sx={{
+              flex: 1,
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <Box
+              sx={{
+                flexShrink: 0,
+                display: "flex",
+                bgcolor: "#f5f5f5",
+                borderBottom: "2px solid #e0e0e0",
+                overflow: "hidden",
+                position: "sticky",
+                top: 0,
+                zIndex: 100,
+              }}
+            >
+              <Box
+                sx={{
+                  width: 83,
+                  minWidth: 80,
+                  fontWeight: 600,
+                  fontSize: "0.75rem",
+                  color: "text.secondary",
+                  borderRight: "1px solid #e0e0e0",
+                  // borderLeft: `3px solid ${getRowTypeColor("HEADER")}`,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  p: 1,
+                  flexShrink: 0,
+                  // position: "sticky",
+                  // left: 0,
+                  bgcolor: "#f5f5f5",
+                  zIndex: 101,
+                }}
+              >
+                #
+              </Box>
+              <Box
+                ref={headerScrollRef}
+                sx={{
+                  flex: 1,
+                  overflowX: "hidden",
+                  overflowY: "hidden",
+                }}
+              >
+                <Box
+                  sx={{
+                    display: "grid",
+                    gridTemplateColumns,
+                  }}
+                >
+                  {columns.map((col) => (
+                    <Box
+                      key={col.id}
+                      sx={{
+                        fontWeight: 600,
+                        fontSize: "0.8rem",
+                        p: 1,
+                        borderRight: "1px solid #e0e0e0",
+                      }}
+                    >
+                      {col.name}
+                      <Typography
+                        variant="caption"
+                        display="block"
+                        color="text.secondary"
+                        sx={{ fontSize: "0.65rem" }}
+                      >
+                        {col.id} {/* ({col.format?.width || 150}px) */}
+                      </Typography>
+                    </Box>
+                  ))}
+                </Box>
+              </Box>
+            </Box>
+
+            <Box
+              ref={parentRef}
+              onScroll={handleScroll}
+              sx={{
+                flex: 1,
+                overflow: "auto",
+                position: "relative",
+                willChange: "transform",
+              }}
+            >
+              <Box
+                sx={{
+                  height: `${rowVirtualizer.getTotalSize()}px`,
+                  width: "100%",
+                  position: "relative",
+                }}
+              >
+                {virtualItems.map((virtualRow) => {
+                  const rowId = rowOrder[virtualRow.index];
+
+                  return (
+                    <Box
+                      key={virtualRow.key}
+                      data-index={virtualRow.index}
+                      sx={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width: "100%",
+                        transform: `translateY(${virtualRow.start}px)`,
+                      }}
+                    >
+                      <RowContent
+                        rowId={rowId}
+                        gridTemplateColumns={gridTemplateColumns}
+                        columnWidths={calculateColumnWidths}
+                        selectedCellId={selectedCell?.cellId || null}
+                        formulaMode={formulaMode}
+                        hiddenCellsMap={hiddenCellsMap}
+                        onCellClick={handleCellClick}
+                        onDynamicRowClick={handleDynamicRowClick}
+                      />
+                    </Box>
+                  );
+                })}
+              </Box>
+            </Box>
+          </Box>
+        )}
+
+        {rowOrder.length === 0 && columns.length > 0 && (
+          <Box sx={{ textAlign: "center", py: 8, color: "text.secondary" }}>
+            <Typography variant="body1" gutterBottom>
+              Add rows from the left panel
+            </Typography>
+          </Box>
+        )}
+      </Paper>
+    </Box>
+  );
+});
+
+ReportCanvas.displayName = "ReportCanvas";
