@@ -1,1 +1,671 @@
 
+// AddRowDialog.jsx
+//
+// Lets the user:
+//   1. Choose a Row ID (custom or auto-generated, still guaranteed unique)
+//   2. Choose WHERE to insert it: Top / Bottom / Above <row> / Below <row>
+//   3. Optionally copy the contents of an existing row of the same type
+//
+// No external virtualization library. Performance at large row counts
+// (thousands+) comes from a different, dependency-free strategy:
+// the two row-pickers never render more than CAPPED_OPTION_COUNT <li>
+// elements at once. The full row list is only ever scanned inside a
+// plain useMemo (cheap — a substring check over a few thousand short
+// strings is sub-millisecond); it is never mounted to the DOM.
+
+import { useState, useEffect, useMemo, useCallback } from "react";
+
+import Dialog from "@mui/material/Dialog";
+import DialogTitle from "@mui/material/DialogTitle";
+import DialogContent from "@mui/material/DialogContent";
+import DialogActions from "@mui/material/DialogActions";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
+import Typography from "@mui/material/Typography";
+import Box from "@mui/material/Box";
+import Alert from "@mui/material/Alert";
+import Divider from "@mui/material/Divider";
+import Chip from "@mui/material/Chip";
+import Autocomplete from "@mui/material/Autocomplete";
+import ToggleButton from "@mui/material/ToggleButton";
+import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
+import Checkbox from "@mui/material/Checkbox";
+import Tooltip from "@mui/material/Tooltip";
+import { IconButton } from "@mui/material";
+import CloseIcon from "@mui/icons-material/Close";
+import VerticalAlignTopIcon from "@mui/icons-material/VerticalAlignTop";
+import VerticalAlignBottomIcon from "@mui/icons-material/VerticalAlignBottom";
+import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
+import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
+import SearchIcon from "@mui/icons-material/Search";
+
+/* ============================================================
+   Constants
+   ============================================================ */
+
+// Hard cap on how many <li> options are ever mounted for a single
+// dropdown. This is the entire "performance strategy" — keep the
+// rendered DOM small regardless of how many thousand rows exist.
+const CAPPED_OPTION_COUNT = 50;
+
+const POSITION_OPTIONS = [
+  { value: "top", label: "Top", icon: <VerticalAlignTopIcon fontSize="small" /> },
+  { value: "above", label: "Above a row", icon: <ArrowUpwardIcon fontSize="small" /> },
+  { value: "below", label: "Below a row", icon: <ArrowDownwardIcon fontSize="small" /> },
+  { value: "bottom", label: "Bottom", icon: <VerticalAlignBottomIcon fontSize="small" /> },
+];
+
+/* ============================================================
+   Helper: capped, case-insensitive substring search over a row list.
+   Returns at most CAPPED_OPTION_COUNT matches. Never mutates input.
+   ============================================================ */
+function searchRows(rows, query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return rows.slice(0, CAPPED_OPTION_COUNT);
+
+  const matches = [];
+  for (let i = 0; i < rows.length && matches.length < CAPPED_OPTION_COUNT; i++) {
+    if (rows[i].id.toLowerCase().includes(q)) {
+      matches.push(rows[i]);
+    }
+  }
+  return matches;
+}
+
+/* ============================================================
+   Reusable row-picker: an Autocomplete pre-bound to the capped
+   search above, with a small "type to narrow down" hint when the
+   source list is larger than what's currently shown.
+   ============================================================ */
+function RowPickerAutocomplete({
+  label,
+  placeholder,
+  sourceRows,
+  value,
+  onChange,
+  error,
+  helperText,
+}) {
+  const [query, setQuery] = useState("");
+
+  const options = useMemo(() => searchRows(sourceRows, query), [sourceRows, query]);
+  const isTruncated = sourceRows.length > options.length;
+
+  return (
+    <Autocomplete
+      options={options}
+      value={value}
+      onChange={(_, newValue) => onChange(newValue)}
+      inputValue={query}
+      onInputChange={(_, newInputValue, reason) => {
+        // Keep the field's displayed text as the row id when a value is
+        // selected; only track free typing as the search query.
+        if (reason === "input") setQuery(newInputValue);
+        if (reason === "clear") setQuery("");
+      }}
+      getOptionLabel={(option) => option?.id ?? ""}
+      isOptionEqualToValue={(option, val) => option.id === val.id}
+      filterOptions={(x) => x} // filtering already done in searchRows
+      autoHighlight
+      selectOnFocus
+      handleHomeEndKeys
+      renderOption={(props, option) => (
+        <li {...props} key={option.id}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, width: "100%" }}>
+            <Typography
+              variant="body2"
+              sx={{ fontFamily: "monospace", flexGrow: 1 }}
+              noWrap
+            >
+              {option.id}
+            </Typography>
+            <Chip
+              label={option.rowType}
+              size="small"
+              variant="outlined"
+              sx={{ height: 20, fontSize: 11 }}
+            />
+          </Box>
+        </li>
+      )}
+      noOptionsText="No matching rows"
+      ListboxProps={{ style: { maxHeight: 300 } }}
+      renderInput={(params) => (
+        <TextField
+          {...params}
+          label={label}
+          placeholder={placeholder}
+          error={error}
+          helperText={
+            error
+              ? helperText
+              : isTruncated
+                ? `Showing first ${options.length} of ${sourceRows.length} rows — keep typing to narrow down`
+                : helperText || " "
+          }
+          InputProps={{
+            ...params.InputProps,
+            startAdornment: (
+              <>
+                <SearchIcon fontSize="small" sx={{ color: "text.disabled", ml: 0.5, mr: -0.5 }} />
+                {params.InputProps.startAdornment}
+              </>
+            ),
+          }}
+        />
+      )}
+    />
+  );
+}
+
+/* ============================================================
+   Main dialog
+   ============================================================ */
+
+/**
+ * @param {boolean} open
+ * @param {string} rowType - "DATA" | "DYNAMIC" (row type being created)
+ * @param {Array<{id: string, rowType: string}>} rows - full ordered row list (from selectRows)
+ * @param {string=} anchorRowId - optional row id to preselect as the position anchor
+ *                                (e.g. the row the user clicked "insert" next to)
+ * @param {() => void} onClose
+ * @param {(result: { id: string, insertAt: number, copyFromRowId: string|null }) => void} onConfirm
+ */
+export const AddRowDialog = ({
+  open,
+  rowType,
+  rows,
+  anchorRowId,
+  onClose,
+  onConfirm,
+}) => {
+  /* ---------------- ROW ID ---------------- */
+
+  const [customId, setCustomId] = useState("");
+  const [error, setError] = useState("");
+  const [generatedId, setGeneratedId] = useState("");
+
+  const existingIdsSet = useMemo(() => new Set(rows.map((r) => r.id)), [rows]);
+
+  const generateUniqueID = useCallback(() => {
+    let newId;
+    let isUnique = false;
+    let numAttempts = 0;
+
+    const MAX_NUMERIC_ATTEMPTS = 15;
+    const randomBuffer = new Uint32Array(1);
+
+    // Phase 1: 5-digit numeric IDs
+    while (!isUnique && numAttempts < MAX_NUMERIC_ATTEMPTS) {
+      window.crypto.getRandomValues(randomBuffer);
+      const numericPart = (randomBuffer[0] % 100000).toString().padStart(5, "0");
+      newId = `R__${numericPart}`;
+      if (!existingIdsSet.has(newId)) isUnique = true;
+      numAttempts++;
+    }
+
+    // Phase 2: alphanumeric fallback
+    if (!isUnique) {
+      let alphaAttempts = 0;
+      const MAX_ALPHA_ATTEMPTS = 20;
+      while (!isUnique && alphaAttempts < MAX_ALPHA_ATTEMPTS) {
+        window.crypto.getRandomValues(randomBuffer);
+        const alphaPart = randomBuffer[0].toString(36).substring(0, 5).padEnd(5, "0");
+        newId = `R__${alphaPart}`;
+        if (!existingIdsSet.has(newId)) isUnique = true;
+        alphaAttempts++;
+      }
+    }
+
+    // Phase 3: absolute fallback, cannot loop forever
+    if (!isUnique) {
+      let counter = 0;
+      do {
+        const fallbackPart = (Date.now() + counter).toString(36).slice(-5).padStart(5, "0");
+        newId = `R__${fallbackPart}`;
+        counter++;
+      } while (existingIdsSet.has(newId));
+    }
+
+    return newId;
+  }, [existingIdsSet]);
+
+  const validateId = useCallback(
+    (id) => {
+      if (!id.trim() || id === "R__") return null;
+      if (/\s/.test(id)) return "Row ID cannot contain spaces";
+      if (!/^R__[a-zA-Z0-9_]+$/.test(id)) {
+        return "Row ID can only contain letters, numbers, and underscores";
+      }
+      if (existingIdsSet.has(id)) return "This Row ID already exists";
+      return null;
+    },
+    [existingIdsSet],
+  );
+
+  const handleIdChange = (value) => {
+    setCustomId(value);
+    const idToValidate = value.startsWith("R__") ? value : "R__" + value;
+    setError(validateId(idToValidate) || "");
+  };
+
+  /* ---------------- POSITION ---------------- */
+
+  const [position, setPosition] = useState("bottom");
+  const [referenceRow, setReferenceRow] = useState(null);
+
+  /* ---------------- COPY FROM ---------------- */
+
+  const [copyEnabled, setCopyEnabled] = useState(false);
+  const [copySourceRow, setCopySourceRow] = useState(null);
+
+  const copySourceOptions = useMemo(
+    () => rows.filter((r) => r.rowType === rowType),
+    [rows, rowType],
+  );
+
+  /* ---------------- RESET ON OPEN ---------------- */
+
+  useEffect(() => {
+    if (!open) return;
+
+    setCustomId("");
+    setError("");
+    setGeneratedId(generateUniqueID());
+    setCopyEnabled(false);
+    setCopySourceRow(null);
+
+    const anchor = anchorRowId ? rows.find((r) => r.id === anchorRowId) : null;
+    if (anchor) {
+      setPosition("above");
+      setReferenceRow(anchor);
+    } else {
+      setPosition("bottom");
+      setReferenceRow(null);
+    }
+    // Only re-run when the dialog opens or the anchor target changes,
+    // not on every `rows`/`generateUniqueID` reference change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, anchorRowId]);
+
+  /* ---------------- DERIVED ---------------- */
+
+  const displayedId = customId.trim()
+    ? customId.trim().startsWith("R__")
+      ? customId.trim()
+      : `R__${customId.trim()}`
+    : generatedId;
+
+  const needsReference = position === "above" || position === "below";
+  const referenceMissing = needsReference && !referenceRow;
+  const copySourceMissing = copyEnabled && !copySourceRow;
+  const canSubmit = !error && !referenceMissing && !copySourceMissing;
+
+  const computeInsertAt = useCallback(() => {
+    const total = rows.length;
+    if (position === "top") return 0;
+    if (position === "bottom") return total;
+    if (!referenceRow) return total;
+    const refIndex = rows.findIndex((r) => r.id === referenceRow.id);
+    if (refIndex === -1) return total;
+    return position === "above" ? refIndex : refIndex + 1;
+  }, [position, referenceRow, rows]);
+
+  /* ---------------- ACTIONS ---------------- */
+
+  const handleClose = () => {
+    setCustomId("");
+    setError("");
+    setCopyEnabled(false);
+    setCopySourceRow(null);
+    onClose();
+  };
+
+  const handleConfirm = () => {
+    if (!canSubmit) return;
+
+    const trimmedId = customId.trim();
+    let finalId = "";
+
+    if (trimmedId) {
+      finalId = trimmedId.startsWith("R__") ? trimmedId : "R__" + trimmedId;
+      const validationError = validateId(finalId);
+      if (validationError) {
+        setError(validationError);
+        return;
+      }
+    } else {
+      finalId = generatedId;
+    }
+
+    onConfirm({
+      id: finalId,
+      insertAt: computeInsertAt(),
+      copyFromRowId: copyEnabled && copySourceRow ? copySourceRow.id : null,
+    });
+    handleClose();
+  };
+
+  /* ---------------- RENDER ---------------- */
+
+  return (
+    <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
+      <DialogTitle sx={{ p: 2, position: "relative" }}>
+        <IconButton
+          onClick={handleClose}
+          sx={{ position: "absolute", right: 16, top: 10 }}
+          aria-label="Close dialog"
+        >
+          <CloseIcon />
+        </IconButton>
+        <Typography>Add {rowType} Row</Typography>
+      </DialogTitle>
+
+      <DialogContent>
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5, mt: 1 }}>
+          {/* ---------------- ROW ID ---------------- */}
+          <Box>
+            <Typography variant="body2" color="text.secondary" gutterBottom>
+              Enter a custom Row ID or leave empty to use the suggested ID.
+            </Typography>
+            <TextField
+              label="Row ID (optional)"
+              value={customId}
+              onChange={(e) => handleIdChange(e.target.value)}
+              placeholder="e.g., 04512, alpha_row"
+              error={!!error}
+              helperText={error || "Letters, numbers, and underscores only"}
+              fullWidth
+              autoFocus
+            />
+            {!customId.trim() && !error && (
+              <Alert severity="info" sx={{ py: 0.5, mt: 1 }}>
+                A unique ID will be used: <strong>{generatedId}</strong>
+              </Alert>
+            )}
+            {customId.trim() && !error && (
+              <Alert severity="success" sx={{ py: 0.5, mt: 1 }}>
+                Row will be created with ID: <strong>{displayedId}</strong>
+              </Alert>
+            )}
+          </Box>
+
+          <Divider />
+
+          {/* ---------------- POSITION ---------------- */}
+          <Box>
+            <Typography variant="body2" color="text.secondary" gutterBottom>
+              Where should this row be added?
+            </Typography>
+            <ToggleButtonGroup
+              value={position}
+              exclusive
+              onChange={(_, value) => {
+                if (value !== null) setPosition(value);
+              }}
+              size="small"
+              fullWidth
+            >
+              {POSITION_OPTIONS.map((opt) => (
+                <ToggleButton
+                  key={opt.value}
+                  value={opt.value}
+                  disabled={
+                    (opt.value === "above" || opt.value === "below") &&
+                    rows.length === 0
+                  }
+                >
+                  <Tooltip title={opt.label}>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                      {opt.icon}
+                      <Typography
+                        variant="caption"
+                        sx={{ display: { xs: "none", sm: "inline" } }}
+                      >
+                        {opt.label}
+                      </Typography>
+                    </Box>
+                  </Tooltip>
+                </ToggleButton>
+              ))}
+            </ToggleButtonGroup>
+
+            {needsReference && (
+              <Box sx={{ mt: 1.5 }}>
+                <RowPickerAutocomplete
+                  label={position === "above" ? "Row to insert above" : "Row to insert below"}
+                  placeholder="Search by Row ID…"
+                  sourceRows={rows}
+                  value={referenceRow}
+                  onChange={setReferenceRow}
+                  error={referenceMissing}
+                  helperText="Select a row to continue"
+                />
+              </Box>
+            )}
+          </Box>
+
+          <Divider />
+
+          {/* ---------------- COPY FROM ---------------- */}
+          <Box>
+            <Box
+              sx={{ display: "flex", alignItems: "center", gap: 1, cursor: "pointer" }}
+              onClick={() => copySourceOptions.length > 0 && setCopyEnabled((v) => !v)}
+            >
+              <Checkbox
+                checked={copyEnabled}
+                disabled={copySourceOptions.length === 0}
+                onChange={(e) => setCopyEnabled(e.target.checked)}
+                onClick={(e) => e.stopPropagation()}
+              />
+              <ContentCopyIcon fontSize="small" color={copyEnabled ? "primary" : "disabled"} />
+              <Typography variant="body2">
+                Copy content from an existing {rowType} row
+              </Typography>
+            </Box>
+
+            {copySourceOptions.length === 0 && (
+              <Typography variant="caption" color="text.secondary" sx={{ ml: 5 }}>
+                No existing {rowType} rows to copy from yet.
+              </Typography>
+            )}
+
+            {copyEnabled && (
+              <Box sx={{ mt: 1.5 }}>
+                <RowPickerAutocomplete
+                  label="Copy from row"
+                  placeholder="Search by Row ID…"
+                  sourceRows={copySourceOptions}
+                  value={copySourceRow}
+                  onChange={setCopySourceRow}
+                  error={copySourceMissing}
+                  helperText="Select a row to copy, or uncheck the box above"
+                />
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+                  The new row keeps its own ID — only its content is copied.
+                </Typography>
+              </Box>
+            )}
+          </Box>
+        </Box>
+      </DialogContent>
+
+      <DialogActions>
+        <Button onClick={handleClose}>Cancel</Button>
+        <Button onClick={handleConfirm} variant="contained" disabled={!canSubmit}>
+          Add Row
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Wiring up the new AddRowDialog
+
+Two files need small, targeted edits. Nothing else in your app changes.
+
+---
+
+## 1. `templateSlice.js` — let `addRow` accept copied cell data
+
+Your current `addRow` reducer always creates blank cells and ignores
+`row.cells` / `row.dynamicConfig` if they're passed in. Update it so that
+when the dialog supplies copied content, it's actually used:
+
+```js
+addRow: (state, action) => {
+  const { row, insertAt } = action.payload;
+  const rowId = row.id;
+
+  const cellIds = [];
+  if (row.rowType !== "DYNAMIC") {
+    state.columns.forEach((_, colIndex) => {
+      const cellId = nanoid();
+      cellIds.push(cellId);
+
+      // If copying from another row, reuse that column's cell content
+      // (minus its old id/rowId, which must stay unique per cell).
+      const sourceCell = row.cells?.[colIndex];
+      state.cells[cellId] = sourceCell
+        ? { ...sourceCell, id: cellId }
+        : { id: cellId, type: "TEXT", value: "" };
+    });
+  }
+
+  state.rows[rowId] = {
+    id: rowId,
+    rowType: row.rowType,
+    cellIds,
+    dynamicConfig: row.dynamicConfig,
+    height: 60,
+  };
+
+  if (insertAt !== undefined) {
+    state.rowOrder.splice(insertAt, 0, rowId);
+  } else {
+    state.rowOrder.push(rowId);
+  }
+},
+```
+
+This is the only reducer change. Everything else in the slice is untouched.
+
+---
+
+## 2. `LeftPanel.jsx` — pass full rows, build the copy payload
+
+### a) Dialog state: store an anchor row id, not a raw index
+
+```js
+const [addRowDialogState, setAddRowDialogState] = useState({
+  open: false,
+  rowType: "",
+  anchorRowId: null, // row the user right-clicked "insert" next to, if any
+});
+
+const openAddRowDialog = useCallback(
+  (type, insertAtIndex) => {
+    const anchorRowId =
+      insertAtIndex !== undefined ? rows[insertAtIndex]?.id ?? null : null;
+    setAddRowDialogState({ open: true, rowType: type, anchorRowId });
+    setInsertMenuAnchor(null);
+  },
+  [rows],
+);
+```
+
+### b) `handleAddRow` — build the new row from the dialog's result
+
+The dialog now calls `onConfirm({ id, insertAt, copyFromRowId })` instead of
+just a row id string:
+
+```js
+const handleAddRow = useCallback(
+  (result) => {
+    const { id, insertAt, copyFromRowId } = result;
+    const { rowType } = addRowDialogState;
+
+    const newRow = { id, rowType };
+
+    const sourceRow = copyFromRowId
+      ? rows.find((r) => r.id === copyFromRowId)
+      : null;
+
+    if (rowType === "DYNAMIC") {
+      newRow.dynamicConfig =
+        sourceRow?.rowType === "DYNAMIC" && sourceRow.dynamicConfig
+          ? structuredClone(sourceRow.dynamicConfig)
+          : {
+              type: "DB_LIST",
+              table: "",
+              select: [],
+              filters: {},
+              columnMappings: [],
+            };
+    } else if (sourceRow?.rowType === rowType && sourceRow.cells) {
+      // Pass the source cells through; the reducer copies their values
+      // into freshly generated cell ids for the new row.
+      newRow.cells = sourceRow.cells;
+    }
+
+    dispatch(addRow({ row: newRow, insertAt }));
+    setAddRowDialogState({ open: false, rowType: "", anchorRowId: null });
+  },
+  [dispatch, addRowDialogState, rows],
+);
+```
+
+### c) Dialog invocation — pass `rows`, not `existingRowIds`
+
+```jsx
+<AddRowDialog
+  open={addRowDialogState.open}
+  rowType={addRowDialogState.rowType}
+  rows={rows}
+  anchorRowId={addRowDialogState.anchorRowId}
+  onClose={() =>
+    setAddRowDialogState({ open: false, rowType: "", anchorRowId: null })
+  }
+  onConfirm={handleAddRow}
+/>
+```
+
+You can now remove the `selectExistingRowIds` import/selector usage in
+`LeftPanel.jsx` if nothing else uses it — `rows` (already selected) is a
+superset of that data.
+
+### d) Close button on the generic "+ Add Row" entry point
+
+If you have a button that opens the dialog without a specific row context
+(e.g. an "Add Row" button at the bottom of the panel, not the per-row insert
+icon), just call `openAddRowDialog("DATA")` with no index — `anchorRowId`
+will be `null` and the dialog will default to **Bottom**.
+
+---
+
+## 3. No new dependencies
+
+This version uses only `@mui/material` (already in your project) — no
+`react-window` or any other virtualization package. Large row counts are
+handled by capping how many options the two row-pickers render at once
+(50 by default, see `CAPPED_OPTION_COUNT` in `AddRowDialog.jsx`), not by
+virtualizing the DOM. Nothing to install.
+
+That's it — everything else (Fortify TLS/CORS work, Spring Boot migration,
+`ReportAnalysisScreen` virtualization) is unrelated to this change and
+untouched.
