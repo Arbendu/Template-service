@@ -1,9 +1,8 @@
-import { useRef, useMemo, useCallback, memo, useEffect, useState } from "react";
+import { useRef, useMemo, useCallback, memo, useEffect } from "react";
 import Box from "@mui/material/Box";
 import Paper from "@mui/material/Paper";
 import Typography from "@mui/material/Typography";
 import Chip from "@mui/material/Chip";
-import { keyframes } from "@emotion/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useAppDispatch, useAppSelector } from "../../store";
 import { setSelectedCell } from "../../store/templateSlice";
@@ -15,23 +14,6 @@ import {
   selectReportMeta,
   selectHiddenCells,
 } from "../../store/selectors";
-
-// Brief highlight pulse played once when a row is newly added/restored.
-// Ends fully transparent so it never permanently changes the row's look.
-const newRowHighlight = keyframes`
-  0% {
-    background-color: rgba(25, 118, 210, 0.28);
-    box-shadow: inset 0 0 0 2px rgba(25, 118, 210, 0.55);
-  }
-  70% {
-    background-color: rgba(25, 118, 210, 0.16);
-    box-shadow: inset 0 0 0 2px rgba(25, 118, 210, 0.35);
-  }
-  100% {
-    background-color: transparent;
-    box-shadow: inset 0 0 0 2px rgba(25, 118, 210, 0);
-  }
-`;
 
 const getRowTypeColor = (type) => {
   const colors = {
@@ -91,7 +73,7 @@ const CellComponent = memo(
           a.render?.align === b.render?.align &&
           a.format?.bgColor === b.format?.bgColor
         );
-      },
+      }
     );
 
     const handleClick = useCallback(() => {
@@ -121,10 +103,10 @@ const CellComponent = memo(
             cell.format?.bgColor && cell.format.bgColor !== "#ffffff"
               ? cell.format.bgColor
               : isSelected
-                ? "#e3f2fd"
-                : formulaMode
-                  ? "#fff9c4"
-                  : "white",
+              ? "#e3f2fd"
+              : formulaMode
+              ? "#fff9c4"
+              : "white",
           border: isSelected ? "2px solid #1976d2" : "1px solid #e0e0e0",
           boxSizing: "border-box",
           fontWeight: cell.render?.bold ? 600 : 400,
@@ -140,8 +122,8 @@ const CellComponent = memo(
             bgcolor: isSelected
               ? "#e3f2fd"
               : formulaMode
-                ? "#fff59d"
-                : "#f5f5f5",
+              ? "#fff59d"
+              : "#f5f5f5",
             zIndex: isSelected ? 10 : 2,
           },
         }}
@@ -197,7 +179,7 @@ const CellComponent = memo(
       prevProps.columnWidths === nextProps.columnWidths &&
       prevProps.columnAlign === nextProps.columnAlign
     );
-  },
+  }
 );
 
 CellComponent.displayName = "CellComponent";
@@ -210,7 +192,6 @@ const RowContent = memo(
     selectedCellId,
     formulaMode,
     hiddenCellsMap,
-    isHighlighted,
     onCellClick,
     onDynamicRowClick,
   }) => {
@@ -230,10 +211,6 @@ const RowContent = memo(
           borderLeft: `3px solid ${getRowTypeColor(row.rowType)}`,
           "&:hover": { bgcolor: "#f9f9f9" },
           minHeight: 60,
-          position: "relative",
-          animation: isHighlighted
-            ? `${newRowHighlight} 1.8s ease-out`
-            : "none",
         }}
       >
         <Box
@@ -339,11 +316,10 @@ const RowContent = memo(
       prevProps.selectedCellId === nextProps.selectedCellId &&
       prevProps.formulaMode === nextProps.formulaMode &&
       prevProps.hiddenCellsMap === nextProps.hiddenCellsMap &&
-      prevProps.isHighlighted === nextProps.isHighlighted &&
       prevProps.gridTemplateColumns === nextProps.gridTemplateColumns &&
       prevProps.columnWidths === nextProps.columnWidths
     );
-  },
+  }
 );
 
 RowContent.displayName = "RowContent";
@@ -380,7 +356,7 @@ export const ReportCanvas = memo(() => {
 
     const totalSpecifiedWidth = columns.reduce(
       (sum, col) => sum + (col.format?.width || 1),
-      0,
+      0
     );
     return columns.map((col) => {
       const colWidth = col.format?.width || 1;
@@ -390,7 +366,7 @@ export const ReportCanvas = memo(() => {
 
   const gridTemplateColumns = useMemo(
     () => calculateColumnWidths.map((width) => `${width}px`).join(" "),
-    [calculateColumnWidths],
+    [calculateColumnWidths]
   );
 
   const rowVirtualizer = useVirtualizer({
@@ -399,51 +375,6 @@ export const ReportCanvas = memo(() => {
     estimateSize: useCallback(() => 60, []),
     overscan: 20,
   });
-
-  // ---- Scroll-to & highlight a newly added row ----
-  // Detected by diffing rowOrder against its previous value rather than a
-  // dedicated Redux action, so this works regardless of which flow added
-  // the row (Add Row dialog, duplicate, undo of a delete, etc).
-  const [highlightedRowId, setHighlightedRowId] = useState(null);
-  const prevRowOrderRef = useRef(rowOrder);
-  const highlightTimeoutRef = useRef(null);
-
-  useEffect(() => {
-    const prevOrder = prevRowOrderRef.current;
-    prevRowOrderRef.current = rowOrder;
-
-    if (prevOrder === rowOrder || rowOrder.length <= prevOrder.length) {
-      return;
-    }
-
-    const prevIds = new Set(prevOrder);
-    const addedRowId = rowOrder.find((id) => !prevIds.has(id));
-    if (!addedRowId) return;
-
-    const addedIndex = rowOrder.indexOf(addedRowId);
-
-    // Defer to the next frame so the virtualizer has re-measured the new
-    // (longer) list before we ask it to scroll.
-    requestAnimationFrame(() => {
-      rowVirtualizer.scrollToIndex(addedIndex, {
-        align: "center",
-        behavior: "smooth",
-      });
-    });
-
-    setHighlightedRowId(addedRowId);
-    if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
-    highlightTimeoutRef.current = setTimeout(() => {
-      setHighlightedRowId(null);
-    }, 1800);
-  }, [rowOrder, rowVirtualizer]);
-
-  useEffect(() => {
-    return () => {
-      if (highlightTimeoutRef.current)
-        clearTimeout(highlightTimeoutRef.current);
-    };
-  }, []);
 
   const handleCellClick = useCallback(
     (rowId, cellId, colId) => {
@@ -454,13 +385,13 @@ export const ReportCanvas = memo(() => {
         if (row?.rowType === "DYNAMIC") return;
         const cellRef = `cell_${rowId}_${colId}`;
         window.dispatchEvent(
-          new CustomEvent("formula-cell-selected", { detail: cellRef }),
+          new CustomEvent("formula-cell-selected", { detail: cellRef })
         );
       } else {
         dispatch(setSelectedCell({ rowId, cellId }));
       }
     },
-    [rows, dispatch, formulaMode],
+    [rows, dispatch, formulaMode]
   );
 
   const handleDynamicRowClick = useCallback(
@@ -469,7 +400,7 @@ export const ReportCanvas = memo(() => {
         dispatch(setSelectedCell({ rowId, cellId: "" }));
       }
     },
-    [dispatch, formulaMode],
+    [dispatch, formulaMode]
   );
 
   // useEffect(() => {
@@ -718,7 +649,6 @@ export const ReportCanvas = memo(() => {
                         selectedCellId={selectedCell?.cellId || null}
                         formulaMode={formulaMode}
                         hiddenCellsMap={hiddenCellsMap}
-                        isHighlighted={rowId === highlightedRowId}
                         onCellClick={handleCellClick}
                         onDynamicRowClick={handleDynamicRowClick}
                       />
