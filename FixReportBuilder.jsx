@@ -1,675 +1,481 @@
-import { useRef, useMemo, useCallback, memo, useEffect } from "react";
+import { useState, useEffect, useCallback, memo, useMemo } from "react";
 import Box from "@mui/material/Box";
-import Paper from "@mui/material/Paper";
+import Button from "@mui/material/Button";
+import IconButton from "@mui/material/IconButton";
+import TextField from "@mui/material/TextField";
+import FormControl from "@mui/material/FormControl";
+import InputLabel from "@mui/material/InputLabel";
+import Select from "@mui/material/Select";
+import MenuItem from "@mui/material/MenuItem";
 import Typography from "@mui/material/Typography";
 import Chip from "@mui/material/Chip";
-import { useVirtualizer } from "@tanstack/react-virtual";
-import { useAppDispatch, useAppSelector } from "../../store";
-import { setSelectedCell } from "../../store/templateSlice";
-import {
-  selectRowOrder,
-  selectColumns,
-  selectSelectedCell,
-  selectFormulaMode,
-  selectReportMeta,
-  selectHiddenCells,
-} from "../../store/selectors";
+import Paper from "@mui/material/Paper";
+import Autocomplete from "@mui/material/Autocomplete";
+import AddIcon from "@mui/icons-material/Add";
+import DeleteIcon from "@mui/icons-material/Delete";
+import { useTableConfig } from "../../hooks/useTableConfig";
+import { useConfirmDialog } from "../../hooks/useConfirmDialog";
+import ConfirmationDialog from "../dialogs/ConfirmationDialog";
 
-const getRowTypeColor = (type) => {
-  const colors = {
-    HEADER: "#1976d2",
-    DATA: "#2c8aa8",
-    SEPARATOR: "#757575",
-    DYNAMIC: "#388e3c",
-    FOOTER: "#f57c00",
-  };
-  return colors[type] || "#757575";
-};
+const OPERATORS = [
+  { value: "=", label: "Equals (=)" },
+  { value: "!=", label: "Not Equals (≠)" },
+  { value: ">", label: "Greater Than (>)" },
+  { value: ">=", label: "Greater or Equal (≥)" },
+  { value: "<", label: "Less Than (<)" },
+  { value: "<=", label: "Less or Equal (≤)" },
+  { value: "LIKE", label: "Contains (LIKE)" },
+  { value: "IN", label: "In List (IN)" },
+  // { value: "NOT IN", label: "Not In List (NOT IN)" },
+  // { value: "IS NULL", label: "Is Empty (NULL)" },
+  // { value: "IS NOT NULL", label: "Is Not Empty (NOT NULL)" },
+];
 
-const getCellValue = (cell) => {
-  if (cell.type === "TEXT") return cell.value || "Click to edit";
-  if (cell.type === "FORMULA") return `= ${cell.expression || "formula"}`;
-  if (cell.type?.startsWith("DB_")) {
-    const table = cell.source?.table || "";
-    const column = cell.source?.column || "";
-    if (!table || !column) return `${cell.type}(?)`;
-    const aggType = cell.type.replace("DB_", "");
-    if (cell.type === "DB_VALUE") {
-      return `${table}.${column}`;
-    }
-    return `${aggType}(${table}.${column})`;
-  }
-  return "Empty cell";
-};
-
-const CellComponent = memo(
+export const FilterBuilder = memo(
   ({
-    cellId,
-    rowId,
-    colId,
-    cellIndex,
-    isSelected,
-    formulaMode,
-    columnWidths,
-    columnAlign,
-    isHidden,
-    onCellClick,
+    filters,
+    onFiltersChange,
+    tableName = "",
+    title = "Filter Conditions",
+    availableColumns: customColumns,
   }) => {
-    const cell = useAppSelector(
-      (state) => state.template.present.cells[cellId],
-      (a, b) => {
-        if (!a && !b) return true;
-        if (!a || !b) return false;
-        return (
-          a.id === b.id &&
-          a.type === b.type &&
-          a.value === b.value &&
-          a.expression === b.expression &&
-          a.source?.table === b.source?.table &&
-          a.source?.column === b.source?.column &&
-          a.render?.colspan === b.render?.colspan &&
-          a.render?.rowspan === b.render?.rowspan &&
-          a.render?.bold === b.render?.bold &&
-          a.render?.align === b.render?.align &&
-          a.format?.bgColor === b.format?.bgColor
-        );
-      }
+    const { getFilterableColumns, getColumnDataType } = useTableConfig();
+    const [newInValue, setNewInValue] = useState("");
+
+    const { confirm, dialogProps } = useConfirmDialog();
+
+    const availableColumns = useMemo(
+      () => customColumns || (tableName ? getFilterableColumns(tableName) : []),
+      [customColumns, tableName, getFilterableColumns],
     );
 
-    const handleClick = useCallback(() => {
-      onCellClick(rowId, cellId, colId);
-    }, [rowId, cellId, colId, onCellClick]);
+    const parseFiltersToUI = useCallback(() => {
+      const conditions = [];
 
-    const colspan = cell?.render?.colspan || 1;
-    const rowspan = cell?.render?.rowspan || 1;
+      Object.entries(filters || {}).forEach(([column, columnConditions]) => {
+        const dataType = tableName
+          ? getColumnDataType(tableName, column)
+          : undefined;
 
-    const cellWidth = useMemo(() => {
-      let totalWidth = 0;
-      for (let i = 0; i < colspan && cellIndex + i < columnWidths.length; i++) {
-        totalWidth += columnWidths[cellIndex + i];
-      }
-      return totalWidth;
-    }, [colspan, cellIndex, columnWidths]);
+        if (Array.isArray(columnConditions)) {
+          columnConditions.forEach((condition, index) => {
+            conditions.push({
+              column,
+              conditionIndex: index,
+              condition: {
+                ...condition,
+                dataType: condition.dataType || dataType,
+              },
+            });
+          });
+        } else if (
+          typeof columnConditions === "object" &&
+          columnConditions !== null
+        ) {
+          if (columnConditions.op !== undefined) {
+            conditions.push({
+              column,
+              conditionIndex: 0,
+              condition: {
+                op: columnConditions.op,
+                value: columnConditions.value,
+                dataType: columnConditions.dataType || dataType,
+              },
+            });
+          } else {
+            Object.entries(columnConditions).forEach(([op, val], index) => {
+              conditions.push({
+                column,
+                conditionIndex: index,
+                condition: {
+                  op,
+                  value: val,
+                  dataType,
+                },
+              });
+            });
+          }
+        } else {
+          conditions.push({
+            column,
+            conditionIndex: 0,
+            condition: {
+              op: "=",
+              value: columnConditions,
+              dataType,
+            },
+          });
+        }
+      });
 
-    if (isHidden || !cell) return null;
+      return conditions;
+    }, [filters, tableName, getColumnDataType]);
 
-    return (
-      <Box
-        onClick={handleClick}
-        sx={{
-          cursor: formulaMode ? "crosshair" : "pointer",
-          position: "relative",
-          bgcolor:
-            cell.format?.bgColor && cell.format.bgColor !== "#ffffff"
-              ? cell.format.bgColor
-              : isSelected
-              ? "#e3f2fd"
-              : formulaMode
-              ? "#fff9c4"
-              : "white",
-          border: isSelected ? "2px solid #1976d2" : "1px solid #e0e0e0",
-          boxSizing: "border-box",
-          fontWeight: cell.render?.bold ? 600 : 400,
-          textAlign: cell.render?.align || columnAlign || "left",
-          width: `${cellWidth}px`,
-          minWidth: `${cellWidth}px`,
-          gridColumn: colspan > 1 ? `span ${colspan}` : undefined,
-          gridRow: rowspan > 1 ? `span ${rowspan}` : undefined,
-          p: 1,
-          zIndex: isSelected ? 10 : 1,
-          overflow: "hidden",
-          "&:hover": {
-            bgcolor: isSelected
-              ? "#e3f2fd"
-              : formulaMode
-              ? "#fff59d"
-              : "#f5f5f5",
-            zIndex: isSelected ? 10 : 2,
+    const [uiConditions, setUiConditions] = useState(parseFiltersToUI);
+
+    useEffect(() => {
+      setUiConditions(parseFiltersToUI());
+    }, [filters, tableName /* , parseFiltersToUI */]);
+
+    const conditionsToFilters = useCallback((conds) => {
+      const result = {};
+
+      conds.forEach((cond) => {
+        if (!result[cond.column]) {
+          result[cond.column] = [];
+        }
+        result[cond.column].push(cond.condition);
+      });
+
+      return result;
+    }, []);
+
+    const updateConditions = useCallback(
+      (newConditions) => {
+        setUiConditions(newConditions);
+        onFiltersChange(conditionsToFilters(newConditions));
+      },
+      [onFiltersChange, conditionsToFilters],
+    );
+
+    const addCondition = useCallback(() => {
+      const firstColumn = availableColumns[0] || "";
+      const dataType =
+        tableName && firstColumn
+          ? getColumnDataType(tableName, firstColumn)
+          : undefined;
+      const newCondition = {
+        column: firstColumn,
+        conditionIndex: 0,
+        condition: { op: "=", value: "", dataType },
+      };
+      updateConditions([...uiConditions, newCondition]);
+    }, [
+      availableColumns,
+      uiConditions,
+      updateConditions,
+      tableName,
+      getColumnDataType,
+    ]);
+
+    const removeCondition = useCallback(
+      async (index) => {
+        const isConfirmed = await confirm({
+          title: "Delete Condition",
+          // itemName: "",
+          content:
+            "Are you sure you want to delete the condition? This action cannot be undone.",
+        });
+
+        if (!isConfirmed) return;
+        updateConditions(uiConditions.filter((_, i) => i !== index));
+      },
+      [uiConditions, updateConditions],
+    );
+
+    const updateCondition = useCallback(
+      (index, field, value) => {
+        const newConditions = [...uiConditions];
+
+        if (field === "column") {
+          const dataType =
+            tableName && value ? getColumnDataType(tableName, value) : null;
+
+          newConditions[index] = {
+            ...newConditions[index],
+            column: value,
+            condition: { ...newConditions[index].condition, dataType },
+          };
+        } else if (field === "op") {
+          const newOp = value;
+          let newValue = newConditions[index].condition.value;
+
+          if (newOp === "IN" || newOp === "NOT IN") {
+            newValue = [];
+          } else if (Array.isArray(newValue)) {
+            newValue = "";
+          } else if (newOp === "IS NULL" || newOp === "IS NOT NULL") {
+            newValue = null;
+          }
+
+          newConditions[index] = {
+            ...newConditions[index],
+            condition: { op: newOp, value: newValue },
+          };
+        } else if (field === "value") {
+          newConditions[index] = {
+            ...newConditions[index],
+            condition: { ...newConditions[index].condition, value },
+          };
+        }
+
+        updateConditions(newConditions);
+      },
+      [getColumnDataType, tableName, uiConditions, updateConditions],
+    );
+
+    const addInValue = useCallback(
+      (index, val) => {
+        if (!val.trim()) return;
+        const newConditions = [...uiConditions];
+        const currentValues = Array.isArray(
+          newConditions[index].condition.value,
+        )
+          ? newConditions[index].condition.value
+          : [];
+        newConditions[index] = {
+          ...newConditions[index],
+          condition: {
+            ...newConditions[index].condition,
+            value: [...currentValues, val.trim()],
+            dataType: newConditions[index].condition.dataType,
           },
-        }}
-      >
-        <Typography
-          variant="body2"
-          sx={{
-            fontSize: "0.8rem",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            wordBreak: "break-all",
-          }}
-        >
-          {getCellValue(cell)}
-        </Typography>
-        {colspan > 1 && (
-          <Chip
-            label={`cs:${colspan}`}
-            size="small"
-            sx={{
-              position: "absolute",
-              top: 2,
-              right: 2,
-              height: 16,
-              fontSize: "0.6rem",
-            }}
-          />
-        )}
-        {rowspan > 1 && (
-          <Chip
-            label={`rs:${rowspan}`}
-            size="small"
-            color="secondary"
-            sx={{
-              position: "absolute",
-              top: colspan > 1 ? 20 : 2,
-              right: 2,
-              height: 16,
-              fontSize: "0.6rem",
-            }}
-          />
-        )}
-      </Box>
+        };
+        updateConditions(newConditions);
+        setNewInValue("");
+      },
+      [uiConditions, updateConditions],
     );
-  },
-  (prevProps, nextProps) => {
-    return (
-      prevProps.cellId === nextProps.cellId &&
-      prevProps.isSelected === nextProps.isSelected &&
-      prevProps.formulaMode === nextProps.formulaMode &&
-      prevProps.isHidden === nextProps.isHidden &&
-      prevProps.columnWidths === nextProps.columnWidths &&
-      prevProps.columnAlign === nextProps.columnAlign
+
+    const removeInValue = useCallback(
+      (condIndex, valIndex) => {
+        const newConditions = [...uiConditions];
+        const currentValues = newConditions[condIndex].condition.value;
+        newConditions[condIndex] = {
+          ...newConditions[condIndex],
+          condition: {
+            ...newConditions[condIndex].condition,
+            value: currentValues.filter((_, i) => i !== valIndex),
+            dataType: newConditions[condIndex].condition.dataType,
+          },
+        };
+        updateConditions(newConditions);
+      },
+      [uiConditions, updateConditions],
     );
-  }
-);
 
-CellComponent.displayName = "CellComponent";
+    const isNullOperator = (op) => op === "IS NULL" || op === "IS NOT NULL";
+    const isInOperator = (op) => op === "IN" || op === "NOT IN";
 
-const RowContent = memo(
-  ({
-    rowId,
-    gridTemplateColumns,
-    columnWidths,
-    selectedCellId,
-    formulaMode,
-    hiddenCellsMap,
-    onCellClick,
-    onDynamicRowClick,
-  }) => {
-    const row = useAppSelector((state) => state.template.present.rows[rowId]);
-    const columns = useAppSelector(selectColumns);
-
-    const handleDynamicClick = useCallback(() => {
-      onDynamicRowClick(rowId);
-    }, [rowId, onDynamicRowClick]);
-
-    if (!row) return null;
+    const groupedByColumn = uiConditions.reduce((acc, cond, idx) => {
+      if (!acc[cond.column]) {
+        acc[cond.column] = [];
+      }
+      acc[cond.column].push({ ...cond, originalIndex: idx });
+      return acc;
+    }, {});
 
     return (
-      <Box
-        sx={{
-          display: "flex",
-          borderLeft: `3px solid ${getRowTypeColor(row.rowType)}`,
-          "&:hover": { bgcolor: "#f9f9f9" },
-          minHeight: 60,
-        }}
-      >
+      <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <Box
           sx={{
-            bgcolor: "#fafafa",
-            borderRight: "1px solid #e0e0e0",
-            textAlign: "center",
-            width: 80,
-            minWidth: 80,
-            flexShrink: 0,
-            p: 0.5,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "flex-start",
-            paddingTop: 1,
-          }}
-        >
-          <Typography
-            variant="caption"
-            display="block"
-            color="text.secondary"
-            sx={{ fontSize: "0.65rem" }}
-          >
-            {row.id}
-          </Typography>
-          <Chip
-            label={row.rowType}
-            size="small"
-            sx={{
-              fontSize: "0.6rem",
-              height: 18,
-              bgcolor: getRowTypeColor(row.rowType),
-              color: "white",
-              fontWeight: 600,
-              mt: 0.5,
-            }}
-          />
-        </Box>
-
-        {row.rowType === "DYNAMIC" ? (
-          <Box
-            onClick={handleDynamicClick}
-            sx={{
-              flex: 1,
-              bgcolor: selectedCellId === null ? "#c8e6c9" : "#e8f5e9",
-              fontStyle: "italic",
-              color: "text.secondary",
-              cursor: formulaMode ? "not-allowed" : "pointer",
-              border:
-                selectedCellId === null
-                  ? "2px solid #388e3c"
-                  : "1px solid #e0e0e0",
-              opacity: formulaMode ? 0.6 : 1,
-              p: 1,
-              "&:hover": { bgcolor: formulaMode ? "#e8f5e9" : "#c8e6c9" },
-            }}
-          >
-            Dynamic rows from {row.dynamicConfig?.table || "database"} - Click
-            to configure
-            {formulaMode && (
-              <Typography variant="caption" display="block" color="error">
-                (Cannot use in formulas)
-              </Typography>
-            )}
-          </Box>
-        ) : (
-          <Box
-            sx={{
-              display: "grid",
-              gridTemplateColumns,
-              flex: 1,
-            }}
-          >
-            {row.cellIds?.map((cellId, cellIndex) => {
-              const column = columns[cellIndex];
-              if (!column) return null;
-
-              return (
-                <CellComponent
-                  key={cellId}
-                  cellId={cellId}
-                  rowId={rowId}
-                  colId={column.id}
-                  cellIndex={cellIndex}
-                  isSelected={selectedCellId === cellId}
-                  formulaMode={formulaMode}
-                  columnWidths={columnWidths}
-                  columnAlign={column.format?.align || "left"}
-                  isHidden={hiddenCellsMap.get(`${rowId}-${cellId}`) || false}
-                  onCellClick={onCellClick}
-                />
-              );
-            })}
-          </Box>
-        )}
-      </Box>
-    );
-  },
-  (prevProps, nextProps) => {
-    return (
-      prevProps.rowId === nextProps.rowId &&
-      prevProps.selectedCellId === nextProps.selectedCellId &&
-      prevProps.formulaMode === nextProps.formulaMode &&
-      prevProps.hiddenCellsMap === nextProps.hiddenCellsMap &&
-      prevProps.gridTemplateColumns === nextProps.gridTemplateColumns &&
-      prevProps.columnWidths === nextProps.columnWidths
-    );
-  }
-);
-
-RowContent.displayName = "RowContent";
-
-export const ReportCanvas = memo(() => {
-  const dispatch = useAppDispatch();
-  const parentRef = useRef(null);
-  const headerScrollRef = useRef(null);
-
-  const rowOrder = useAppSelector(selectRowOrder);
-  const columns = useAppSelector(selectColumns);
-  const selectedCell = useAppSelector(selectSelectedCell);
-  const formulaMode = useAppSelector(selectFormulaMode);
-  const reportMeta = useAppSelector(selectReportMeta);
-  const hiddenCells = useAppSelector(selectHiddenCells);
-  const rows = useAppSelector((state) => state.template.present.rows);
-
-  const hiddenCellsMap = useMemo(() => {
-    const map = new Map();
-    hiddenCells.forEach((key) => map.set(key, true));
-    return map;
-  }, [hiddenCells]);
-
-  const calculateColumnWidths = useMemo(() => {
-    if (!parentRef.current) return columns.map(() => 150);
-
-    const containerWidth = parentRef.current.clientWidth - 80;
-    const hasAnyWidth = columns.some((col) => col.format?.width);
-
-    if (!hasAnyWidth) {
-      const equalWidth = Math.floor(containerWidth / columns.length);
-      return columns.map(() => equalWidth);
-    }
-
-    const totalSpecifiedWidth = columns.reduce(
-      (sum, col) => sum + (col.format?.width || 1),
-      0
-    );
-    return columns.map((col) => {
-      const colWidth = col.format?.width || 1;
-      return Math.floor((colWidth / totalSpecifiedWidth) * containerWidth);
-    });
-  }, [columns, parentRef.current?.clientWidth]);
-
-  const gridTemplateColumns = useMemo(
-    () => calculateColumnWidths.map((width) => `${width}px`).join(" "),
-    [calculateColumnWidths]
-  );
-
-  const rowVirtualizer = useVirtualizer({
-    count: rowOrder.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: useCallback(() => 60, []),
-    overscan: 20,
-  });
-
-  const handleCellClick = useCallback(
-    (rowId, cellId, colId) => {
-      const row = rows[rowId];
-
-      if (formulaMode) {
-        // console.log("Ok inside", `cell_${rowId}_${colId}`);
-        if (row?.rowType === "DYNAMIC") return;
-        const cellRef = `cell_${rowId}_${colId}`;
-        window.dispatchEvent(
-          new CustomEvent("formula-cell-selected", { detail: cellRef })
-        );
-      } else {
-        dispatch(setSelectedCell({ rowId, cellId }));
-      }
-    },
-    [rows, dispatch, formulaMode]
-  );
-
-  const handleDynamicRowClick = useCallback(
-    (rowId) => {
-      if (!formulaMode) {
-        dispatch(setSelectedCell({ rowId, cellId: "" }));
-      }
-    },
-    [dispatch, formulaMode]
-  );
-
-  // useEffect(() => {
-  //   const handleKeyDown = (e) => {
-  //     if (!selectedCell || formulaMode) return;
-
-  //     const { rowId, cellId } = selectedCell;
-  //     const currentRow = rows[rowId];
-  //     if (!currentRow || currentRow.rowType === "DYNAMIC") return;
-
-  //     const currentRowIndex = rowOrder.indexOf(rowId);
-  //     const currentCellIndex = currentRow.cellIds.indexOf(cellId);
-
-  //     let newRowIndex = currentRowIndex;
-  //     let newCellIndex = currentCellIndex;
-
-  //     if (e.key === "ArrowUp") {
-  //       e.preventDefault();
-  //       newRowIndex = Math.max(0, currentRowIndex - 1);
-  //     } else if (e.key === "ArrowDown") {
-  //       e.preventDefault();
-  //       newRowIndex = Math.min(rowOrder.length - 1, currentRowIndex + 1);
-  //     } else if (e.key === "ArrowLeft") {
-  //       e.preventDefault();
-  //       newCellIndex = Math.max(0, currentCellIndex - 1);
-  //     } else if (e.key === "ArrowRight") {
-  //       e.preventDefault();
-  //       newCellIndex = Math.min(
-  //         currentRow.cellIds.length - 1,
-  //         currentCellIndex + 1
-  //       );
-  //     } else {
-  //       return;
-  //     }
-
-  //     const newRowId = rowOrder[newRowIndex];
-  //     const newRow = rows[newRowId];
-
-  //     if (newRow && newRow.rowType !== "DYNAMIC") {
-  //       const validCellIndex = Math.min(
-  //         newCellIndex,
-  //         newRow.cellIds.length - 1
-  //       );
-  //       const newCellId = newRow.cellIds[validCellIndex];
-
-  //       if (newCellId) {
-  //         dispatch(setSelectedCell({ rowId: newRowId, cellId: newCellId }));
-  //       }
-  //     }
-  //   };
-
-  //   window.addEventListener("keydown", handleKeyDown);
-  //   return () => window.removeEventListener("keydown", handleKeyDown);
-  // }, [selectedCell, rows, rowOrder, dispatch, formulaMode]);
-
-  const handleScroll = useCallback(() => {
-    if (parentRef.current && headerScrollRef.current) {
-      headerScrollRef.current.scrollLeft = parentRef.current.scrollLeft;
-    }
-  }, []);
-
-  const virtualItems = rowVirtualizer.getVirtualItems();
-
-  return (
-    <Box
-      sx={{
-        flex: 1,
-        // bgcolor: formulaMode ? "#fff3e0" : "#f5f7fa",
-        p: 3,
-        overflow: "hidden",
-        display: "flex",
-        flexDirection: "column",
-        cursor: formulaMode ? "crosshair" : "default",
-      }}
-    >
-      <Paper
-        elevation={3}
-        sx={{
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          bgcolor: "white",
-          p: 2,
-          overflow: "hidden",
-          boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
-        }}
-      >
-        {formulaMode && (
-          <Box
-            sx={{
-              mb: 2,
-              p: 1.5,
-              bgcolor: "#ff9800",
-              color: "white",
-              borderRadius: 1,
-              textAlign: "center",
-            }}
-          >
-            <Typography variant="body2" fontWeight={600}>
-              Formula Building Mode - Click cells to add to formula (Dynamic
-              rows excluded)
-            </Typography>
-          </Box>
-        )}
-
-        <Box
-          sx={{
-            mb: 2,
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
           }}
         >
-          <Typography variant="h6" fontWeight={600}>
-            {reportMeta.reportName || "Untitled Report"}
+          <Typography fontWeight={600} color="text.secondary">
+            {title}
           </Typography>
-          <Typography variant="caption" color="text.secondary">
-            {columns.length} cols × {rowOrder.length} rows
-          </Typography>
+          <Button
+            size="small"
+            startIcon={<AddIcon />}
+            onClick={addCondition}
+            variant="outlined"
+            disabled={!tableName}
+          >
+            Add Condition
+          </Button>
         </Box>
 
-        {columns.length === 0 ? (
-          <Box sx={{ textAlign: "center", py: 8, color: "text.secondary" }}>
-            <Typography variant="body1" gutterBottom>
-              Add columns from the left panel to get started
+        {availableColumns.length === 0 && (
+          <Paper
+            variant="outlined"
+            sx={{ p: 2, textAlign: "center", bgcolor: "#fff3e0" }}
+          >
+            <Typography variant="body2" color="warning.dark">
+              {customColumns
+                ? "No columns available for filtering."
+                : "Please select a table first to add filter conditions."}
             </Typography>
-          </Box>
-        ) : (
-          <Box
-            sx={{
-              flex: 1,
-              overflow: "hidden",
-              display: "flex",
-              flexDirection: "column",
-            }}
+          </Paper>
+        )}
+
+        {availableColumns.length > 0 && uiConditions.length === 0 && (
+          <Paper
+            variant="outlined"
+            sx={{ p: 2, textAlign: "center", bgcolor: "#f5f5f5" }}
+          >
+            <Typography variant="body2" color="text.secondary">
+              No filter conditions. Click "Add Condition" to add filters.
+            </Typography>
+          </Paper>
+        )}
+
+        {uiConditions.map((cond, index) => (
+          <Paper
+            key={index}
+            variant="outlined"
+            sx={{ p: 1.5, bgcolor: "#fafafa" }}
           >
             <Box
               sx={{
-                flexShrink: 0,
                 display: "flex",
-                bgcolor: "#f5f5f5",
-                borderBottom: "2px solid #e0e0e0",
-                overflow: "hidden",
-                position: "sticky",
-                top: 0,
-                zIndex: 100,
+                gap: 1,
+                alignItems: "flex-start",
+                flexWrap: "wrap",
               }}
             >
-              <Box
-                sx={{
-                  width: 83,
-                  minWidth: 80,
-                  fontWeight: 600,
-                  fontSize: "0.75rem",
-                  color: "text.secondary",
-                  borderRight: "1px solid #e0e0e0",
-                  // borderLeft: `3px solid ${getRowTypeColor("HEADER")}`,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  p: 1,
-                  flexShrink: 0,
-                  // position: "sticky",
-                  // left: 0,
-                  bgcolor: "#f5f5f5",
-                  zIndex: 101,
-                }}
-              >
-                #
-              </Box>
-              <Box
-                ref={headerScrollRef}
-                sx={{
-                  flex: 1,
-                  overflowX: "hidden",
-                  overflowY: "hidden",
-                }}
-              >
-                <Box
-                  sx={{
-                    display: "grid",
-                    gridTemplateColumns,
-                  }}
+              <Autocomplete
+                size="small"
+                sx={{ minWidth: 140 }}
+                fullWidth
+                options={availableColumns}
+                value={cond.column || null}
+                onChange={(_, newValue) =>
+                  updateCondition(index, "column", newValue || "")
+                }
+                renderInput={(params) => (
+                  <TextField {...params} label="Column" />
+                )}
+                freeSolo={false}
+              />
+
+              <FormControl size="small" fullWidth sx={{ minWidth: 150 }}>
+                <InputLabel>Operator</InputLabel>
+                <Select
+                  value={cond.condition.op}
+                  onChange={(e) => updateCondition(index, "op", e.target.value)}
+                  label="Operator"
                 >
-                  {columns.map((col) => (
-                    <Box
-                      key={col.id}
-                      sx={{
-                        fontWeight: 600,
-                        fontSize: "0.8rem",
-                        p: 1,
-                        borderRight: "1px solid #e0e0e0",
-                      }}
-                    >
-                      {col.name}
-                      <Typography
-                        variant="caption"
-                        display="block"
-                        color="text.secondary"
-                        sx={{ fontSize: "0.65rem" }}
-                      >
-                        {col.id} {/* ({col.format?.width || 150}px) */}
-                      </Typography>
-                    </Box>
+                  {OPERATORS.map((op) => (
+                    <MenuItem key={op.value} value={op.value}>
+                      {op.label}
+                    </MenuItem>
                   ))}
+                </Select>
+              </FormControl>
+
+              {!isNullOperator(cond.condition.op) &&
+                !isInOperator(cond.condition.op) && (
+                  <TextField
+                    size="small"
+                    label="Value"
+                    value={cond.condition.value || ""}
+                    onChange={(e) =>
+                      updateCondition(index, "value", e.target.value)
+                    }
+                    sx={{ flex: 1, minWidth: 100 }}
+                  />
+                )}
+
+              <IconButton
+                size="small"
+                onClick={() => removeCondition(index)}
+                color="error"
+              >
+                <DeleteIcon fontSize="small" />
+              </IconButton>
+            </Box>
+
+            {isInOperator(cond.condition.op) && (
+              <Box sx={{ mt: 1.5, pl: 1 }}>
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ mb: 1, display: "block" }}
+                >
+                  Values in list:
+                </Typography>
+                <Box
+                  sx={{ display: "flex", flexWrap: "wrap", gap: 0.5, mb: 1 }}
+                >
+                  {Array.isArray(cond.condition.value) &&
+                    cond.condition.value.map((val, valIndex) => (
+                      <Chip
+                        key={valIndex}
+                        label={val}
+                        size="small"
+                        onDelete={() => removeInValue(index, valIndex)}
+                        color="primary"
+                        variant="outlined"
+                      />
+                    ))}
+                  {(!Array.isArray(cond.condition.value) ||
+                    cond.condition.value.length === 0) && (
+                    <Typography variant="caption" color="text.disabled">
+                      No values added yet
+                    </Typography>
+                  )}
+                </Box>
+                <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
+                  <TextField
+                    size="small"
+                    label="Add value"
+                    value={newInValue}
+                    onChange={(e) => setNewInValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addInValue(index, newInValue);
+                      }
+                    }}
+                    sx={{ flex: 1 }}
+                  />
+                  <Button
+                    size="small"
+                    variant="contained"
+                    onClick={() => addInValue(index, newInValue)}
+                  >
+                    Add
+                  </Button>
                 </Box>
               </Box>
-            </Box>
+            )}
+          </Paper>
+        ))}
 
-            <Box
-              ref={parentRef}
-              onScroll={handleScroll}
-              sx={{
-                flex: 1,
-                overflow: "auto",
-                position: "relative",
-                willChange: "transform",
-              }}
-            >
-              <Box
-                sx={{
-                  height: `${rowVirtualizer.getTotalSize()}px`,
-                  width: "100%",
-                  position: "relative",
-                }}
-              >
-                {virtualItems.map((virtualRow) => {
-                  const rowId = rowOrder[virtualRow.index];
-
-                  return (
-                    <Box
-                      key={virtualRow.key}
-                      data-index={virtualRow.index}
-                      sx={{
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        width: "100%",
-                        transform: `translateY(${virtualRow.start}px)`,
-                      }}
-                    >
-                      <RowContent
-                        rowId={rowId}
-                        gridTemplateColumns={gridTemplateColumns}
-                        columnWidths={calculateColumnWidths}
-                        selectedCellId={selectedCell?.cellId || null}
-                        formulaMode={formulaMode}
-                        hiddenCellsMap={hiddenCellsMap}
-                        onCellClick={handleCellClick}
-                        onDynamicRowClick={handleDynamicRowClick}
-                      />
-                    </Box>
-                  );
-                })}
-              </Box>
-            </Box>
-          </Box>
-        )}
-
-        {rowOrder.length === 0 && columns.length > 0 && (
-          <Box sx={{ textAlign: "center", py: 8, color: "text.secondary" }}>
-            <Typography variant="body1" gutterBottom>
-              Add rows from the left panel
+        {uiConditions.length > 0 && (
+          <Paper variant="outlined" sx={{ p: 1.5, bgcolor: "#e8f5e9" }}>
+            <Typography variant="caption" color="success.dark">
+              <strong>Preview:</strong> {uiConditions.length} condition
+              {uiConditions.length !== 1 ? "s" : ""} will be applied
             </Typography>
-          </Box>
+            <Box sx={{ mt: 0.5 }}>
+              {Object.entries(groupedByColumn).map(([column, conditions]) => (
+                <Box key={column} sx={{ mb: 0.5 }}>
+                  <Typography
+                    variant="caption"
+                    fontWeight={600}
+                    color="text.primary"
+                  >
+                    {column}:
+                  </Typography>
+                  {conditions.map((c, i) => (
+                    <Typography
+                      key={i}
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: "block", pl: 1 }}
+                    >
+                      {c.condition.op}{" "}
+                      {isNullOperator(c.condition.op)
+                        ? ""
+                        : isInOperator(c.condition.op)
+                          ? `(${c.condition.value.join(", ")})`
+                          : `"${c.condition.value}"`}
+                    </Typography>
+                  ))}
+                </Box>
+              ))}
+            </Box>
+          </Paper>
         )}
-      </Paper>
-    </Box>
-  );
-});
 
-ReportCanvas.displayName = "ReportCanvas";
+        <ConfirmationDialog {...dialogProps} />
+      </Box>
+    );
+  },
+);
+
+FilterBuilder.displayName = "FilterBuilder";
