@@ -1,1124 +1,3169 @@
-import { useState, useEffect, useCallback, memo, useMemo } from "react";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import IconButton from "@mui/material/IconButton";
-import TextField from "@mui/material/TextField";
-import FormControl from "@mui/material/FormControl";
-import InputLabel from "@mui/material/InputLabel";
-import Select from "@mui/material/Select";
-import MenuItem from "@mui/material/MenuItem";
-import Typography from "@mui/material/Typography";
-import Chip from "@mui/material/Chip";
-import Paper from "@mui/material/Paper";
-import Autocomplete from "@mui/material/Autocomplete";
-import AddIcon from "@mui/icons-material/Add";
-import DeleteIcon from "@mui/icons-material/Delete";
-import { useTableConfig } from "../../hooks/useTableConfig";
-import { useConfirmDialog } from "../../hooks/useConfirmDialog";
-import ConfirmationDialog from "../dialogs/ConfirmationDialog";
+// ColumnItem.jsx
 
-const OPERATORS = [
-  { value: "=", label: "Equals (=)" },
-  { value: "!=", label: "Not Equals (≠)" },
-  { value: ">", label: "Greater Than (>)" },
-  { value: ">=", label: "Greater or Equal (≥)" },
-  { value: "<", label: "Less Than (<)" },
-  { value: "<=", label: "Less or Equal (≤)" },
-  { value: "LIKE", label: "Contains (LIKE)" },
-  { value: "IN", label: "In List (IN)" },
-  // { value: "NOT IN", label: "Not In List (NOT IN)" },
-  // { value: "IS NULL", label: "Is Empty (NULL)" },
-  // { value: "IS NOT NULL", label: "Is Not Empty (NOT NULL)" },
+import { memo, useCallback, useMemo } from "react";
+import {
+  Box,
+  Typography,
+  IconButton,
+  TextField,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Button,
+  Chip,
+  Tooltip,
+  Stack,
+  Divider,
+  Grid,
+  ToggleButton,
+  ToggleButtonGroup,
+  Collapse,
+  Switch,
+  FormControlLabel,
+  InputAdornment,
+  Paper,
+} from "@mui/material";
+import { alpha, useTheme } from "@mui/material/styles";
+
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import DeleteIcon from "@mui/icons-material/DeleteOutlined";
+import FormatAlignLeftIcon from "@mui/icons-material/FormatAlignLeft";
+import FormatAlignCenterIcon from "@mui/icons-material/FormatAlignCenter";
+import FormatAlignRightIcon from "@mui/icons-material/FormatAlignRight";
+import FormatBoldIcon from "@mui/icons-material/FormatBold";
+import FilterListIcon from "@mui/icons-material/FilterList";
+import SettingsIcon from "@mui/icons-material/Settings";
+import TuneIcon from "@mui/icons-material/Tune";
+import AttachMoneyIcon from "@mui/icons-material/AttachMoney";
+import NumbersIcon from "@mui/icons-material/Numbers";
+import CalendarTodayIcon from "@mui/icons-material/CalendarToday";
+import TextFieldsIcon from "@mui/icons-material/TextFields";
+
+import { useDebouncedInput } from "../../hooks/useDebouncedInput";
+import { ColumnSourceDialog } from "./ColumnSourceDialog";
+import { useState } from "react";
+
+/* ─────────────────── helpers ─────────────────── */
+
+const FORMAT_TYPE_META = {
+  none: {
+    label: "Text / Default",
+    icon: TextFieldsIcon,
+    color: "text.secondary",
+  },
+  currency: { label: "Currency", icon: AttachMoneyIcon, color: "success.main" },
+  number: { label: "Number", icon: NumbersIcon, color: "info.main" },
+  date: { label: "Date", icon: CalendarTodayIcon, color: "warning.main" },
+};
+
+const DATE_FORMAT_PRESETS = [
+  { value: "dd-MMM-yyyy", label: "dd-MMM-yyyy  (01-Jan-2025)" },
+  { value: "dd/MM/yyyy", label: "dd/MM/yyyy   (01/01/2025)" },
+  { value: "yyyy-MM-dd", label: "yyyy-MM-dd   (2025-01-01)" },
+  { value: "MM/dd/yyyy", label: "MM/dd/yyyy   (01/01/2025)" },
+  { value: "dd-MM-yyyy", label: "dd-MM-yyyy   (01-01-2025)" },
+  { value: "MMM dd, yyyy", label: "MMM dd, yyyy (Jan 01, 2025)" },
+  // { value: "__custom__", label: "Custom pattern…" },
 ];
 
-export const FilterBuilder = memo(
-  ({
-    filters,
-    onFiltersChange,
-    tableName = "",
-    title = "Filter Conditions",
-    availableColumns: customColumns,
-  }) => {
-    const { getFilterableColumns, getColumnDataType } = useTableConfig();
-    const [newInValue, setNewInValue] = useState("");
+/* ─────────────────── sub-components ─────────────────── */
 
-    const { confirm, dialogProps } = useConfirmDialog();
-
-    const availableColumns = useMemo(
-      () => customColumns || (tableName ? getFilterableColumns(tableName) : []),
-      [customColumns, tableName, getFilterableColumns],
-    );
-
-    const parseFiltersToUI = useCallback(() => {
-      const conditions = [];
-
-      Object.entries(filters || {}).forEach(([column, columnConditions]) => {
-        const dataType = tableName
-          ? getColumnDataType(tableName, column)
-          : undefined;
-
-        if (Array.isArray(columnConditions)) {
-          columnConditions.forEach((condition, index) => {
-            conditions.push({
-              column,
-              conditionIndex: index,
-              condition: {
-                ...condition,
-                dataType: condition.dataType || dataType,
-              },
-            });
-          });
-        } else if (
-          typeof columnConditions === "object" &&
-          columnConditions !== null
-        ) {
-          if (columnConditions.op !== undefined) {
-            conditions.push({
-              column,
-              conditionIndex: 0,
-              condition: {
-                op: columnConditions.op,
-                value: columnConditions.value,
-                dataType: columnConditions.dataType || dataType,
-              },
-            });
-          } else {
-            Object.entries(columnConditions).forEach(([op, val], index) => {
-              conditions.push({
-                column,
-                conditionIndex: index,
-                condition: {
-                  op,
-                  value: val,
-                  dataType,
-                },
-              });
-            });
-          }
-        } else {
-          conditions.push({
-            column,
-            conditionIndex: 0,
-            condition: {
-              op: "=",
-              value: columnConditions,
-              dataType,
-            },
-          });
-        }
-      });
-
-      return conditions;
-    }, [filters, tableName, getColumnDataType]);
-
-    const [uiConditions, setUiConditions] = useState(parseFiltersToUI);
-
-    useEffect(() => {
-      setUiConditions(parseFiltersToUI());
-    }, [filters, tableName /* , parseFiltersToUI */]);
-
-    const conditionsToFilters = useCallback((conds) => {
-      const result = {};
-
-      conds.forEach((cond) => {
-        if (!result[cond.column]) {
-          result[cond.column] = [];
-        }
-        result[cond.column].push(cond.condition);
-      });
-
-      return result;
-    }, []);
-
-    const updateConditions = useCallback(
-      (newConditions) => {
-        setUiConditions(newConditions);
-        onFiltersChange(conditionsToFilters(newConditions));
-      },
-      [onFiltersChange, conditionsToFilters],
-    );
-
-    const addCondition = useCallback(() => {
-      const firstColumn = availableColumns[0] || "";
-      const dataType =
-        tableName && firstColumn
-          ? getColumnDataType(tableName, firstColumn)
-          : undefined;
-      const newCondition = {
-        column: firstColumn,
-        conditionIndex: 0,
-        condition: { op: "=", value: "", dataType },
-      };
-      updateConditions([...uiConditions, newCondition]);
-    }, [
-      availableColumns,
-      uiConditions,
-      updateConditions,
-      tableName,
-      getColumnDataType,
-    ]);
-
-    const removeCondition = useCallback(
-      async (index) => {
-        const isConfirmed = await confirm({
-          title: "Delete Condition",
-          // itemName: "",
-          content:
-            "Are you sure you want to delete the condition? This action cannot be undone.",
-        });
-
-        if (!isConfirmed) return;
-        updateConditions(uiConditions.filter((_, i) => i !== index));
-      },
-      [uiConditions, updateConditions],
-    );
-
-    const updateCondition = useCallback(
-      (index, field, value) => {
-        const newConditions = [...uiConditions];
-
-        if (field === "column") {
-          const dataType =
-            tableName && value ? getColumnDataType(tableName, value) : null;
-
-          newConditions[index] = {
-            ...newConditions[index],
-            column: value,
-            condition: { ...newConditions[index].condition, dataType },
-          };
-        } else if (field === "op") {
-          const newOp = value;
-          let newValue = newConditions[index].condition.value;
-
-          if (newOp === "IN" || newOp === "NOT IN") {
-            newValue = [];
-          } else if (Array.isArray(newValue)) {
-            newValue = "";
-          } else if (newOp === "IS NULL" || newOp === "IS NOT NULL") {
-            newValue = null;
-          }
-
-          newConditions[index] = {
-            ...newConditions[index],
-            condition: { op: newOp, value: newValue },
-          };
-        } else if (field === "value") {
-          newConditions[index] = {
-            ...newConditions[index],
-            condition: { ...newConditions[index].condition, value },
-          };
-        }
-
-        updateConditions(newConditions);
-      },
-      [getColumnDataType, tableName, uiConditions, updateConditions],
-    );
-
-    const addInValue = useCallback(
-      (index, val) => {
-        if (!val.trim()) return;
-        const newConditions = [...uiConditions];
-        const currentValues = Array.isArray(
-          newConditions[index].condition.value,
-        )
-          ? newConditions[index].condition.value
-          : [];
-        newConditions[index] = {
-          ...newConditions[index],
-          condition: {
-            ...newConditions[index].condition,
-            value: [...currentValues, val.trim()],
-            dataType: newConditions[index].condition.dataType,
-          },
-        };
-        updateConditions(newConditions);
-        setNewInValue("");
-      },
-      [uiConditions, updateConditions],
-    );
-
-    const removeInValue = useCallback(
-      (condIndex, valIndex) => {
-        const newConditions = [...uiConditions];
-        const currentValues = newConditions[condIndex].condition.value;
-        newConditions[condIndex] = {
-          ...newConditions[condIndex],
-          condition: {
-            ...newConditions[condIndex].condition,
-            value: currentValues.filter((_, i) => i !== valIndex),
-            dataType: newConditions[condIndex].condition.dataType,
-          },
-        };
-        updateConditions(newConditions);
-      },
-      [uiConditions, updateConditions],
-    );
-
-    const isNullOperator = (op) => op === "IS NULL" || op === "IS NOT NULL";
-    const isInOperator = (op) => op === "IN" || op === "NOT IN";
-
-    const groupedByColumn = uiConditions.reduce((acc, cond, idx) => {
-      if (!acc[cond.column]) {
-        acc[cond.column] = [];
-      }
-      acc[cond.column].push({ ...cond, originalIndex: idx });
-      return acc;
-    }, {});
-
-    return (
-      <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <Box
-          sx={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
-        >
-          <Typography fontWeight={600} color="text.secondary">
-            {title}
-          </Typography>
-          <Button
-            size="small"
-            startIcon={<AddIcon />}
-            onClick={addCondition}
-            variant="outlined"
-            disabled={!tableName}
-          >
-            Add Condition
-          </Button>
-        </Box>
-
-        {availableColumns.length === 0 && (
-          <Paper
-            variant="outlined"
-            sx={{ p: 2, textAlign: "center", bgcolor: "#fff3e0" }}
-          >
-            <Typography variant="body2" color="warning.dark">
-              {customColumns
-                ? "No columns available for filtering."
-                : "Please select a table first to add filter conditions."}
-            </Typography>
-          </Paper>
-        )}
-
-        {availableColumns.length > 0 && uiConditions.length === 0 && (
-          <Paper
-            variant="outlined"
-            sx={{ p: 2, textAlign: "center", bgcolor: "#f5f5f5" }}
-          >
-            <Typography variant="body2" color="text.secondary">
-              No filter conditions. Click "Add Condition" to add filters.
-            </Typography>
-          </Paper>
-        )}
-
-        {uiConditions.map((cond, index) => (
-          <Paper
-            key={index}
-            variant="outlined"
-            sx={{ p: 1.5, bgcolor: "#fafafa" }}
-          >
-            <Box
-              sx={{
-                display: "flex",
-                gap: 1,
-                alignItems: "flex-start",
-                flexWrap: "wrap",
-              }}
-            >
-              <Autocomplete
-                size="small"
-                sx={{ minWidth: 140 }}
-                fullWidth
-                options={availableColumns}
-                value={cond.column || null}
-                onChange={(_, newValue) =>
-                  updateCondition(index, "column", newValue || "")
-                }
-                renderInput={(params) => (
-                  <TextField {...params} label="Column" />
-                )}
-                freeSolo={false}
-              />
-
-              <FormControl size="small" fullWidth sx={{ minWidth: 150 }}>
-                <InputLabel>Operator</InputLabel>
-                <Select
-                  value={cond.condition.op}
-                  onChange={(e) => updateCondition(index, "op", e.target.value)}
-                  label="Operator"
-                >
-                  {OPERATORS.map((op) => (
-                    <MenuItem key={op.value} value={op.value}>
-                      {op.label}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-
-              {!isNullOperator(cond.condition.op) &&
-                !isInOperator(cond.condition.op) && (
-                  <TextField
-                    size="small"
-                    label="Value"
-                    value={cond.condition.value || ""}
-                    onChange={(e) =>
-                      updateCondition(index, "value", e.target.value)
-                    }
-                    sx={{ flex: 1, minWidth: 100 }}
-                  />
-                )}
-
-              <IconButton
-                size="small"
-                onClick={() => removeCondition(index)}
-                color="error"
-              >
-                <DeleteIcon fontSize="small" />
-              </IconButton>
-            </Box>
-
-            {isInOperator(cond.condition.op) && (
-              <Box sx={{ mt: 1.5, pl: 1 }}>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{ mb: 1, display: "block" }}
-                >
-                  Values in list:
-                </Typography>
-                <Box
-                  sx={{ display: "flex", flexWrap: "wrap", gap: 0.5, mb: 1 }}
-                >
-                  {Array.isArray(cond.condition.value) &&
-                    cond.condition.value.map((val, valIndex) => (
-                      <Chip
-                        key={valIndex}
-                        label={val}
-                        size="small"
-                        onDelete={() => removeInValue(index, valIndex)}
-                        color="primary"
-                        variant="outlined"
-                      />
-                    ))}
-                  {(!Array.isArray(cond.condition.value) ||
-                    cond.condition.value.length === 0) && (
-                    <Typography variant="caption" color="text.disabled">
-                      No values added yet
-                    </Typography>
-                  )}
-                </Box>
-                <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
-                  <TextField
-                    size="small"
-                    label="Add value"
-                    value={newInValue}
-                    onChange={(e) => setNewInValue(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        addInValue(index, newInValue);
-                      }
-                    }}
-                    sx={{ flex: 1 }}
-                  />
-                  <Button
-                    size="small"
-                    variant="contained"
-                    onClick={() => addInValue(index, newInValue)}
-                  >
-                    Add
-                  </Button>
-                </Box>
-              </Box>
-            )}
-          </Paper>
-        ))}
-
-        {uiConditions.length > 0 && (
-          <Paper variant="outlined" sx={{ p: 1.5, bgcolor: "#e8f5e9" }}>
-            <Typography variant="caption" color="success.dark">
-              <strong>Preview:</strong> {uiConditions.length} condition
-              {uiConditions.length !== 1 ? "s" : ""} will be applied
-            </Typography>
-            <Box sx={{ mt: 0.5 }}>
-              {Object.entries(groupedByColumn).map(([column, conditions]) => (
-                <Box key={column} sx={{ mb: 0.5 }}>
-                  <Typography
-                    variant="caption"
-                    fontWeight={600}
-                    color="text.primary"
-                  >
-                    {column}:
-                  </Typography>
-                  {conditions.map((c, i) => (
-                    <Typography
-                      key={i}
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ display: "block", pl: 1 }}
-                    >
-                      {c.condition.op}{" "}
-                      {isNullOperator(c.condition.op)
-                        ? ""
-                        : isInOperator(c.condition.op)
-                          ? `(${c.condition.value.join(", ")})`
-                          : `"${c.condition.value}"`}
-                    </Typography>
-                  ))}
-                </Box>
-              ))}
-            </Box>
-          </Paper>
-        )}
-
-        <ConfirmationDialog {...dialogProps} />
-      </Box>
-    );
-  },
+/** Thin section header used inside format options panel */
+const SectionLabel = ({ children }) => (
+  <Typography
+    variant="overline"
+    sx={{
+      fontSize: "0.62rem",
+      letterSpacing: "0.08em",
+      color: "text.disabled",
+      lineHeight: 1,
+    }}
+  >
+    {children}
+  </Typography>
 );
 
-FilterBuilder.displayName = "FilterBuilder";
+/** A styled Switch row with label */
+const LabeledSwitch = ({
+  label,
+  sublabel,
+  checked,
+  onChange,
+  color = "primary",
+}) => (
+  <Box
+    display="flex"
+    alignItems="center"
+    justifyContent="space-between"
+    sx={{ py: 0.25 }}
+  >
+    <Box>
+      <Typography variant="body2" fontWeight={500} lineHeight={1.3}>
+        {label}
+      </Typography>
+      {sublabel && (
+        <Typography variant="caption" color="text.secondary" lineHeight={1.2}>
+          {sublabel}
+        </Typography>
+      )}
+    </Box>
+    <Switch
+      size="small"
+      checked={!!checked}
+      onChange={(e) => onChange(e.target.checked)}
+      color={color}
+    />
+  </Box>
+);
 
+/* ─────────────────── FORMAT OPTIONS PANELS ─────────────────── */
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-import { useState, useEffect, useCallback, memo, useMemo } from "react";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import IconButton from "@mui/material/IconButton";
-import TextField from "@mui/material/TextField";
-import FormControl from "@mui/material/FormControl";
-import InputLabel from "@mui/material/InputLabel";
-import Select from "@mui/material/Select";
-import MenuItem from "@mui/material/MenuItem";
-import Typography from "@mui/material/Typography";
-import Chip from "@mui/material/Chip";
-import Paper from "@mui/material/Paper";
-import Autocomplete from "@mui/material/Autocomplete";
-import Switch from "@mui/material/Switch";
-import FormControlLabel from "@mui/material/FormControlLabel";
-import Tooltip from "@mui/material/Tooltip";
-import Divider from "@mui/material/Divider";
-import AddIcon from "@mui/icons-material/Add";
-import DeleteIcon from "@mui/icons-material/Delete";
-import DeleteSweepIcon from "@mui/icons-material/DeleteSweep";
-import { useTableConfig } from "../../hooks/useTableConfig";
-import { useConfirmDialog } from "../../hooks/useConfirmDialog";
-import ConfirmationDialog from "../dialogs/ConfirmationDialog";
-
-const OPERATORS = [
-  { value: "=", label: "Equals (=)" },
-  { value: "!=", label: "Not Equals (≠)" },
-  { value: ">", label: "Greater Than (>)" },
-  { value: ">=", label: "Greater or Equal (≥)" },
-  { value: "<", label: "Less Than (<)" },
-  { value: "<=", label: "Less or Equal (≤)" },
-  { value: "LIKE", label: "Contains (LIKE)" },
-  { value: "IN", label: "In List (IN)" },
-  // { value: "NOT IN", label: "Not In List (NOT IN)" },
-  // { value: "IS NULL", label: "Is Empty (NULL)" },
-  // { value: "IS NOT NULL", label: "Is Not Empty (NOT NULL)" },
-];
-
-const isNullOperator = (op) => op === "IS NULL" || op === "IS NOT NULL";
-const isInOperator = (op) => op === "IN" || op === "NOT IN";
-
-export const FilterBuilder = memo(
-  ({
-    filters,
-    onFiltersChange,
-    tableName = "",
-    title = "Filter Conditions",
-    availableColumns: customColumns,
-  }) => {
-    const { getFilterableColumns, getColumnDataType } = useTableConfig();
-    const { confirm, dialogProps } = useConfirmDialog();
-
-    // UI-only state, keyed by condition index. Kept separate from `filters`
-    // so typing in one condition's "add value" box never leaks into another.
-    const [inputBuffers, setInputBuffers] = useState({});
-    const [bulkModeByIndex, setBulkModeByIndex] = useState({});
-
-    const availableColumns = useMemo(
-      () => customColumns || (tableName ? getFilterableColumns(tableName) : []),
-      [customColumns, tableName, getFilterableColumns],
+/** Currency-specific options */
+const CurrencyOptions = ({ format, onUpdate }) => {
+  const theme = useTheme();
+  const isCustomDateFormat =
+    format?.outputFormat &&
+    !DATE_FORMAT_PRESETS.some(
+      (p) => p.value === format.outputFormat && p.value !== "__custom__",
     );
 
-    const parseFiltersToUI = useCallback(() => {
-      const conditions = [];
+  return (
+    <Stack spacing={2}>
+      <Grid container spacing={1.5}>
+        {/* Decimals */}
+        <Grid item xs={6} sm={4}>
+          <TextField
+            label="Decimals"
+            type="number"
+            size="small"
+            fullWidth
+            value={format?.decimals ?? 2}
+            onChange={(e) => {
+              const v = Math.max(
+                0,
+                Math.min(10, parseInt(e.target.value) || 0),
+              );
+              onUpdate("format.decimals", v);
+            }}
+            inputProps={{ min: 0, max: 10, step: 1 }}
+            InputProps={{
+              endAdornment: (
+                <InputAdornment position="end">
+                  <Typography variant="caption" color="text.disabled">
+                    0–10
+                  </Typography>
+                </InputAdornment>
+              ),
+            }}
+          />
+        </Grid>
 
-      Object.entries(filters || {}).forEach(([column, columnConditions]) => {
-        const dataType = tableName
-          ? getColumnDataType(tableName, column)
-          : undefined;
+        {/* <Grid item xs={6} sm={4}>
+          <TextField
+            label="Symbol"
+            size="small"
+            fullWidth
+            value={format?.currencySymbol ?? ""}
+            onChange={(e) => onUpdate("format.currencySymbol", e.target.value)}
+            placeholder="₹  $  €  £"
+            inputProps={{ maxLength: 5 }}
+          />
+        </Grid>
 
-        if (Array.isArray(columnConditions)) {
-          columnConditions.forEach((condition, index) => {
-            conditions.push({
-              column,
-              conditionIndex: index,
-              condition: {
-                ...condition,
-                dataType: condition.dataType || dataType,
-              },
-            });
-          });
-        } else if (
-          typeof columnConditions === "object" &&
-          columnConditions !== null
-        ) {
-          if (columnConditions.op !== undefined) {
-            conditions.push({
-              column,
-              conditionIndex: 0,
-              condition: {
-                op: columnConditions.op,
-                value: columnConditions.value,
-                dataType: columnConditions.dataType || dataType,
-              },
-            });
-          } else {
-            Object.entries(columnConditions).forEach(([op, val], index) => {
-              conditions.push({
-                column,
-                conditionIndex: index,
-                condition: {
-                  op,
-                  value: val,
-                  dataType,
-                },
-              });
-            });
-          }
-        } else {
-          conditions.push({
-            column,
-            conditionIndex: 0,
-            condition: {
-              op: "=",
-              value: columnConditions,
-              dataType,
-            },
-          });
-        }
-      });
 
-      return conditions;
-    }, [filters, tableName, getColumnDataType]);
+        <Grid item xs={12} sm={4}>
+          <Box>
+            <SectionLabel>Symbol Position</SectionLabel>
+            <ToggleButtonGroup
+              size="small"
+              exclusive
+              fullWidth
+              value={format?.currencySymbolPosition || "prefix"}
+              onChange={(_, v) => {
+                if (v) onUpdate("format.currencySymbolPosition", v);
+              }}
+              sx={{ mt: 0.5 }}
+            >
+              <ToggleButton
+                value="prefix"
+                sx={{ fontSize: "0.72rem", py: 0.6 }}
+              >
+                Prefix
+              </ToggleButton>
+              <ToggleButton
+                value="suffix"
+                sx={{ fontSize: "0.72rem", py: 0.6 }}
+              >
+                Suffix
+              </ToggleButton>
+            </ToggleButtonGroup>
+          </Box>
+        </Grid> */}
+      </Grid>
 
-    const [uiConditions, setUiConditions] = useState(parseFiltersToUI);
+      <Divider sx={{ borderStyle: "dashed", opacity: 0.5 }} />
 
-    useEffect(() => {
-      setUiConditions(parseFiltersToUI());
-    }, [filters, tableName /* , parseFiltersToUI */]);
+      <Stack spacing={0.5}>
+        <LabeledSwitch
+          label="Thousand Seperator"
+          sublabel="Add's , to seperate amount"
+          checked={format?.thousandSeparator ?? true}
+          onChange={(v) => onUpdate("format.thousandSeparator", v)}
+        />
+        {/* <LabeledSwitch
+          label="Show Absolute Value"
+          sublabel="Display negatives as positive"
+          checked={format?.showAbsoluteValue ?? false}
+          onChange={(v) => onUpdate("format.showAbsoluteValue", v)}
+          color="warning"
+        /> */}
+      </Stack>
+    </Stack>
+  );
+};
 
-    const conditionsToFilters = useCallback((conds) => {
-      const result = {};
+/** Number-specific options */
+const NumberOptions = ({ format, onUpdate }) => (
+  <Stack spacing={2}>
+    <Grid container spacing={1.5}>
+      <Grid item xs={6}>
+        <TextField
+          label="Decimals"
+          type="number"
+          size="small"
+          fullWidth
+          value={format?.decimals ?? 2}
+          onChange={(e) => {
+            const v = Math.max(0, Math.min(10, parseInt(e.target.value) || 0));
+            onUpdate("format.decimals", v);
+          }}
+          inputProps={{ min: 0, max: 10, step: 1 }}
+          InputProps={{
+            endAdornment: (
+              <InputAdornment position="end">
+                <Typography variant="caption" color="text.disabled">
+                  0–10
+                </Typography>
+              </InputAdornment>
+            ),
+          }}
+        />
+      </Grid>
+    </Grid>
 
-      conds.forEach((cond) => {
-        if (!result[cond.column]) {
-          result[cond.column] = [];
-        }
-        result[cond.column].push(cond.condition);
-      });
+    <Divider sx={{ borderStyle: "dashed", opacity: 0.5 }} />
 
-      return result;
-    }, []);
+    <LabeledSwitch
+      label="Thousand Separator"
+      sublabel="Add's , to seperate amount"
+      checked={format?.thousandSeparator ?? true}
+      onChange={(v) => onUpdate("format.thousandSeparator", v)}
+    />
+  </Stack>
+);
 
-    const updateConditions = useCallback(
-      (newConditions) => {
-        setUiConditions(newConditions);
-        onFiltersChange(conditionsToFilters(newConditions));
-      },
-      [onFiltersChange, conditionsToFilters],
+/** Date-specific options */
+const DateOptions = ({ format, onUpdate }) => {
+  const currentFormat = format?.outputFormat || "dd-MMM-yyyy";
+  const isCustom = !DATE_FORMAT_PRESETS.some(
+    (p) => p.value === currentFormat && p.value !== "__custom__",
+  );
+  const selectValue = isCustom ? "__custom__" : currentFormat;
+
+  return (
+    <Stack spacing={1.5}>
+      <FormControl size="small" fullWidth>
+        <InputLabel>Date Format</InputLabel>
+        <Select
+          value={selectValue}
+          label="Date Format"
+          onChange={(e) => {
+            if (e.target.value !== "__custom__") {
+              onUpdate("format.outputFormat", e.target.value);
+            } else {
+              onUpdate("format.outputFormat", "");
+            }
+          }}
+        >
+          {DATE_FORMAT_PRESETS.map((p) => (
+            <MenuItem key={p.value} value={p.value}>
+              <Typography variant="body2">{p.label}</Typography>
+            </MenuItem>
+          ))}
+        </Select>
+      </FormControl>
+
+      {/* <Collapse in={isCustom}>
+        <TextField
+          label="Custom Pattern"
+          size="small"
+          fullWidth
+          value={currentFormat}
+          onChange={(e) => onUpdate("format.outputFormat", e.target.value)}
+          placeholder="e.g. MMM yyyy"
+          helperText="Java DateTimeFormatter pattern"
+          InputProps={{
+            endAdornment: (
+              <InputAdornment position="end">
+                <Typography
+                  variant="caption"
+                  color="text.disabled"
+                  sx={{ whiteSpace: "nowrap" }}
+                >
+                  {currentFormat || "pattern"}
+                </Typography>
+              </InputAdornment>
+            ),
+          }}
+        />
+      </Collapse> */}
+    </Stack>
+  );
+};
+
+/* ─────────────────── FORMAT OPTIONS WRAPPER ─────────────────── */
+
+const FormatOptionsPanel = ({ format, formatType, onUpdate }) => {
+  const theme = useTheme();
+
+  const accentColor = useMemo(() => {
+    switch (formatType) {
+      case "currency":
+        return theme.palette.success.main;
+      case "number":
+        return theme.palette.info.main;
+      case "date":
+        return theme.palette.warning.main;
+      default:
+        return null;
+    }
+  }, [formatType, theme]);
+
+  const hasOptions = ["currency", "number", "date"].includes(formatType);
+
+  return (
+    <Collapse in={hasOptions} unmountOnExit>
+      <Paper
+        variant="outlined"
+        sx={{
+          borderRadius: 1.5,
+          borderColor: alpha(accentColor || theme.palette.divider, 0.35),
+          borderLeftWidth: 3,
+          borderLeftColor: accentColor,
+          borderLeftStyle: "solid",
+          overflow: "hidden",
+          bgcolor: alpha(accentColor || theme.palette.primary.main, 0.03),
+        }}
+      >
+        <Box
+          sx={{
+            px: 1.5,
+            py: 0.75,
+            display: "flex",
+            alignItems: "center",
+            gap: 1,
+            borderBottom: "1px solid",
+            borderColor: alpha(accentColor || theme.palette.divider, 0.2),
+            bgcolor: alpha(accentColor || theme.palette.primary.main, 0.05),
+          }}
+        >
+          <TuneIcon sx={{ fontSize: 14, color: accentColor }} />
+          <Typography
+            variant="caption"
+            fontWeight={600}
+            color={accentColor}
+            sx={{ letterSpacing: "0.04em" }}
+          >
+            {FORMAT_TYPE_META[formatType]?.label || ""} Options
+          </Typography>
+        </Box>
+
+        <Box sx={{ p: 1.5 }}>
+          {formatType === "currency" && (
+            <CurrencyOptions format={format} onUpdate={onUpdate} />
+          )}
+          {formatType === "number" && (
+            <NumberOptions format={format} onUpdate={onUpdate} />
+          )}
+          {formatType === "date" && (
+            <DateOptions format={format} onUpdate={onUpdate} />
+          )}
+        </Box>
+      </Paper>
+    </Collapse>
+  );
+};
+
+/* ─────────────────── MAIN COMPONENT ─────────────────── */
+
+export const ColumnItem = memo(
+  ({ col, isEditing, onToggleEdit, onRemove, onUpdate }) => {
+    const theme = useTheme();
+    const [filtersOpen, setFiltersOpen] = useState(false);
+
+    /* Debounced Name */
+    const handleNameUpdate = useCallback(
+      (value) => onUpdate("name", value),
+      [onUpdate],
     );
 
-    const addCondition = useCallback(() => {
-      const firstColumn = availableColumns[0] || "";
-      const dataType =
-        tableName && firstColumn
-          ? getColumnDataType(tableName, firstColumn)
-          : undefined;
-      const newCondition = {
-        column: firstColumn,
-        conditionIndex: 0,
-        condition: { op: "=", value: "", dataType },
-      };
-      updateConditions([...uiConditions, newCondition]);
-    }, [
-      availableColumns,
-      uiConditions,
-      updateConditions,
-      tableName,
-      getColumnDataType,
-    ]);
-
-    const removeCondition = useCallback(
-      async (index) => {
-        const isConfirmed = await confirm({
-          title: "Delete Condition",
-          content:
-            "Are you sure you want to delete the condition? This action cannot be undone.",
-        });
-
-        if (!isConfirmed) return;
-        updateConditions(uiConditions.filter((_, i) => i !== index));
-        // Indices shift after a removal, so drop stale per-index UI state
-        // rather than risk it attaching to the wrong condition.
-        setInputBuffers({});
-        setBulkModeByIndex({});
-      },
-      [uiConditions, updateConditions, confirm],
+    const [debouncedName, setDebouncedName] = useDebouncedInput(
+      col.name || "",
+      handleNameUpdate,
+      200,
     );
 
-    const clearAllConditions = useCallback(async () => {
-      if (uiConditions.length === 0) return;
-
-      const isConfirmed = await confirm({
-        title: "Clear All Conditions",
-        content: `Are you sure you want to remove all ${uiConditions.length} filter condition${
-          uiConditions.length !== 1 ? "s" : ""
-        }? This action cannot be undone.`,
-      });
-
-      if (!isConfirmed) return;
-      updateConditions([]);
-      setInputBuffers({});
-      setBulkModeByIndex({});
-    }, [uiConditions, updateConditions, confirm]);
-
-    const updateCondition = useCallback(
-      (index, field, value) => {
-        const newConditions = [...uiConditions];
-
-        if (field === "column") {
-          const dataType =
-            tableName && value ? getColumnDataType(tableName, value) : null;
-
-          newConditions[index] = {
-            ...newConditions[index],
-            column: value,
-            condition: { ...newConditions[index].condition, dataType },
-          };
-        } else if (field === "op") {
-          const newOp = value;
-          let newValue = newConditions[index].condition.value;
-
-          if (newOp === "IN" || newOp === "NOT IN") {
-            newValue = [];
-          } else if (Array.isArray(newValue)) {
-            newValue = "";
-          } else if (newOp === "IS NULL" || newOp === "IS NOT NULL") {
-            newValue = null;
-          }
-
-          newConditions[index] = {
-            ...newConditions[index],
-            condition: { op: newOp, value: newValue },
-          };
-        } else if (field === "value") {
-          newConditions[index] = {
-            ...newConditions[index],
-            condition: { ...newConditions[index].condition, value },
-          };
-        }
-
-        updateConditions(newConditions);
-      },
-      [getColumnDataType, tableName, uiConditions, updateConditions],
-    );
-
-    const toggleBulkMode = useCallback((index) => {
-      setBulkModeByIndex((prev) => ({ ...prev, [index]: !prev[index] }));
-      // Clear any partially-typed text so switching modes doesn't
-      // misinterpret a single value as a comma list or vice versa.
-      setInputBuffers((prev) => ({ ...prev, [index]: "" }));
-    }, []);
-
-    // Adds one value, or many at once when bulk mode is on for this
-    // condition (comma-separated, trimmed, empty entries dropped, deduped).
-    const addInValues = useCallback(
-      (index) => {
-        const raw = inputBuffers[index] || "";
-        if (!raw.trim()) return;
-
-        const isBulk = !!bulkModeByIndex[index];
-        const parts = isBulk
-          ? raw
-              .split(",")
-              .map((v) => v.trim())
-              .filter(Boolean)
-          : [raw.trim()];
-
-        if (parts.length === 0) return;
-
-        const newConditions = [...uiConditions];
-        const currentValues = Array.isArray(
-          newConditions[index].condition.value,
-        )
-          ? newConditions[index].condition.value
-          : [];
-        const mergedValues = Array.from(new Set([...currentValues, ...parts]));
-
-        newConditions[index] = {
-          ...newConditions[index],
-          condition: {
-            ...newConditions[index].condition,
-            value: mergedValues,
-          },
-        };
-        updateConditions(newConditions);
-        setInputBuffers((prev) => ({ ...prev, [index]: "" }));
-      },
-      [uiConditions, updateConditions, inputBuffers, bulkModeByIndex],
-    );
-
-    const removeInValue = useCallback(
-      (condIndex, valIndex) => {
-        const newConditions = [...uiConditions];
-        const currentValues = newConditions[condIndex].condition.value;
-        newConditions[condIndex] = {
-          ...newConditions[condIndex],
-          condition: {
-            ...newConditions[condIndex].condition,
-            value: currentValues.filter((_, i) => i !== valIndex),
-            dataType: newConditions[condIndex].condition.dataType,
-          },
-        };
-        updateConditions(newConditions);
-      },
-      [uiConditions, updateConditions],
-    );
-
-    const groupedByColumn = useMemo(
-      () =>
-        uiConditions.reduce((acc, cond, idx) => {
-          if (!acc[cond.column]) {
-            acc[cond.column] = [];
-          }
-          acc[cond.column].push({ ...cond, originalIndex: idx });
-          return acc;
-        }, {}),
-      [uiConditions],
-    );
+    const tableCount = col.templateColumnFilters?.length || 0;
+    const formatType = col.format?.type || "none";
+    const TypeIcon = FORMAT_TYPE_META[formatType]?.icon || TextFieldsIcon;
+    const typeColor = FORMAT_TYPE_META[formatType]?.color || "text.secondary";
 
     return (
-      <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <Box
+        sx={{
+          mb: 1.5,
+          bgcolor: "background.paper",
+          borderRadius: 1.5,
+          border: "1px solid",
+          borderColor: isEditing ? "primary.main" : "divider",
+          boxShadow: isEditing
+            ? `0 0 0 3px ${alpha(theme.palette.primary.main, 0.1)}`
+            : "none",
+          transition: "all 0.2s ease-in-out",
+          overflow: "hidden",
+        }}
+      >
+        {/* ── HEADER ── */}
         <Box
           sx={{
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
+            px: 1.5,
+            py: 1.25,
+            cursor: "pointer",
+            "&:hover": { bgcolor: "action.hover" },
+            transition: "background-color 0.15s",
           }}
+          onClick={onToggleEdit}
         >
-          <Typography fontWeight={600} color="text.secondary">
-            {title}
-          </Typography>
-          <Box sx={{ display: "flex", gap: 1 }}>
-            {uiConditions.length > 0 && (
-              <Tooltip title="Remove all conditions">
-                <Button
-                  size="small"
-                  startIcon={<DeleteSweepIcon />}
-                  onClick={clearAllConditions}
-                  color="error"
-                  variant="text"
-                >
-                  Clear All
-                </Button>
-              </Tooltip>
-            )}
-            <Button
-              size="small"
-              startIcon={<AddIcon />}
-              onClick={addCondition}
-              variant="outlined"
-              disabled={!tableName || availableColumns.length === 0}
+          <Box display="flex" alignItems="center" gap={1.5} minWidth={0}>
+            <Box
+              sx={{
+                width: 30,
+                height: 30,
+                borderRadius: 1,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                bgcolor: isEditing
+                  ? alpha(theme.palette.primary.main, 0.12)
+                  : "action.selected",
+                flexShrink: 0,
+              }}
             >
-              Add Condition
-            </Button>
+              <SettingsIcon
+                sx={{
+                  fontSize: 16,
+                  color: isEditing ? "primary.main" : "text.secondary",
+                }}
+              />
+            </Box>
+
+            <Box minWidth={0}>
+              <Typography
+                variant="subtitle2"
+                fontWeight={600}
+                lineHeight={1.2}
+                noWrap
+                sx={{ maxWidth: 200 }}
+              >
+                {col.name || "Untitled Column"}
+              </Typography>
+              <Box display="flex" alignItems="center" gap={0.75} mt={0.2}>
+                <Typography
+                  variant="caption"
+                  color="text.disabled"
+                  sx={{ fontFamily: "monospace" }}
+                >
+                  {col.id}
+                </Typography>
+                {formatType !== "none" && (
+                  <>
+                    <Box
+                      sx={{
+                        width: 3,
+                        height: 3,
+                        borderRadius: "50%",
+                        bgcolor: "text.disabled",
+                      }}
+                    />
+                    <Box display="flex" alignItems="center" gap={0.3}>
+                      <TypeIcon sx={{ fontSize: 11, color: typeColor }} />
+                      <Typography
+                        variant="caption"
+                        sx={{ color: typeColor, textTransform: "capitalize" }}
+                      >
+                        {FORMAT_TYPE_META[formatType]?.label}
+                      </Typography>
+                    </Box>
+                  </>
+                )}
+              </Box>
+            </Box>
+          </Box>
+
+          <Box display="flex" alignItems="center" gap={0.5} flexShrink={0}>
+            {tableCount > 0 && !isEditing && (
+              <Chip
+                label={`${tableCount} filter${tableCount > 1 ? "s" : ""}`}
+                size="small"
+                color="secondary"
+                variant="outlined"
+                sx={{ height: 20, fontSize: "0.62rem", borderRadius: 1 }}
+              />
+            )}
+            <Tooltip title="Remove Column" placement="top">
+              <IconButton
+                size="small"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemove();
+                }}
+                sx={{
+                  color: "text.disabled",
+                  "&:hover": {
+                    color: "error.main",
+                    bgcolor: alpha(theme.palette.error.main, 0.08),
+                  },
+                }}
+              >
+                <DeleteIcon sx={{ fontSize: 16 }} />
+              </IconButton>
+            </Tooltip>
+            <IconButton
+              size="small"
+              sx={{
+                color: "text.disabled",
+                transform: isEditing ? "rotate(180deg)" : "rotate(0deg)",
+                transition: "transform 0.2s",
+              }}
+            >
+              <ExpandMoreIcon sx={{ fontSize: 18 }} />
+            </IconButton>
           </Box>
         </Box>
 
-        {availableColumns.length === 0 && (
-          <Paper
-            variant="outlined"
-            sx={{ p: 2, textAlign: "center", bgcolor: "#fff3e0" }}
+        {/* ── EDIT CONTENT ── */}
+        <Collapse in={isEditing}>
+          <Box
+            sx={{
+              p: 2,
+              pt: 1.75,
+              borderTop: "1px solid",
+              borderColor: "divider",
+            }}
           >
-            <Typography variant="body2" color="warning.dark">
-              {customColumns
-                ? "No columns available for filtering."
-                : "Please select a table first to add filter conditions."}
-            </Typography>
-          </Paper>
-        )}
-
-        {availableColumns.length > 0 && uiConditions.length === 0 && (
-          <Paper
-            variant="outlined"
-            sx={{ p: 2, textAlign: "center", bgcolor: "#f5f5f5" }}
-          >
-            <Typography variant="body2" color="text.secondary">
-              No filter conditions. Click "Add Condition" to add filters.
-            </Typography>
-          </Paper>
-        )}
-
-        {uiConditions.map((cond, index) => {
-          const isBulk = !!bulkModeByIndex[index];
-          const conditionValues = Array.isArray(cond.condition.value)
-            ? cond.condition.value
-            : [];
-
-          return (
-            <Paper
-              key={index}
-              variant="outlined"
-              sx={{ p: 1.5, bgcolor: "#fafafa" }}
-            >
-              {/* Header row: keeps the delete button in one predictable
-                  spot regardless of how the fields below wrap. */}
-              <Box
-                sx={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  mb: 1,
-                }}
-              >
-                <Typography
-                  variant="caption"
-                  fontWeight={600}
-                  color="text.secondary"
-                >
-                  Condition {index + 1}
-                </Typography>
-                <Tooltip title="Delete condition">
-                  <IconButton
+            <Stack spacing={2}>
+              {/* ── ROW 1: Name + Width ── */}
+              <Grid container spacing={1.5} alignItems="flex-start">
+                <Grid item xs={8} sm={9}>
+                  <TextField
+                    label="Column Display Name"
                     size="small"
-                    onClick={() => removeCondition(index)}
-                    color="error"
-                  >
-                    <DeleteIcon fontSize="small" />
-                  </IconButton>
-                </Tooltip>
-              </Box>
-
-              <Divider sx={{ mb: 1.5 }} />
-
-              <Box
-                sx={{
-                  display: "flex",
-                  gap: 1,
-                  alignItems: "flex-start",
-                  flexWrap: "wrap",
-                }}
-              >
-                <Autocomplete
-                  size="small"
-                  sx={{ minWidth: 140 }}
-                  fullWidth
-                  options={availableColumns}
-                  value={cond.column || null}
-                  onChange={(_, newValue) =>
-                    updateCondition(index, "column", newValue || "")
-                  }
-                  renderInput={(params) => (
-                    <TextField {...params} label="Column" />
-                  )}
-                  freeSolo={false}
-                />
-
-                <FormControl size="small" fullWidth sx={{ minWidth: 150 }}>
-                  <InputLabel>Operator</InputLabel>
-                  <Select
-                    value={cond.condition.op}
-                    onChange={(e) =>
-                      updateCondition(index, "op", e.target.value)
-                    }
-                    label="Operator"
-                  >
-                    {OPERATORS.map((op) => (
-                      <MenuItem key={op.value} value={op.value}>
-                        {op.label}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-
-                {!isNullOperator(cond.condition.op) &&
-                  !isInOperator(cond.condition.op) && (
+                    value={debouncedName}
+                    onChange={(e) => setDebouncedName(e.target.value)}
+                    fullWidth
+                    variant="outlined"
+                    placeholder="e.g. Account Balance"
+                  />
+                </Grid>
+                <Grid item xs={4} sm={3}>
+                  <Tooltip title="PDF column width." placement="top" arrow>
                     <TextField
+                      label="Column Width"
+                      type="number"
                       size="small"
-                      label="Value"
-                      type={
-                        cond.condition.dataType === "number" ||
-                        cond.condition.dataType === "integer" ||
-                        cond.condition.dataType === "float"
-                          ? "number"
-                          : "text"
-                      }
-                      value={cond.condition.value ?? ""}
-                      onChange={(e) =>
-                        updateCondition(index, "value", e.target.value)
-                      }
-                      sx={{ flex: 1, minWidth: 100 }}
+                      fullWidth
+                      value={col.format?.width ?? ""}
+                      sx={{ minWidth: 200 }}
+                      onChange={(e) => {
+                        const v =
+                          e.target.value === ""
+                            ? undefined
+                            : Math.max(
+                                1,
+                                Math.min(100, parseFloat(e.target.value) || 1),
+                              );
+                        onUpdate("format.width", v);
+                      }}
+                      inputProps={{ min: 1, max: 100, step: 1 }}
+                      placeholder="Auto"
+                      // InputProps={{
+                      //   endAdornment:
+                      //     col.format?.width != null ? (
+                      //       <InputAdornment position="end">
+                      //         <Typography
+                      //           variant="caption"
+                      //           color="text.disabled"
+                      //         >
+                      //           %
+                      //         </Typography>
+                      //       </InputAdornment>
+                      //     ) : null,
+                      // }}
                     />
-                  )}
-              </Box>
+                  </Tooltip>
+                </Grid>
+              </Grid>
 
-              {isInOperator(cond.condition.op) && (
-                <Box sx={{ mt: 1.5 }}>
+              {/* ── ROW 2: Data Type + Alignment + Bold ── */}
+              <Grid container spacing={1.5} alignItems="center">
+                <Grid item xs={12} sm={5}>
+                  <FormControl size="small" fullWidth>
+                    <InputLabel>Data Type</InputLabel>
+                    <Select
+                      value={formatType}
+                      label="Data Type"
+                      onChange={(e) => {
+                        onUpdate(
+                          "format.type",
+                          e.target.value === "none"
+                            ? undefined
+                            : e.target.value,
+                        );
+                      }}
+                      renderValue={(v) => (
+                        <Box display="flex" alignItems="center" gap={1}>
+                          {(() => {
+                            const meta = FORMAT_TYPE_META[v];
+                            const Icon = meta?.icon;
+                            return Icon ? (
+                              <Icon sx={{ fontSize: 16, color: meta.color }} />
+                            ) : null;
+                          })()}
+                          <Typography variant="body2">
+                            {FORMAT_TYPE_META[v]?.label || "Text / Default"}
+                          </Typography>
+                        </Box>
+                      )}
+                    >
+                      {Object.entries(FORMAT_TYPE_META).map(([val, meta]) => {
+                        const Icon = meta.icon;
+                        return (
+                          <MenuItem key={val} value={val}>
+                            <Box display="flex" alignItems="center" gap={1.5}>
+                              <Icon sx={{ fontSize: 18, color: meta.color }} />
+                              <Typography variant="body2">
+                                {meta.label}
+                              </Typography>
+                            </Box>
+                          </MenuItem>
+                        );
+                      })}
+                    </Select>
+                  </FormControl>
+                </Grid>
+
+                <Grid item xs={12} sm={7}>
                   <Box
+                    display="flex"
+                    alignItems="center"
+                    gap={0.5}
                     sx={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      mb: 1,
-                      flexWrap: "wrap",
-                      gap: 1,
+                      border: "1px solid",
+                      borderColor: "divider",
+                      borderRadius: 1,
+                      px: 0.75,
+                      py: 0.5,
+                      bgcolor: "action.hover",
                     }}
                   >
-                    <Typography variant="caption" color="text.secondary">
-                      Values in list ({conditionValues.length})
-                    </Typography>
-                    <FormControlLabel
-                      sx={{ mr: 0 }}
-                      control={
-                        <Switch
-                          size="small"
-                          checked={isBulk}
-                          onChange={() => toggleBulkMode(index)}
-                        />
-                      }
-                      label={
-                        <Typography variant="caption" color="text.secondary">
-                          Bulk add (comma-separated)
-                        </Typography>
-                      }
-                    />
-                  </Box>
-
-                  <Box
-                    sx={{ display: "flex", flexWrap: "wrap", gap: 0.5, mb: 1 }}
-                  >
-                    {conditionValues.map((val, valIndex) => (
-                      <Chip
-                        key={valIndex}
-                        label={val}
-                        size="small"
-                        onDelete={() => removeInValue(index, valIndex)}
-                        color="primary"
-                        variant="outlined"
-                      />
-                    ))}
-                    {conditionValues.length === 0 && (
-                      <Typography variant="caption" color="text.disabled">
-                        No values added yet
-                      </Typography>
-                    )}
-                  </Box>
-
-                  <Box sx={{ display: "flex", gap: 1, alignItems: "flex-start" }}>
-                    <TextField
-                      size="small"
-                      label={isBulk ? "Add values" : "Add value"}
-                      placeholder={isBulk ? "value1, value2, value3" : ""}
-                      value={inputBuffers[index] || ""}
-                      onChange={(e) =>
-                        setInputBuffers((prev) => ({
-                          ...prev,
-                          [index]: e.target.value,
-                        }))
-                      }
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey) {
-                          e.preventDefault();
-                          addInValues(index);
-                        }
-                      }}
-                      fullWidth
-                      multiline={isBulk}
-                      minRows={1}
-                      maxRows={3}
-                      sx={{ flex: 1 }}
-                    />
-                    <Button
-                      size="small"
-                      variant="contained"
-                      onClick={() => addInValues(index)}
-                      sx={{ flexShrink: 0 }}
-                    >
-                      Add
-                    </Button>
-                  </Box>
-                </Box>
-              )}
-            </Paper>
-          );
-        })}
-
-        {uiConditions.length > 0 && (
-          <Paper variant="outlined" sx={{ p: 1.5, bgcolor: "#e8f5e9" }}>
-            <Typography variant="caption" color="success.dark">
-              <strong>Preview:</strong> {uiConditions.length} condition
-              {uiConditions.length !== 1 ? "s" : ""} will be applied
-            </Typography>
-            <Box sx={{ mt: 0.5 }}>
-              {Object.entries(groupedByColumn).map(([column, conditions]) => (
-                <Box key={column} sx={{ mb: 0.5 }}>
-                  <Typography
-                    variant="caption"
-                    fontWeight={600}
-                    color="text.primary"
-                  >
-                    {column}:
-                  </Typography>
-                  {conditions.map((c, i) => (
                     <Typography
-                      key={i}
+                      variant="caption"
+                      color="text.disabled"
+                      sx={{ mr: 0.5, whiteSpace: "nowrap" }}
+                    >
+                      Align
+                    </Typography>
+                    <ToggleButtonGroup
+                      size="small"
+                      value={col.format?.align || "LEFT"}
+                      exclusive
+                      onChange={(_, newAlign) => {
+                        if (newAlign) onUpdate("format.align", newAlign);
+                      }}
+                      sx={{
+                        "& .MuiToggleButton-root": {
+                          border: "none",
+                          px: 0.75,
+                          py: 0.4,
+                        },
+                      }}
+                    >
+                      <ToggleButton value="LEFT">
+                        <FormatAlignLeftIcon sx={{ fontSize: 16 }} />
+                      </ToggleButton>
+                      <ToggleButton value="CENTER">
+                        <FormatAlignCenterIcon sx={{ fontSize: 16 }} />
+                      </ToggleButton>
+                      <ToggleButton value="RIGHT">
+                        <FormatAlignRightIcon sx={{ fontSize: 16 }} />
+                      </ToggleButton>
+                    </ToggleButtonGroup>
+
+                    <Divider
+                      orientation="vertical"
+                      flexItem
+                      sx={{ mx: 0.75 }}
+                    />
+
+                    <Tooltip title="Bold (PDF only)" placement="top">
+                      <ToggleButton
+                        value="bold"
+                        size="small"
+                        selected={col.format?.bold || false}
+                        onChange={() =>
+                          onUpdate("format.bold", !col.format?.bold)
+                        }
+                        color="primary"
+                        sx={{ border: "none", px: 0.75, py: 0.4 }}
+                      >
+                        <FormatBoldIcon sx={{ fontSize: 16 }} />
+                      </ToggleButton>
+                    </Tooltip>
+                  </Box>
+                </Grid>
+              </Grid>
+
+              {/* ── ROW 3: Conditional Format Options ── */}
+              <FormatOptionsPanel
+                format={col.format}
+                formatType={formatType}
+                onUpdate={onUpdate}
+              />
+
+              <Divider sx={{ borderStyle: "dashed", opacity: 0.6 }} />
+
+              {/* ── ROW 4: Source Filters ── */}
+              <Box
+                display="flex"
+                alignItems="center"
+                justifyContent="space-between"
+                sx={{
+                  bgcolor:
+                    tableCount > 0
+                      ? alpha(theme.palette.secondary.main, 0.06)
+                      : "action.hover",
+                  border: "1px solid",
+                  borderColor:
+                    tableCount > 0
+                      ? alpha(theme.palette.secondary.main, 0.25)
+                      : "divider",
+                  p: 1.25,
+                  borderRadius: 1.5,
+                  transition: "all 0.2s",
+                }}
+              >
+                <Box display="flex" gap={1.25} alignItems="center">
+                  <Box
+                    sx={{
+                      width: 28,
+                      height: 28,
+                      bgcolor:
+                        tableCount > 0
+                          ? alpha(theme.palette.secondary.main, 0.15)
+                          : alpha(theme.palette.primary.main, 0.1),
+                      borderRadius: 1,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <FilterListIcon
+                      sx={{
+                        fontSize: 16,
+                        color:
+                          tableCount > 0 ? "secondary.main" : "primary.main",
+                      }}
+                    />
+                  </Box>
+                  <Box>
+                    <Typography
+                      variant="body2"
+                      fontWeight={600}
+                      lineHeight={1.3}
+                    >
+                      Column Filters
+                    </Typography>
+                    <Typography
                       variant="caption"
                       color="text.secondary"
-                      sx={{ display: "block", pl: 1 }}
+                      lineHeight={1.2}
                     >
-                      {c.condition.op}{" "}
-                      {isNullOperator(c.condition.op)
-                        ? ""
-                        : isInOperator(c.condition.op)
-                          ? `(${c.condition.value.join(", ")})`
-                          : `"${c.condition.value}"`}
+                      {tableCount === 0
+                        ? "No DB filters configured"
+                        : `${tableCount} table${tableCount > 1 ? "s" : ""} with filter conditions`}
                     </Typography>
-                  ))}
+                  </Box>
                 </Box>
-              ))}
-            </Box>
-          </Paper>
-        )}
 
-        <ConfirmationDialog {...dialogProps} />
+                <Button
+                  size="small"
+                  variant={tableCount ? "contained" : "outlined"}
+                  color={tableCount ? "secondary" : "primary"}
+                  disableElevation
+                  onClick={() => setFiltersOpen(true)}
+                  sx={{ textTransform: "none", borderRadius: 1, minWidth: 50 }}
+                >
+                  {tableCount ? "Edit" : "Add"}
+                </Button>
+              </Box>
+            </Stack>
+
+            {/* ── DIALOG ── */}
+            <ColumnSourceDialog
+              open={filtersOpen}
+              value={col.templateColumnFilters}
+              onClose={() => setFiltersOpen(false)}
+              onSave={(tables) => {
+                onUpdate("templateColumnFilters", tables);
+                setFiltersOpen(false);
+              }}
+            />
+          </Box>
+        </Collapse>
       </Box>
     );
   },
 );
 
-FilterBuilder.displayName = "FilterBuilder";
+ColumnItem.displayName = "ColumnItem";
+
+
+
+
+
+
+
+
+// ColumnSourceDialog.jsx
+
+import { useEffect, useState } from "react";
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  Box,
+  Typography,
+  IconButton,
+  Autocomplete,
+  TextField,
+  Chip,
+  Paper,
+  Divider,
+  Stack,
+  Fade,
+} from "@mui/material";
+
+import CloseIcon from "@mui/icons-material/Close";
+import AddIcon from "@mui/icons-material/Add";
+import DeleteIcon from "@mui/icons-material/DeleteOutline";
+import TableChartIcon from "@mui/icons-material/TableChart";
+import FilterAltIcon from "@mui/icons-material/FilterAlt";
+
+import { useTableConfig } from "../../hooks/useTableConfig";
+import { FilterBuilder } from "../editor/FilterBuilder";
+
+/* ---------------- CONSTANTS ---------------- */
+
+const EMPTY_TABLE = {
+  tableName: "",
+  filters: {},
+};
+
+/* ---------------- COMPONENT ---------------- */
+
+export const ColumnSourceDialog = ({ open, value = [], onClose, onSave }) => {
+  const { tableConfigs } = useTableConfig();
+  const [tables, setTables] = useState([]);
+
+  /* Initialization logic */
+  useEffect(() => {
+    if (open) {
+      setTables(
+        Array.isArray(value)
+          ? value.map((t) => ({
+              tableName: t.tableName || "",
+              filters: t.filters || {},
+            }))
+          : [],
+      );
+    }
+  }, [open]);
+
+  /* ---------------- HELPERS ---------------- */
+
+  const addTable = () => {
+    setTables((p) => [...p, { ...EMPTY_TABLE }]);
+  };
+
+  const updateTable = (index, key, val) => {
+    setTables((prev) => {
+      const copy = [...prev];
+      copy[index] = {
+        ...copy[index],
+        [key]: val,
+        ...(key === "tableName" ? { filters: {} } : {}),
+      };
+      return copy;
+    });
+  };
+
+  const removeTable = (index) => {
+    setTables((p) => p.filter((_, i) => i !== index));
+  };
+
+  /* Exclude already selected tables to prevent duplicates */
+  const availableTables = (currentIndex) => {
+    const selected = tables
+      .filter((_, i) => i !== currentIndex)
+      .map((t) => t.tableName);
+
+    return tableConfigs.filter((t) => !selected.includes(t.tableName));
+  };
+
+  const isValid =
+    tables.length > 0 &&
+    tables.every((t) => t.tableName && Object.keys(t.filters || {}).length > 0);
+
+  /* ---------------- UI ---------------- */
+
+  return (
+    <Dialog open={open} maxWidth="md" fullWidth onClose={onClose}>
+      <DialogTitle
+        sx={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          pb: 1,
+        }}
+      >
+        <Box>
+          <Typography variant="h6" fontWeight={600}>
+            Configure Data Sources
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            Map this column to specific tables and define filter logic.
+          </Typography>
+        </Box>
+        <IconButton onClick={onClose} size="small">
+          <CloseIcon />
+        </IconButton>
+      </DialogTitle>
+
+      <Divider />
+
+      <DialogContent sx={{ bgcolor: "background.default", p: 3 }}>
+        <Stack spacing={2}>
+          {tables.length === 0 ? (
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 6,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                borderStyle: "dashed",
+                bgcolor: "transparent",
+              }}
+            >
+              <FilterAltIcon
+                sx={{ fontSize: 48, color: "action.disabled", mb: 1 }}
+              />
+              <Typography color="text.secondary" fontWeight={500}>
+                No data sources connected yet.
+              </Typography>
+              <Button
+                startIcon={<AddIcon />}
+                onClick={addTable}
+                sx={{ mt: 2 }}
+                variant="contained"
+                size="small"
+              >
+                Add First Source
+              </Button>
+            </Paper>
+          ) : (
+            <>
+              {tables.map((tbl, index) => (
+                <Fade in={true} key={index}>
+                  <Paper
+                    elevation={0}
+                    variant="outlined"
+                    sx={{ overflow: "hidden" }}
+                  >
+                    {/* Item Header */}
+                    <Box
+                      sx={{
+                        p: 1.5,
+                        pl: 2,
+                        bgcolor: "action.hover",
+                        borderBottom: "1px solid",
+                        borderColor: "divider",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 2,
+                      }}
+                    >
+                      <TableChartIcon
+                        fontSize="small"
+                        color={tbl.tableName ? "primary" : "action"}
+                      />
+
+                      {/* Table Selector (Inline in header) */}
+                      <Autocomplete
+                        size="small"
+                        sx={{ width: 300 }}
+                        options={availableTables(index)}
+                        getOptionLabel={(o) => o?.label || o?.tableName || ""}
+                        value={
+                          tableConfigs.find(
+                            (t) => t.tableName === tbl.tableName,
+                          ) || null
+                        }
+                        onChange={(_, v) =>
+                          updateTable(index, "tableName", v?.tableName || "")
+                        }
+                        renderInput={(params) => (
+                          <TextField
+                            {...params}
+                            placeholder="Select Source Table"
+                            variant="standard"
+                            InputProps={{
+                              ...params.InputProps,
+                              disableUnderline: true,
+                            }}
+                            sx={{
+                              "& .MuiInputBase-root": {
+                                fontSize: "0.95rem",
+                                fontWeight: 500,
+                              },
+                            }}
+                          />
+                        )}
+                      />
+
+                      <Box flexGrow={1} />
+
+                      {Object.keys(tbl.filters || {}).length > 0 && (
+                        <Chip
+                          size="small"
+                          label={`${
+                            Object.keys(tbl.filters).length
+                          } active filters`}
+                          color="primary"
+                          variant="outlined"
+                          sx={{ height: 24 }}
+                        />
+                      )}
+
+                      <IconButton
+                        size="small"
+                        color="error"
+                        onClick={() => removeTable(index)}
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Box>
+
+                    {/* Filter Builder Content */}
+                    <Box sx={{ p: 2 }}>
+                      {!tbl.tableName ? (
+                        <Typography
+                          variant="body2"
+                          color="text.secondary"
+                          sx={{ fontStyle: "italic", pl: 1 }}
+                        >
+                          Please select a table above to configure filters.
+                        </Typography>
+                      ) : (
+                        <FilterBuilder
+                          tableName={tbl.tableName}
+                          filters={tbl.filters}
+                          onFiltersChange={(f) =>
+                            updateTable(index, "filters", f)
+                          }
+                        />
+                      )}
+                    </Box>
+                  </Paper>
+                </Fade>
+              ))}
+
+              <Button
+                startIcon={<AddIcon />}
+                onClick={addTable}
+                variant="outlined"
+                fullWidth
+                sx={{ borderStyle: "dashed", color: "text.secondary" }}
+              >
+                Add Another Source Table
+              </Button>
+            </>
+          )}
+        </Stack>
+      </DialogContent>
+
+      <Divider />
+
+      <DialogActions sx={{ px: 3, py: 2 }}>
+        <Button onClick={onClose} color="inherit">
+          Cancel
+        </Button>
+        <Button
+          variant="contained"
+          disabled={!isValid}
+          onClick={() => onSave(tables)}
+          disableElevation
+        >
+          Save Configuration
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
+
+
+
+
+
+
+
+
+
+// ExtrasDialog.jsx
+
+import { useState, useEffect } from "react";
+import Dialog from "@mui/material/Dialog";
+import DialogTitle from "@mui/material/DialogTitle";
+import DialogContent from "@mui/material/DialogContent";
+import DialogActions from "@mui/material/DialogActions";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
+import Box from "@mui/material/Box";
+import Typography from "@mui/material/Typography";
+import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
+import Chip from "@mui/material/Chip";
+import AddIcon from "@mui/icons-material/Add";
+import DeleteIcon from "@mui/icons-material/Delete";
+import CloseIcon from "@mui/icons-material/Close";
+import TitleIcon from "@mui/icons-material/Title";
+import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
+
+/**
+ * ExtrasDialog — generic dialog for editing "extras" key-value pairs.
+ *
+ * Props:
+ *   open         {boolean}           — whether dialog is visible
+ *   section      {"header"|"footer"} — which extras section is being edited (future-proof)
+ *   propExtras   {Array}             — current extras from store  [{ name, value }]
+ *   onClose      {() => void}
+ *   onSave       {(extras: Array) => void}
+ */
+export const ExtrasDialog = ({
+  open,
+  section = "header",
+  propExtras,
+  onClose,
+  onSave,
+}) => {
+  const [extras, setExtras] = useState([]);
+
+  /* Sync from store every time dialog opens */
+  useEffect(() => {
+    if (open) {
+      setExtras(propExtras ? propExtras.map((e) => ({ ...e })) : []);
+    }
+  }, [open, propExtras]);
+
+  /* ---------- handlers ---------- */
+
+  const addExtra = () => {
+    setExtras((prev) => [...prev, { name: "", value: "" }]);
+  };
+
+  const updateExtra = (index, field, value) => {
+    setExtras((prev) =>
+      prev.map((item, i) => (i === index ? { ...item, [field]: value } : item)),
+    );
+  };
+
+  const removeExtra = (index) => {
+    setExtras((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleSave = () => {
+    onSave(extras);
+    onClose();
+  };
+
+  const handleClose = () => {
+    onClose();
+  };
+
+  /* Disable save if any entry has an empty name */
+  const isValid = extras.every((e) => e.name.trim() !== "");
+
+  const sectionLabel = section.charAt(0) + section.slice(1);
+
+  /* ---------- render ---------- */
+
+  return (
+    <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
+      {/* ── Title bar ── */}
+      <DialogTitle
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          gap: 1,
+          pr: 6,
+          borderBottom: "1px solid",
+          borderColor: "divider",
+        }}
+      >
+        <TitleIcon fontSize="small" color="primary" />
+        <Box sx={{ flex: 1 }}>
+          <Typography variant="subtitle1" fontWeight={700} lineHeight={1.2}>
+            {sectionLabel} Extras
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            Additional key-value pairs attached to the report {section}
+          </Typography>
+        </Box>
+
+        {extras.length > 0 && (
+          <Chip
+            label={extras.length}
+            size="small"
+            color="primary"
+            sx={{ fontWeight: 700 }}
+          />
+        )}
+
+        <IconButton
+          onClick={handleClose}
+          size="small"
+          sx={{ position: "absolute", right: 12, top: 12 }}
+        >
+          <CloseIcon fontSize="small" />
+        </IconButton>
+      </DialogTitle>
+
+      {/* ── Body ── */}
+      <DialogContent dividers sx={{ p: 2.5 }}>
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          {/* Add button */}
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<AddIcon />}
+            onClick={addExtra}
+            sx={{ alignSelf: "flex-start" }}
+          >
+            Add {sectionLabel} Extra
+          </Button>
+
+          {/* Empty state */}
+          {extras.length === 0 && (
+            <Box
+              sx={{
+                py: 4,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 1,
+                color: "text.disabled",
+                border: "1px dashed",
+                borderColor: "divider",
+                borderRadius: 1,
+              }}
+            >
+              <InfoOutlinedIcon sx={{ fontSize: 32, opacity: 0.4 }} />
+              <Typography variant="body2">
+                No {section} extras defined yet.
+              </Typography>
+              <Typography variant="caption">
+                Click "Add {sectionLabel} Extra" to add one.
+              </Typography>
+            </Box>
+          )}
+
+          {/* Entry list */}
+          {extras.map((extra, index) => (
+            <Box
+              key={index}
+              sx={{
+                p: 1.5,
+                border: "1px solid",
+                borderColor:
+                  extra.name.trim() === "" ? "warning.light" : "divider",
+                borderRadius: 1.5,
+                bgcolor: "background.paper",
+                display: "flex",
+                alignItems: "center",
+                gap: 1.5,
+                transition: "border-color 0.2s",
+                "&:hover": {
+                  borderColor:
+                    extra.name.trim() === "" ? "warning.main" : "primary.light",
+                  bgcolor: "action.hover",
+                },
+              }}
+            >
+              {/* Index badge */}
+              <Typography
+                variant="caption"
+                fontWeight={700}
+                sx={{
+                  minWidth: 20,
+                  height: 20,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  bgcolor: "primary.main",
+                  color: "primary.contrastText",
+                  borderRadius: "50%",
+                  flexShrink: 0,
+                  fontSize: 10,
+                }}
+              >
+                {index + 1}
+              </Typography>
+
+              {/* Name field */}
+              <TextField
+                label="Label"
+                size="small"
+                value={extra.name}
+                onChange={(e) => updateExtra(index, "name", e.target.value)}
+                placeholder="e.g. branch_code"
+                error={extra.name.trim() === ""}
+                helperText={extra.name.trim() === "" ? "Required" : " "}
+                sx={{ flex: 1 }}
+              />
+
+              {/* Value field */}
+              <TextField
+                label="Value"
+                size="small"
+                value={extra.value}
+                onChange={(e) => updateExtra(index, "value", e.target.value)}
+                placeholder="e.g. BR-001"
+                helperText=" "
+                sx={{ flex: 1 }}
+              />
+
+              {/* Delete button */}
+              <Tooltip title="Remove">
+                <IconButton
+                  size="small"
+                  onClick={() => removeExtra(index)}
+                  sx={{
+                    color: "error.main",
+                    flexShrink: 0,
+                    mb: 2.5, // align with fields (offset helper text)
+                    "&:hover": { bgcolor: "error.lighter" },
+                  }}
+                >
+                  <DeleteIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          ))}
+
+          {/* Duplicate name warning */}
+          {(() => {
+            const names = extras.map((e) => e.name.trim()).filter(Boolean);
+            const hasDupe = names.length !== new Set(names).size;
+            return hasDupe ? (
+              <Typography variant="caption" color="warning.main">
+                ⚠ Duplicate label names detected — each label must be unique.
+              </Typography>
+            ) : null;
+          })()}
+        </Box>
+      </DialogContent>
+
+      {/* ── Footer ── */}
+      <DialogActions sx={{ px: 2.5, py: 1.5 }}>
+        <Button onClick={handleClose} color="inherit">
+          Cancel
+        </Button>
+        <Button
+          onClick={handleSave}
+          variant="contained"
+          disabled={
+            !isValid ||
+            (() => {
+              const names = extras.map((e) => e.name.trim()).filter(Boolean);
+              return names.length !== new Set(names).size;
+            })()
+          }
+        >
+          Save Changes
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
+
+
+
+
+
+
+
+
+
+
+// GlobalsPanel.jsx
+
+import {
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Box,
+  Button,
+  Typography,
+  IconButton,
+  Chip,
+  Tooltip,
+} from "@mui/material";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import FunctionsIcon from "@mui/icons-material/Functions";
+import AddIcon from "@mui/icons-material/Add";
+import EditIcon from "@mui/icons-material/Edit";
+import DeleteIcon from "@mui/icons-material/Delete";
+import KeyboardIcon from "@mui/icons-material/Keyboard";
+import CodeIcon from "@mui/icons-material/Code";
+import StorageIcon from "@mui/icons-material/Storage";
+import CalendarTodayIcon from "@mui/icons-material/CalendarToday";
+import TextFieldsIcon from "@mui/icons-material/TextFields";
+import TagIcon from "@mui/icons-material/Tag";
+import ToggleOnIcon from "@mui/icons-material/ToggleOn";
+import { toPascalKebabCase } from "../../../../utils/CommonUtilities";
+
+/* ── colour helpers ───────────────────────────────────────── */
+
+const MODE_META = {
+  INPUT: { color: "#0288d1", bg: "#e1f5fe", Icon: KeyboardIcon },
+  EXPRESSION: { color: "#7b1fa2", bg: "#f3e5f5", Icon: CodeIcon },
+  QUERY: { color: "#2e7d32", bg: "#e8f5e9", Icon: StorageIcon },
+};
+
+const TYPE_META = {
+  DATE: { color: "warning", Icon: CalendarTodayIcon },
+  STRING: { color: "info", Icon: TextFieldsIcon },
+  NUMBER: { color: "success", Icon: TagIcon },
+  BOOLEAN: { color: "secondary", Icon: ToggleOnIcon },
+};
+
+/* ── empty state ──────────────────────────────────────────── */
+
+const EmptyState = () => (
+  <Box
+    sx={{
+      py: 3,
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      gap: 0.75,
+      color: "text.disabled",
+    }}
+  >
+    <FunctionsIcon sx={{ fontSize: 32, opacity: 0.4 }} />
+    <Typography variant="caption" textAlign="center" sx={{ maxWidth: 200 }}>
+      No global variables yet. Variables are shared across all template
+      sections.
+    </Typography>
+  </Box>
+);
+
+/* ── single variable card ─────────────────────────────────── */
+
+const VariableCard = ({ g, index, onEdit, onRemove }) => {
+  const modeMeta = MODE_META[g.mode] || MODE_META.INPUT;
+  const typeMeta = TYPE_META[g.dataType];
+  const ModeIcon = modeMeta.Icon;
+
+  return (
+    <Box
+      sx={{
+        position: "relative",
+        pl: 1.5,
+        pr: 1,
+        py: 1.25,
+        borderRadius: 1.5,
+        border: "1px solid",
+        borderColor: "divider",
+        borderLeftWidth: 3,
+        borderLeftColor: modeMeta.color,
+        bgcolor: "background.paper",
+        transition: "box-shadow .15s",
+        "&:hover": { boxShadow: "0 2px 8px rgba(0,0,0,.10)" },
+      }}
+    >
+      {/* top row: name + actions */}
+      <Box
+        display="flex"
+        justifyContent="space-between"
+        alignItems="flex-start"
+      >
+        <Box minWidth={0}>
+          <Typography
+            variant="body2"
+            fontWeight={700}
+            sx={{
+              fontFamily: "monospace",
+              letterSpacing: ".03em",
+              lineHeight: 1.3,
+            }}
+            noWrap
+          >
+            {g.name}
+          </Typography>
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            sx={{ fontFamily: "monospace", opacity: 0.65 }}
+          >
+            $G&#123;{g.name}&#125;
+          </Typography>
+        </Box>
+
+        <Box display="flex" sx={{ ml: 0.5, mt: -0.25 }}>
+          <Tooltip title="Edit">
+            <IconButton size="small" onClick={() => onEdit(g, index)}>
+              <EditIcon sx={{ fontSize: 15 }} />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Delete">
+            <IconButton
+              size="small"
+              color="error"
+              onClick={() => onRemove(index)}
+            >
+              <DeleteIcon sx={{ fontSize: 15 }} />
+            </IconButton>
+          </Tooltip>
+        </Box>
+      </Box>
+
+      {/* label */}
+      {g.label && (
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ display: "block", mt: 0.25, mb: 0.75 }}
+        >
+          {g.label}
+        </Typography>
+      )}
+
+      {/* badges row */}
+      <Box display="flex" gap={0.75} flexWrap="wrap" mt={0.5}>
+        {/* data type chip */}
+        {typeMeta && (
+          <Chip
+            icon={<typeMeta.Icon sx={{ fontSize: "12px !important" }} />}
+            label={toPascalKebabCase(g.dataType)}
+            size="small"
+            color={typeMeta.color}
+            variant="outlined"
+            sx={{ height: 20, fontSize: 11, "& .MuiChip-label": { px: 0.75 } }}
+          />
+        )}
+
+        {/* mode chip */}
+        <Chip
+          icon={
+            <ModeIcon
+              sx={{
+                fontSize: "12px !important",
+                color: `${modeMeta.color} !important`,
+              }}
+            />
+          }
+          label={`${toPascalKebabCase(g.mode)} Mode`}
+          size="small"
+          variant="outlined"
+          sx={{
+            height: 20,
+            fontSize: 11,
+            color: modeMeta.color,
+            borderColor: modeMeta.color,
+            "& .MuiChip-label": { px: 0.75 },
+          }}
+        />
+      </Box>
+    </Box>
+  );
+};
+
+/* ── panel ────────────────────────────────────────────────── */
+
+export const GlobalsPanel = ({
+  expanded,
+  onToggle,
+  globals,
+  onAdd,
+  onEdit,
+  onRemove,
+}) => {
+  const count = globals?.length || 0;
+
+  return (
+    <Accordion
+      expanded={expanded}
+      onChange={onToggle}
+      disableGutters
+      elevation={0}
+      sx={{
+        "&:before": { display: "none" },
+        border: "1px solid",
+        borderColor: "divider",
+        mb: 0.5,
+        borderRadius: "6px !important",
+      }}
+    >
+      <AccordionSummary
+        expandIcon={<ExpandMoreIcon />}
+        sx={{ minHeight: 44, "& .MuiAccordionSummary-content": { my: 0 } }}
+      >
+        <FunctionsIcon sx={{ mr: 1, fontSize: 18, color: "text.secondary" }} />
+        <Typography variant="body2" fontWeight={600}>
+          Global Variables
+        </Typography>
+        {count > 0 && (
+          <Chip
+            label={count}
+            size="small"
+            sx={{ ml: 1, height: 18, fontSize: 11, bgcolor: "action.selected" }}
+          />
+        )}
+      </AccordionSummary>
+
+      <AccordionDetails sx={{ pt: 0, pb: 1.5, px: 1.5 }}>
+        <Button
+          variant="outlined"
+          size="small"
+          startIcon={<AddIcon />}
+          onClick={onAdd}
+          fullWidth
+          sx={{ mb: 1.5, borderStyle: "dashed" }}
+        >
+          Add Global Variable
+        </Button>
+
+        {count === 0 ? (
+          <EmptyState />
+        ) : (
+          <Box display="flex" flexDirection="column" gap={1}>
+            {globals.map((g, i) => (
+              <VariableCard
+                key={g.name}
+                g={g}
+                index={i}
+                onEdit={onEdit}
+                onRemove={onRemove}
+              />
+            ))}
+          </Box>
+        )}
+      </AccordionDetails>
+    </Accordion>
+  );
+};
+
+
+
+
+
+
+
+
+
+// LeftPanel.jsx
+
+import { memo, useState, useCallback } from "react";
+import Paper from "@mui/material/Paper";
+
+/* ---------------- REDUX ---------------- */
+
+import { useAppDispatch, useAppSelector } from "../../store";
+
+import {
+  selectTemplateMeta,
+  selectReportMeta,
+  selectColumns,
+  selectRows,
+  selectVariants,
+  selectTableNames,
+  selectDynamicRowIds,
+  // selectExistingRowIds,
+  selectGlobals,
+} from "../../store/selectors";
+
+import {
+  setTemplateMeta,
+  setReportMeta,
+  addColumn,
+  updateColumn,
+  updateColumnFormat,
+  removeColumn,
+  addRow,
+  removeRow,
+  reorderRows,
+  addVariant,
+  updateVariant,
+  removeVariant,
+  addGlobalVariable,
+  updateGlobalVariable,
+  removeGlobalVariable,
+} from "../../store/templateSlice";
+
+/* ---------------- PANELS ---------------- */
+
+import { MetadataPanel } from "./MetadataPanel";
+import { ColumnsPanel } from "./ColumnsPanel";
+import { RowsPanel } from "./RowsPanel";
+import { GlobalsPanel } from "./GlobalsPanel";
+import { VariantsPanel } from "./VariantsPanel";
+
+/* ---------------- DIALOGS ---------------- */
+
+import { AddRowDialog } from "./AddRowDialog";
+import { VariantDialog } from "./VariantDialog";
+import { GlobalVariableDialog } from "./GlobalVariableDialog";
+import { ExtrasDialog } from "./ExtrasDialog";
+import { Box, Menu, MenuItem, Typography } from "@mui/material";
+
+/* ------------------------------------------------ */
+
+export const LeftPanel = memo(() => {
+  const dispatch = useAppDispatch();
+
+  /* ---------------- STORE ---------------- */
+
+  const templateMeta = useAppSelector(selectTemplateMeta);
+  const reportMeta = useAppSelector(selectReportMeta);
+  const columns = useAppSelector(selectColumns);
+  const rows = useAppSelector(selectRows);
+  const variants = useAppSelector(selectVariants);
+  const globals = useAppSelector(selectGlobals);
+  const tableNames = useAppSelector(selectTableNames);
+  const dynamicRowIds = useAppSelector(selectDynamicRowIds);
+  // const existingRowIds = useAppSelector(selectExistingRowIds);
+
+  /* ---------------- PANEL EXPANSION ---------------- */
+
+  const [expandedPanels, setExpandedPanels] = useState({
+    metadata: true,
+    columns: false,
+    rows: false,
+    globals: false,
+    variants: false,
+  });
+
+  const handleExpand = useCallback((panel) => {
+    setExpandedPanels((p) => ({ ...p, [panel]: !p[panel] }));
+  }, []);
+
+  /* ---------------- METADATA ---------------- */
+
+  const updateMetadata = useCallback(
+    (field, value) => {
+      if (field.startsWith("reportMeta.")) {
+        dispatch(setReportMeta({ [field.split(".")[1]]: value }));
+      } else {
+        dispatch(setTemplateMeta({ [field.split(".")[1]]: value }));
+      }
+    },
+    [dispatch],
+  );
+
+  /* ---------------- COLUMNS ---------------- */
+
+  const [editingColumn, setEditingColumn] = useState(null);
+
+  const handleAddColumn = useCallback(() => {
+    dispatch(addColumn());
+  }, [dispatch]);
+
+  const handleUpdateColumn = useCallback(
+    (index, field, value) => {
+      if (field.includes(".")) {
+        const [, formatKey] = field.split(".");
+        dispatch(updateColumnFormat({ index, format: { [formatKey]: value } }));
+      } else {
+        dispatch(updateColumn({ index, column: { [field]: value } }));
+      }
+    },
+    [dispatch],
+  );
+
+  const handleRemoveColumn = useCallback(
+    (colId, index) => {
+      dispatch(removeColumn({ colId, index }));
+    },
+    [dispatch],
+  );
+
+  /* ---------------- ROWS ---------------- */
+
+  const [draggedRowIndex, setDraggedRowIndex] = useState(null);
+  const [dropTargetIndex, setDropTargetIndex] = useState(null);
+  const [insertMenuAnchor, setInsertMenuAnchor] = useState(null);
+  const [insertAtIndex, setInsertAtIndex] = useState(0);
+  const [addRowDialogState, setAddRowDialogState] = useState({
+    open: false,
+    rowType: "",
+    anchorRowId: null, // row the user right-clicked "insert" next to, if any
+  });
+
+  const openAddRowDialog = useCallback(
+    (type, insertAtIndex) => {
+      const anchorRowId =
+        insertAtIndex !== undefined ? (rows[insertAtIndex]?.id ?? null) : null;
+      setAddRowDialogState({ open: true, rowType: type, anchorRowId });
+      setInsertMenuAnchor(null);
+    },
+    [rows],
+  );
+  // const [addRowDialogState, setAddRowDialogState] = useState({
+  //   open: false,
+  //   rowType: "",
+  //   insertAt: 0,
+  // });
+
+  // const openAddRowDialog = useCallback(
+  //   (type, insertAt = rows.length) => {
+  //     setAddRowDialogState({ open: true, rowType: type, insertAt });
+  //     setInsertMenuAnchor(null);
+  //   },
+  //   [rows.length],
+  // );
+
+
+
+  const handleAddRow = useCallback(
+    (result) => {
+      const { id, insertAt, copyFromRowId } = result;
+      const { rowType } = addRowDialogState;
+
+      const newRow = { id, rowType };
+
+      const sourceRow = copyFromRowId
+        ? rows.find((r) => r.id === copyFromRowId)
+        : null;
+
+      if (rowType === "DYNAMIC") {
+        newRow.dynamicConfig =
+          sourceRow?.rowType === "DYNAMIC" && sourceRow.dynamicConfig
+            ? structuredClone(sourceRow.dynamicConfig)
+            : {
+                type: "DB_LIST",
+                table: "",
+                select: [],
+                filters: {},
+                columnMappings: [],
+              };
+      } else if (sourceRow?.rowType === rowType && sourceRow.cells) {
+        // Pass the source cells through; the reducer copies their values
+        // into freshly generated cell ids for the new row.
+        newRow.cells = sourceRow.cells;
+      }
+
+      dispatch(addRow({ row: newRow, insertAt }));
+      setAddRowDialogState({ open: false, rowType: "", anchorRowId: null });
+    },
+    [dispatch, addRowDialogState, rows],
+  );
+
+
+  const handleRemoveRow = useCallback(
+    (rowId) => {
+      dispatch(removeRow({ rowId }));
+    },
+    [dispatch],
+  );
+
+  const handleDragStart = useCallback((index) => {
+    setDraggedRowIndex(index);
+  }, []);
+
+  const handleDragOver = useCallback((e, index) => {
+    e.preventDefault();
+    setDropTargetIndex(index);
+  }, []);
+
+  const handleDragEnd = useCallback(() => {
+    if (
+      draggedRowIndex !== null &&
+      dropTargetIndex !== null &&
+      draggedRowIndex !== dropTargetIndex
+    ) {
+      dispatch(reorderRows({ fromIndex: draggedRowIndex, toIndex: dropTargetIndex }));
+    }
+    setDraggedRowIndex(null);
+    setDropTargetIndex(null);
+  }, [dispatch, draggedRowIndex, dropTargetIndex]);
+
+  const handleInsertClick = useCallback((event, index) => {
+    setInsertMenuAnchor(event.currentTarget);
+    setInsertAtIndex(index);
+  }, []);
+
+  /* ---------------- VARIANTS ---------------- */
+
+  const [variantDialogOpen, setVariantDialogOpen] = useState(false);
+  const [editingVariant, setEditingVariant] = useState(null);
+  const [editingVariantIndex, setEditingVariantIndex] = useState(null);
+
+  const openAddVariantDialog = () => {
+    setEditingVariant(null);
+    setEditingVariantIndex(null);
+    setVariantDialogOpen(true);
+  };
+
+  const openEditVariantDialog = (variant, index) => {
+    setEditingVariant(variant);
+    setEditingVariantIndex(index);
+    setVariantDialogOpen(true);
+  };
+
+  const handleSaveVariant = useCallback(
+    (variant) => {
+      if (editingVariantIndex !== null) {
+        dispatch(updateVariant({ index: editingVariantIndex, variant }));
+      } else {
+        dispatch(addVariant(variant));
+      }
+      setVariantDialogOpen(false);
+      setEditingVariant(null);
+      setEditingVariantIndex(null);
+    },
+    [dispatch, editingVariantIndex],
+  );
+
+  const handleRemoveVariant = useCallback(
+    (index) => {
+      dispatch(removeVariant(index));
+    },
+    [dispatch],
+  );
+
+  /* ---------------- GLOBAL VARIABLES ---------------- */
+
+  const [globalDialogOpen, setGlobalDialogOpen] = useState(false);
+  const [editingGlobal, setEditingGlobal] = useState(null);
+  const [editingGlobalIndex, setEditingGlobalIndex] = useState(null);
+
+  const openAddGlobalVariableDialog = () => {
+    setEditingGlobal(null);
+    setEditingGlobalIndex(null);
+    setGlobalDialogOpen(true);
+  };
+
+  const openEditGlobalVariableDialog = (global, index) => {
+    setEditingGlobal(global);
+    setEditingGlobalIndex(index);
+    setGlobalDialogOpen(true);
+  };
+
+  const handleSaveGlobalVariable = useCallback(
+    (global) => {
+      if (editingGlobalIndex !== null) {
+        dispatch(updateGlobalVariable({ index: editingGlobalIndex, global }));
+      } else {
+        dispatch(addGlobalVariable(global));
+      }
+      setGlobalDialogOpen(false);
+      setEditingGlobal(null);
+      setEditingGlobalIndex(null);
+    },
+    [dispatch, editingGlobalIndex],
+  );
+
+  const handleRemoveGlobalVariable = useCallback(
+    (index) => {
+      dispatch(removeGlobalVariable(index));
+    },
+    [dispatch],
+  );
+
+  /* ---------------- EXTRAS HEADERS ---------------- */
+
+  const [extrasHeadersDialogOpen, setExtrasHeadersDialogOpen] = useState(false);
+
+  const handleSaveExtrasHeaders = useCallback(
+    (extras) => {
+      dispatch(setReportMeta({ extras }));
+    },
+    [dispatch],
+  );
+
+  /* ---------------- RENDER ---------------- */
+
+  return (
+    <Paper elevation={0} sx={{ width: 340, overflow: "auto", borderRadius: 0 }}>
+      <Box sx={{ p: 2 }}>
+        <Typography
+          variant="subtitle2"
+          fontWeight={600}
+          gutterBottom
+          sx={{ color: "text.secondary" }}
+        >
+          REPORT STRUCTURE
+        </Typography>
+
+        <MetadataPanel
+          expanded={expandedPanels.metadata}
+          onToggle={() => handleExpand("metadata")}
+          templateMeta={templateMeta}
+          reportMeta={reportMeta}
+          onUpdate={updateMetadata}
+          onOpenExtrasHeaders={() => setExtrasHeadersDialogOpen(true)}
+          extrasHeadersCount={reportMeta.extras?.length ?? 0}
+        />
+
+        <ColumnsPanel
+          expanded={expandedPanels.columns}
+          onToggle={() => handleExpand("columns")}
+          columns={columns}
+          editingColumn={editingColumn}
+          setEditingColumn={setEditingColumn}
+          onAddColumn={handleAddColumn}
+          onRemoveColumn={handleRemoveColumn}
+          onUpdateColumn={handleUpdateColumn}
+        />
+
+        <RowsPanel
+          expanded={expandedPanels.rows}
+          onToggle={() => handleExpand("rows")}
+          rows={rows}
+          draggedRowIndex={draggedRowIndex}
+          dropTargetIndex={dropTargetIndex}
+          onDragStart={handleDragStart}
+          onDragOver={handleDragOver}
+          onDragEnd={handleDragEnd}
+          onInsertClick={handleInsertClick}
+          onRemoveRow={handleRemoveRow}
+          openAddRowDialog={openAddRowDialog}
+        />
+
+        <GlobalsPanel
+          expanded={expandedPanels.globals}
+          onToggle={() => handleExpand("globals")}
+          globals={globals}
+          onAdd={openAddGlobalVariableDialog}
+          onEdit={openEditGlobalVariableDialog}
+          onRemove={handleRemoveGlobalVariable}
+        />
+
+        <VariantsPanel
+          expanded={expandedPanels.variants}
+          onToggle={() => handleExpand("variants")}
+          variants={variants}
+          onAdd={openAddVariantDialog}
+          onEdit={openEditVariantDialog}
+          onRemove={handleRemoveVariant}
+        />
+      </Box>
+
+      {/* ---------------- DIALOGS ---------------- */}
+
+      {/* Header Extras */}
+      <ExtrasDialog
+        open={extrasHeadersDialogOpen}
+        section="header"
+        propExtras={reportMeta.extras}
+        onClose={() => setExtrasHeadersDialogOpen(false)}
+        onSave={handleSaveExtrasHeaders}
+      />
+
+      {/* <AddRowDialog
+        open={addRowDialogState.open}
+        rowType={addRowDialogState.rowType}
+        existingRowIds={existingRowIds}
+        onClose={() => setAddRowDialogState({ open: false, rowType: "", insertAt: 0 })}
+        onConfirm={handleAddRow}
+      /> */}
+
+      <AddRowDialog
+        open={addRowDialogState.open}
+        rowType={addRowDialogState.rowType}
+        rows={rows}
+        anchorRowId={addRowDialogState.anchorRowId}
+        onClose={() =>
+          setAddRowDialogState({ open: false, rowType: "", anchorRowId: null })
+        }
+        onConfirm={handleAddRow}
+      />
+
+      <VariantDialog
+        open={variantDialogOpen}
+        variant={editingVariant}
+        tableNames={tableNames}
+        dynamicRowIds={dynamicRowIds}
+        onClose={() => {
+          setVariantDialogOpen(false);
+          setEditingVariant(null);
+          setEditingVariantIndex(null);
+        }}
+        onSave={handleSaveVariant}
+      />
+
+      <GlobalVariableDialog
+        open={globalDialogOpen}
+        globalVariable={editingGlobal}
+        globals={globals}
+        onClose={() => {
+          setGlobalDialogOpen(false);
+          setEditingGlobal(null);
+          setEditingGlobalIndex(null);
+        }}
+        onSave={handleSaveGlobalVariable}
+      />
+
+      <Menu
+        anchorEl={insertMenuAnchor}
+        open={Boolean(insertMenuAnchor)}
+        onClose={() => setInsertMenuAnchor(null)}
+      >
+        {/* <MenuItem onClick={() => openAddRowDialog("HEADER", insertAtIndex)}>Header</MenuItem> */}
+        <MenuItem onClick={() => openAddRowDialog("DATA", insertAtIndex)}>
+          Data
+        </MenuItem>
+        {/* <MenuItem onClick={() => openAddRowDialog("SEPARATOR", insertAtIndex)}>Separator</MenuItem> */}
+        <MenuItem onClick={() => openAddRowDialog("DYNAMIC", insertAtIndex)}>
+          Dynamic
+        </MenuItem>
+        {/* <MenuItem onClick={() => openAddRowDialog("FOOTER", insertAtIndex)}>Footer</MenuItem> */}
+      </Menu>
+    </Paper>
+  );
+});
+
+LeftPanel.displayName = "LeftPanel";
+
+
+
+
+
+
+
+
+
+
+
+
+
+// RowItem.jsx
+
+import { memo } from "react";
+import {
+  Box,
+  Typography,
+  ListItem,
+  ListItemText,
+  IconButton,
+} from "@mui/material";
+import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
+import AddIcon from "@mui/icons-material/Add";
+import DeleteIcon from "@mui/icons-material/Delete";
+
+export const RowItem = memo(
+  ({
+    row,
+    index,
+    isDragging,
+    isDropTarget,
+    onDragStart,
+    onDragOver,
+    onDragEnd,
+    onInsertClick,
+    onRemove,
+  }) => {
+    return (
+      <Box>
+        {/* Drop indicator */}
+        <Box
+          onDragOver={onDragOver}
+          onDrop={onDragEnd}
+          sx={{
+            height: isDropTarget && !isDragging ? 24 : 4,
+            bgcolor:
+              isDropTarget && !isDragging ? "primary.light" : "transparent",
+            borderRadius: 1,
+            transition: "all 0.2s",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {isDropTarget && !isDragging && (
+            <Typography variant="caption" color="primary.contrastText">
+              Drop here
+            </Typography>
+          )}
+        </Box>
+
+        <ListItem
+          draggable
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          sx={{
+            cursor: "grab",
+            bgcolor: isDragging ? "action.selected" : "transparent",
+            borderRadius: 1,
+            "&:hover": { bgcolor: "action.hover" },
+          }}
+          secondaryAction={
+            <Box sx={{ display: "flex", gap: 0.5 }}>
+              <IconButton
+                size="small"
+                onClick={onInsertClick}
+                title="Insert row after"
+              >
+                <AddIcon fontSize="small" />
+              </IconButton>
+              <IconButton edge="end" size="small" onClick={onRemove}>
+                <DeleteIcon fontSize="small" />
+              </IconButton>
+            </Box>
+          }
+        >
+          <DragIndicatorIcon
+            sx={{
+              mr: 1,
+              color: "text.disabled",
+              cursor: "grab",
+            }}
+            fontSize="small"
+          />
+
+          <ListItemText
+            primary={row.id}
+            secondary={row.rowType}
+            primaryTypographyProps={{ variant: "body2" }}
+            secondaryTypographyProps={{
+              variant: "caption",
+              color: "primary",
+            }}
+          />
+        </ListItem>
+      </Box>
+    );
+  },
+);
+
+RowItem.displayName = "RowItem";
+
+
+
+
+
+
+
+
+
+
+
+// RowPanel.jsx
+
+import {
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Box,
+  Button,
+  Typography,
+} from "@mui/material";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import ViewAgendaIcon from "@mui/icons-material/ViewAgenda";
+import { VirtualizedRowList } from "./VirtualizedRowList";
+
+export const RowsPanel = ({
+  expanded,
+  onToggle,
+  rows,
+  draggedRowIndex,
+  dropTargetIndex,
+  onDragStart,
+  onDragOver,
+  onDragEnd,
+  onInsertClick,
+  onRemoveRow,
+  openAddRowDialog,
+}) => {
+  return (
+    <Accordion expanded={expanded} onChange={onToggle}>
+      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+        <ViewAgendaIcon sx={{ mr: 1, fontSize: 20 }} />
+        <Typography variant="body2" fontWeight={500}>
+          Rows ({rows.length})
+        </Typography>
+      </AccordionSummary>
+
+      <AccordionDetails>
+        <Box display="flex" flexDirection="column" gap={1}>
+          <Box display="grid" gridTemplateColumns="1fr 1fr" gap={0.5}>
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => openAddRowDialog("DATA")}
+            >
+              Add Data Row
+            </Button>
+
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => openAddRowDialog("DYNAMIC")}
+            >
+              Add Dynamic Row
+            </Button>
+          </Box>
+
+          <VirtualizedRowList
+            rows={rows}
+            draggedRowIndex={draggedRowIndex}
+            dropTargetIndex={dropTargetIndex}
+            onDragStart={onDragStart}
+            onDragOver={onDragOver}
+            onDragEnd={onDragEnd}
+            onInsertClick={onInsertClick}
+            onRemoveRow={onRemoveRow}
+          />
+        </Box>
+      </AccordionDetails>
+    </Accordion>
+  );
+};
+
+
+
+
+
+
+
+
+
+// VariantDialog.jsx
+
+import { useState, useEffect } from "react";
+import Dialog from "@mui/material/Dialog";
+import DialogTitle from "@mui/material/DialogTitle";
+import DialogContent from "@mui/material/DialogContent";
+import DialogActions from "@mui/material/DialogActions";
+import Button from "@mui/material/Button";
+import TextField from "@mui/material/TextField";
+import Box from "@mui/material/Box";
+import Typography from "@mui/material/Typography";
+import IconButton from "@mui/material/IconButton";
+import FormControl from "@mui/material/FormControl";
+import InputLabel from "@mui/material/InputLabel";
+import Select from "@mui/material/Select";
+import MenuItem from "@mui/material/MenuItem";
+import Chip from "@mui/material/Chip";
+import Checkbox from "@mui/material/Checkbox";
+import FormControlLabel from "@mui/material/FormControlLabel";
+import Accordion from "@mui/material/Accordion";
+import AccordionSummary from "@mui/material/AccordionSummary";
+import AccordionDetails from "@mui/material/AccordionDetails";
+import Divider from "@mui/material/Divider";
+import Tooltip from "@mui/material/Tooltip";
+import AddIcon from "@mui/icons-material/Add";
+import DeleteIcon from "@mui/icons-material/Delete";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import SettingsIcon from "@mui/icons-material/Settings";
+import FilterListIcon from "@mui/icons-material/FilterList";
+import CloseIcon from "@mui/icons-material/Close";
+import TuneIcon from "@mui/icons-material/Tune";
+
+/* ── constants ────────────────────────────────────────────── */
+
+const OPERATORS   = ["=", "!=", ">", "<", ">=", "<=", "LIKE", "IN"];
+const PARAM_TYPES = ["STRING", "DATE", "NUMBER", "BOOLEAN"];
+const UI_HINTS    = ["text", "date", "number", "select", "multiselect", "checkbox"];
+const SCOPE_TYPES = ["ALL_DB", "TABLE", "DYNAMIC_TABLE"];
+
+const SCOPE_COLOR = { ALL_DB: "success", TABLE: "primary", DYNAMIC_TABLE: "warning" };
+
+/* ── section label ────────────────────────────────────────── */
+
+const SectionLabel = ({ children }) => (
+  <Typography
+    variant="overline"
+    sx={{
+      display: "block",
+      fontSize: 10,
+      fontWeight: 700,
+      letterSpacing: ".1em",
+      color: "text.secondary",
+      mb: 0.75,
+    }}
+  >
+    {children}
+  </Typography>
+);
+
+/* ── param card ───────────────────────────────────────────── */
+
+const ParamCard = ({ param, index, onUpdate, onRemove }) => (
+  <Box
+    sx={{
+      p: 1.75,
+      border: "1px solid",
+      borderColor: "divider",
+      borderRadius: 1.5,
+      bgcolor: "background.default",
+    }}
+  >
+    {/* header row */}
+    <Box display="flex" justifyContent="space-between" alignItems="center" mb={1.5}>
+      <Box display="flex" alignItems="center" gap={1}>
+        <Box
+          sx={{
+            width: 22,
+            height: 22,
+            borderRadius: "50%",
+            bgcolor: "primary.main",
+            color: "primary.contrastText",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 11,
+            fontWeight: 700,
+            flexShrink: 0,
+          }}
+        >
+          {index + 1}
+        </Box>
+        <Typography
+          variant="body2"
+          fontWeight={700}
+          sx={{ fontFamily: "monospace", letterSpacing: ".03em" }}
+        >
+          {param.paramName || "unnamed"}
+        </Typography>
+      </Box>
+      <Tooltip title="Remove parameter">
+        <IconButton size="small" color="error" onClick={() => onRemove(index)}>
+          <DeleteIcon sx={{ fontSize: 15 }} />
+        </IconButton>
+      </Tooltip>
+    </Box>
+
+    {/* fields */}
+    <Box display="grid" gridTemplateColumns="1fr 1fr" gap={1.5}>
+      <TextField
+        label="Param Name *"
+        size="small"
+        value={param.paramName}
+        onChange={(e) => onUpdate(index, "paramName", e.target.value.replace(/\s/g, ""))}
+        inputProps={{ style: { fontFamily: "monospace" } }}
+        fullWidth
+      />
+      <TextField
+        label="Label"
+        size="small"
+        value={param.label}
+        onChange={(e) => onUpdate(index, "label", e.target.value)}
+        fullWidth
+      />
+      <FormControl size="small" fullWidth>
+        <InputLabel>Type</InputLabel>
+        <Select
+          value={param.paramType}
+          onChange={(e) => onUpdate(index, "paramType", e.target.value)}
+          label="Type"
+        >
+          {PARAM_TYPES.map((t) => <MenuItem key={t} value={t}>{t}</MenuItem>)}
+        </Select>
+      </FormControl>
+      <FormControl size="small" fullWidth>
+        <InputLabel>UI Hint</InputLabel>
+        <Select
+          value={param.uiHint}
+          onChange={(e) => onUpdate(index, "uiHint", e.target.value)}
+          label="UI Hint"
+        >
+          {UI_HINTS.map((h) => <MenuItem key={h} value={h}>{h}</MenuItem>)}
+        </Select>
+      </FormControl>
+    </Box>
+
+    {/* checkboxes */}
+    <Box display="flex" gap={2} mt={1}>
+      <FormControlLabel
+        control={
+          <Checkbox
+            checked={param.required}
+            onChange={(e) => onUpdate(index, "required", e.target.checked)}
+            size="small"
+          />
+        }
+        label={<Typography variant="body2">Required</Typography>}
+        sx={{ m: 0 }}
+      />
+      <FormControlLabel
+        control={
+          <Checkbox
+            checked={param.multiValued}
+            onChange={(e) => onUpdate(index, "multiValued", e.target.checked)}
+            size="small"
+          />
+        }
+        label={<Typography variant="body2">Multi-valued</Typography>}
+        sx={{ m: 0 }}
+      />
+    </Box>
+  </Box>
+);
+
+/* ── filter rule card ─────────────────────────────────────── */
+
+const FilterRuleCard = ({ rule, index, params, tableNames, dynamicRowIds, onUpdate, onRemove }) => (
+  <Box
+    sx={{
+      p: 1.75,
+      border: "1px solid",
+      borderColor: "divider",
+      borderRadius: 1.5,
+      bgcolor: "background.default",
+    }}
+  >
+    {/* header */}
+    <Box display="flex" justifyContent="space-between" alignItems="center" mb={1.5}>
+      <Box display="flex" alignItems="center" gap={1}>
+        <Box
+          sx={{
+            width: 22,
+            height: 22,
+            borderRadius: "50%",
+            bgcolor: "grey.300",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 11,
+            fontWeight: 700,
+            color: "text.primary",
+            flexShrink: 0,
+          }}
+        >
+          {index + 1}
+        </Box>
+        <Chip
+          label={rule.scopeType}
+          size="small"
+          color={SCOPE_COLOR[rule.scopeType] || "default"}
+          variant="outlined"
+          sx={{ height: 20, fontSize: 11, "& .MuiChip-label": { px: 0.75 } }}
+        />
+      </Box>
+      <Tooltip title="Remove filter rule">
+        <IconButton size="small" color="error" onClick={() => onRemove(index)}>
+          <DeleteIcon sx={{ fontSize: 15 }} />
+        </IconButton>
+      </Tooltip>
+    </Box>
+
+    {/* WHERE clause visualizer */}
+    <Box
+      sx={{
+        px: 1.5,
+        py: 1,
+        mb: 1.5,
+        bgcolor: "action.hover",
+        borderRadius: 1,
+        fontFamily: "monospace",
+        fontSize: 12,
+        color: "text.secondary",
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+      }}
+    >
+      <span style={{ color: "#7b1fa2", fontWeight: 700 }}>WHERE </span>
+      <span style={{ color: "#1565c0" }}>{rule.dbColumn || "column"}</span>
+      <span style={{ color: "#e65100", fontWeight: 700 }}> {rule.operator} </span>
+      <span style={{ color: "#2e7d32" }}>:{rule.paramName || "param"}</span>
+    </Box>
+
+    {/* fields grid */}
+    <Box display="grid" gridTemplateColumns="1fr 1fr" gap={1.5}>
+      <FormControl size="small" fullWidth>
+        <InputLabel>Scope Type</InputLabel>
+        <Select
+          value={rule.scopeType}
+          onChange={(e) => onUpdate(index, "scopeType", e.target.value)}
+          label="Scope Type"
+        >
+          {SCOPE_TYPES.map((s) => <MenuItem key={s} value={s}>{s}</MenuItem>)}
+        </Select>
+      </FormControl>
+
+      {rule.scopeType === "TABLE" && (
+        <FormControl size="small" fullWidth>
+          <InputLabel>Table</InputLabel>
+          <Select
+            value={rule.scopeValue || ""}
+            onChange={(e) => onUpdate(index, "scopeValue", e.target.value)}
+            label="Table"
+          >
+            {tableNames.map((t) => <MenuItem key={t} value={t}>{t}</MenuItem>)}
+          </Select>
+        </FormControl>
+      )}
+
+      {rule.scopeType === "DYNAMIC_TABLE" && (
+        <FormControl size="small" fullWidth>
+          <InputLabel>Dynamic Row</InputLabel>
+          <Select
+            value={rule.scopeValue || ""}
+            onChange={(e) => onUpdate(index, "scopeValue", e.target.value)}
+            label="Dynamic Row"
+          >
+            {dynamicRowIds.map((id) => <MenuItem key={id} value={id}>{id}</MenuItem>)}
+          </Select>
+        </FormControl>
+      )}
+
+      {rule.scopeType === "ALL_DB" && <Box />}
+
+      <FormControl size="small" fullWidth>
+        <InputLabel>Parameter</InputLabel>
+        <Select
+          value={rule.paramName}
+          onChange={(e) => onUpdate(index, "paramName", e.target.value)}
+          label="Parameter"
+        >
+          {params.map((p) => (
+            <MenuItem key={p.paramName} value={p.paramName}>{p.paramName}</MenuItem>
+          ))}
+        </Select>
+      </FormControl>
+
+      <TextField
+        label="DB Column"
+        size="small"
+        value={rule.dbColumn}
+        onChange={(e) => onUpdate(index, "dbColumn", e.target.value.toUpperCase())}
+        inputProps={{ style: { fontFamily: "monospace" } }}
+        fullWidth
+      />
+
+      <FormControl size="small" fullWidth>
+        <InputLabel>Operator</InputLabel>
+        <Select
+          value={rule.operator}
+          onChange={(e) => onUpdate(index, "operator", e.target.value)}
+          label="Operator"
+        >
+          {OPERATORS.map((op) => <MenuItem key={op} value={op}>{op}</MenuItem>)}
+        </Select>
+      </FormControl>
+    </Box>
+  </Box>
+);
+
+/* ── dialog ───────────────────────────────────────────────── */
+
+export const VariantDialog = ({
+  open,
+  variant,
+  tableNames,
+  dynamicRowIds,
+  onClose,
+  onSave,
+}) => {
+  const [ev, setEv] = useState({
+    variantCode: "",
+    variantName: "",
+    description: "",
+    params: [],
+    filterRules: [],
+  });
+
+  useEffect(() => {
+    setEv(
+      variant || {
+        variantCode: "",
+        variantName: "",
+        description: "",
+        params: [],
+        filterRules: [],
+      }
+    );
+  }, [variant, open]);
+
+  const updateField = (field, value) => setEv((p) => ({ ...p, [field]: value }));
+
+  /* params */
+  const addParam = () =>
+    setEv((p) => ({
+      ...p,
+      params: [
+        ...p.params,
+        {
+          paramName:   `PARAM_${Date.now()}`,
+          label:        "New Parameter",
+          paramType:   "STRING",
+          required:     true,
+          multiValued:  false,
+          uiHint:      "text",
+        },
+      ],
+    }));
+
+  const updateParam = (i, field, value) => {
+    const next = [...ev.params];
+    next[i] = { ...next[i], [field]: value };
+    updateField("params", next);
+  };
+
+  const removeParam = (i) =>
+    updateField("params", ev.params.filter((_, idx) => idx !== i));
+
+  /* filter rules */
+  const addFilterRule = () =>
+    setEv((p) => ({
+      ...p,
+      filterRules: [
+        ...p.filterRules,
+        { scopeType: "ALL_DB", paramName: "", dbColumn: "", operator: "=" },
+      ],
+    }));
+
+  const updateFilterRule = (i, field, value) => {
+    const next = [...ev.filterRules];
+    next[i] = { ...next[i], [field]: value };
+    updateField("filterRules", next);
+  };
+
+  const removeFilterRule = (i) =>
+    updateField("filterRules", ev.filterRules.filter((_, idx) => idx !== i));
+
+  const handleSave = () => {
+    onSave(ev);
+    onClose();
+  };
+
+  const isValid = ev.variantCode.trim() && ev.variantName.trim();
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+      <DialogTitle sx={{ pr: 6 }}>
+        <Box display="flex" alignItems="center" gap={1}>
+          <TuneIcon fontSize="small" color="action" />
+          <Typography variant="subtitle1" fontWeight={700}>
+            {variant ? "Edit Variant" : "New Variant"}
+          </Typography>
+        </Box>
+        <Typography variant="caption" color="text.secondary">
+          {variant
+            ? `Editing ${variant.variantCode}`
+            : "Configure a report variant with its parameters and filter rules."}
+        </Typography>
+        <IconButton onClick={onClose} sx={{ position: "absolute", right: 12, top: 12 }}>
+          <CloseIcon />
+        </IconButton>
+      </DialogTitle>
+
+      <DialogContent dividers sx={{ display: "flex", flexDirection: "column", gap: 2.5, pt: 2.5 }}>
+
+        {/* ── basic info ─────────────────────────────────────── */}
+        <Box>
+          <SectionLabel>Identity</SectionLabel>
+          <Box display="grid" gridTemplateColumns="1fr 1fr" gap={2} mb={2}>
+            <TextField
+              label="Variant Code *"
+              value={ev.variantCode}
+              onChange={(e) =>
+                updateField("variantCode", e.target.value.replace(/\s/g, "_").toUpperCase())
+              }
+              size="small"
+              required
+              helperText="Unique identifier · no spaces"
+              inputProps={{ style: { fontFamily: "monospace", fontWeight: 600 } }}
+            />
+            <TextField
+              label="Variant Name *"
+              value={ev.variantName}
+              onChange={(e) => updateField("variantName", e.target.value)}
+              size="small"
+              required
+            />
+          </Box>
+          <TextField
+            label="Description"
+            value={ev.description}
+            onChange={(e) => updateField("description", e.target.value)}
+            size="small"
+            multiline
+            rows={2}
+            fullWidth
+          />
+        </Box>
+
+        <Divider />
+
+        {/* ── parameters ────────────────────────────────────── */}
+        <Accordion defaultExpanded disableGutters elevation={0}
+          sx={{ "&:before": { display: "none" }, border: "1px solid", borderColor: "divider", borderRadius: "6px !important" }}
+        >
+          <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ minHeight: 44, "& .MuiAccordionSummary-content": { my: 0 } }}>
+            <SettingsIcon sx={{ mr: 1, fontSize: 18, color: "text.secondary" }} />
+            <Typography variant="body2" fontWeight={600}>
+              Parameters
+            </Typography>
+            {ev.params.length > 0 && (
+              <Chip
+                label={ev.params.length}
+                size="small"
+                sx={{ ml: 1, height: 18, fontSize: 11, bgcolor: "action.selected" }}
+              />
+            )}
+          </AccordionSummary>
+          <AccordionDetails sx={{ pt: 0, pb: 1.5, px: 1.5 }}>
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<AddIcon />}
+              onClick={addParam}
+              sx={{ mb: ev.params.length > 0 ? 1.5 : 0, borderStyle: "dashed" }}
+              fullWidth
+            >
+              Add Parameter
+            </Button>
+
+            {ev.params.length === 0 && (
+              <Typography variant="caption" color="text.disabled" display="block" textAlign="center" py={1.5}>
+                No parameters. Parameters allow end-users to filter report data at runtime.
+              </Typography>
+            )}
+
+            <Box display="flex" flexDirection="column" gap={1.5}>
+              {ev.params.map((param, i) => (
+                <ParamCard
+                  key={i}
+                  param={param}
+                  index={i}
+                  onUpdate={updateParam}
+                  onRemove={removeParam}
+                />
+              ))}
+            </Box>
+          </AccordionDetails>
+        </Accordion>
+
+        {/* ── filter rules ──────────────────────────────────── */}
+        <Accordion defaultExpanded disableGutters elevation={0}
+          sx={{ "&:before": { display: "none" }, border: "1px solid", borderColor: "divider", borderRadius: "6px !important" }}
+        >
+          <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ minHeight: 44, "& .MuiAccordionSummary-content": { my: 0 } }}>
+            <FilterListIcon sx={{ mr: 1, fontSize: 18, color: "text.secondary" }} />
+            <Typography variant="body2" fontWeight={600}>
+              Filter Rules
+            </Typography>
+            {ev.filterRules.length > 0 && (
+              <Chip
+                label={ev.filterRules.length}
+                size="small"
+                sx={{ ml: 1, height: 18, fontSize: 11, bgcolor: "action.selected" }}
+              />
+            )}
+          </AccordionSummary>
+          <AccordionDetails sx={{ pt: 0, pb: 1.5, px: 1.5 }}>
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<AddIcon />}
+              onClick={addFilterRule}
+              sx={{ mb: ev.filterRules.length > 0 ? 1.5 : 0, borderStyle: "dashed" }}
+              fullWidth
+            >
+              Add Filter Rule
+            </Button>
+
+            {ev.filterRules.length === 0 && (
+              <Typography variant="caption" color="text.disabled" display="block" textAlign="center" py={1.5}>
+                No filter rules. Rules bind variant parameters to database columns as SQL WHERE clauses.
+              </Typography>
+            )}
+
+            <Box display="flex" flexDirection="column" gap={1.5}>
+              {ev.filterRules.map((rule, i) => (
+                <FilterRuleCard
+                  key={i}
+                  rule={rule}
+                  index={i}
+                  params={ev.params}
+                  tableNames={tableNames}
+                  dynamicRowIds={dynamicRowIds}
+                  onUpdate={updateFilterRule}
+                  onRemove={removeFilterRule}
+                />
+              ))}
+            </Box>
+          </AccordionDetails>
+        </Accordion>
+
+      </DialogContent>
+
+      <DialogActions sx={{ px: 3, py: 2 }}>
+        <Button onClick={onClose} color="inherit">Cancel</Button>
+        <Button
+          onClick={handleSave}
+          variant="contained"
+          disableElevation
+          disabled={!isValid}
+        >
+          {variant ? "Save Changes" : "Add Variant"}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
+
+
+
+
+
+
+
+
+
+// VariantsPanel.jsx
+
+import {
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Box,
+  Button,
+  Typography,
+  IconButton,
+  Chip,
+  Tooltip,
+} from "@mui/material";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import TuneIcon from "@mui/icons-material/Tune";
+import AddIcon from "@mui/icons-material/Add";
+import EditIcon from "@mui/icons-material/Edit";
+import DeleteIcon from "@mui/icons-material/Delete";
+import FilterListIcon from "@mui/icons-material/FilterList";
+import SettingsIcon from "@mui/icons-material/Settings";
+
+/* ── palette ──────────────────────────────────────────────── */
+
+const VARIANT_ACCENTS = ["#1565c0", "#6a1b9a", "#00695c", "#e65100", "#37474f"];
+
+const accentFor = (index) => VARIANT_ACCENTS[index % VARIANT_ACCENTS.length];
+
+/* ── empty state ──────────────────────────────────────────── */
+
+const EmptyState = () => (
+  <Box
+    sx={{
+      py: 3,
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      gap: 0.75,
+      color: "text.disabled",
+    }}
+  >
+    <TuneIcon sx={{ fontSize: 32, opacity: 0.4 }} />
+    <Typography variant="caption" textAlign="center" sx={{ maxWidth: 210 }}>
+      No variants defined. Variants configure different report run modes with their own parameters and filters.
+    </Typography>
+  </Box>
+);
+
+/* ── single variant card ──────────────────────────────────── */
+
+const VariantCard = ({ v, index, onEdit, onRemove }) => {
+  const accent = accentFor(index);
+
+  return (
+    <Box
+      sx={{
+        pl: 1.5,
+        pr: 1,
+        py: 1.25,
+        borderRadius: 1.5,
+        border: "1px solid",
+        borderColor: "divider",
+        borderLeftWidth: 3,
+        borderLeftColor: accent,
+        bgcolor: "background.paper",
+        transition: "box-shadow .15s",
+        "&:hover": { boxShadow: "0 2px 8px rgba(0,0,0,.10)" },
+      }}
+    >
+      {/* top row */}
+      <Box display="flex" justifyContent="space-between" alignItems="flex-start">
+        <Box minWidth={0} flex={1}>
+          <Typography variant="body2" fontWeight={700} noWrap>
+            {v.variantName}
+          </Typography>
+          <Typography
+            variant="caption"
+            sx={{
+              fontFamily: "monospace",
+              letterSpacing: ".04em",
+              color: accent,
+              fontWeight: 600,
+            }}
+          >
+            {v.variantCode}
+          </Typography>
+        </Box>
+
+        <Box display="flex" sx={{ ml: 0.5, mt: -0.25 }}>
+          <Tooltip title="Edit">
+            <IconButton size="small" onClick={() => onEdit(v, index)}>
+              <EditIcon sx={{ fontSize: 15 }} />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Delete">
+            <IconButton size="small" color="error" onClick={() => onRemove(index)}>
+              <DeleteIcon sx={{ fontSize: 15 }} />
+            </IconButton>
+          </Tooltip>
+        </Box>
+      </Box>
+
+      {/* description */}
+      {v.description && (
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ display: "block", mt: 0.25, mb: 0.75 }}
+          noWrap
+        >
+          {v.description}
+        </Typography>
+      )}
+
+      {/* stat chips */}
+      <Box display="flex" gap={0.75} mt={0.5}>
+        <Chip
+          icon={<SettingsIcon sx={{ fontSize: "11px !important" }} />}
+          label={`${v.params.length} param${v.params.length !== 1 ? "s" : ""}`}
+          size="small"
+          variant="outlined"
+          sx={{ height: 20, fontSize: 11, "& .MuiChip-label": { px: 0.75 } }}
+        />
+        <Chip
+          icon={<FilterListIcon sx={{ fontSize: "11px !important" }} />}
+          label={`${v.filterRules.length} filter${v.filterRules.length !== 1 ? "s" : ""}`}
+          size="small"
+          variant="outlined"
+          sx={{ height: 20, fontSize: 11, "& .MuiChip-label": { px: 0.75 } }}
+        />
+      </Box>
+    </Box>
+  );
+};
+
+/* ── panel ────────────────────────────────────────────────── */
+
+export const VariantsPanel = ({
+  expanded,
+  onToggle,
+  variants,
+  onAdd,
+  onEdit,
+  onRemove,
+}) => {
+  const count = variants.length;
+
+  return (
+    <Accordion
+      expanded={expanded}
+      onChange={onToggle}
+      disableGutters
+      elevation={0}
+      sx={{
+        "&:before": { display: "none" },
+        border: "1px solid",
+        borderColor: "divider",
+        mb: 0.5,
+        borderRadius: "6px !important",
+      }}
+    >
+      <AccordionSummary
+        expandIcon={<ExpandMoreIcon />}
+        sx={{ minHeight: 44, "& .MuiAccordionSummary-content": { my: 0 } }}
+      >
+        <TuneIcon sx={{ mr: 1, fontSize: 18, color: "text.secondary" }} />
+        <Typography variant="body2" fontWeight={600}>
+          Variants
+        </Typography>
+        {count > 0 && (
+          <Chip
+            label={count}
+            size="small"
+            sx={{ ml: 1, height: 18, fontSize: 11, bgcolor: "action.selected" }}
+          />
+        )}
+      </AccordionSummary>
+
+      <AccordionDetails sx={{ pt: 0, pb: 1.5, px: 1.5 }}>
+        <Button
+          variant="outlined"
+          size="small"
+          startIcon={<AddIcon />}
+          onClick={onAdd}
+          fullWidth
+          sx={{ mb: 1.5, borderStyle: "dashed" }}
+        >
+          Add Variant
+        </Button>
+
+        {count === 0 ? (
+          <EmptyState />
+        ) : (
+          <Box display="flex" flexDirection="column" gap={1}>
+            {variants.map((v, i) => (
+              <VariantCard
+                key={v.variantCode}
+                v={v}
+                index={i}
+                onEdit={onEdit}
+                onRemove={onRemove}
+              />
+            ))}
+          </Box>
+        )}
+      </AccordionDetails>
+    </Accordion>
+  );
+};
+
+
+
 
