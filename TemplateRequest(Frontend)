@@ -127,6 +127,8 @@ import ViewRequestDialog from "../dialogs/ViewRequestDialog";
 import CompareTemplateDialog from "../dialogs/CompareTemplate/CompareTemplateDialog";
 import { styles } from "../../TemplateRequestScreenStyles";
 
+const BASE_URL_CONFIG = "/TC/template-config"
+
 export default function PendingRequestsTab() {
   const selectedMenuItem = useSelector((s) => s.menus.selectedMenuItem);
   const requestType = selectedMenuItem?.requestType || "";
@@ -149,12 +151,12 @@ export default function PendingRequestsTab() {
   const fetchData = useCallback(async () => {
     if (!requestType) return;
     try {
-      const response = await callApi("/CR/pending-requests", { requestType }, "POST");
-      const result = response?.data || [];
+      const response = await callApi(BASE_URL_CONFIG+"/template-requests/pending", null, "GET");
+      const result = response?.data || response || [];
 
       const data = result.map((row) => ({
         ...row,
-        ...(typeof row.payload === "object" ? row.payload : {}),
+        ...(typeof row.summary === "object" ? row.summary : {}),
       }));
 
       setRows(data);
@@ -189,7 +191,7 @@ export default function PendingRequestsTab() {
         remarks: confirmDialog.type === "reject" ? remarks.trim() : "No Remarks",
       };
 
-      const res = await callApi("/CR/update-request", payload, "PATCH");
+      const res = await callApi(BASE_URL_CONFIG+"/template-requests/process", payload, "PATCH");
       if (res?.success || res) {
         showSnackBar(confirmDialog.type === "accept" ? "Request Approved" : "Request Rejected", "success");
         fetchData();
@@ -338,7 +340,7 @@ import { styles } from "../../TemplateRequestScreenStyles";
 import CompareTemplateDialog from "../dialogs/CompareTemplate/CompareTemplateDialog";
 import ViewRequestDialog from "../dialogs/ViewRequestDialog";
 
-
+const BASE_URL_CONFIG = "/TC/template-config"
 
 export default function MyRequestsTab() {
   const selectedMenuItem = useSelector((s) => s.menus.selectedMenuItem);
@@ -357,16 +359,16 @@ export default function MyRequestsTab() {
   const fetchData = useCallback(async () => {
     if (!requestType) return;
     try {
-      const response = await callApi("/CR/my-requests", { requestType }, "POST");
+      const response = await callApi(BASE_URL_CONFIG+"/template-requests/my-requests", null, "GET");
       const result = response?.data || response || [];
       const data = result.map((row) => {
-        const payloadObj = typeof row.payload == "object" && row.payload !== null ? row.payload : {};
-        const reportMeta = payloadObj?.template?.reportMeta || {};
+        const payloadObj = typeof row.summary == "object" && row.summary !== null ? row.summary : {};
+        //const reportMeta = payloadObj?.template?.reportMeta || {};
         return {
           ...row,
           payload: payloadObj,
-          reportId: row.targetId || payloadObj.reportId || reportMeta.reportId,
-          reportName: reportMeta.reportName || payloadObj.reportName
+          reportId: payloadObj.reportId ,
+          reportName: payloadObj.reportName || payloadObj.reportName
         };
       });
       setRows(data);
@@ -502,9 +504,9 @@ const ViewRequestDialog = ({ open, handleClose, data }) => {
   
   if (!open) return null;
 
-  console.log("payload: ", data.payload);
+  console.log("summary: ", data.summary);
 
-  const { payload } = data;
+  const { summary } = data;
 
   const mainDetails = [
     { label: "Creator ID", value: data.creatorId, size: 2 },
@@ -559,10 +561,10 @@ const ViewRequestDialog = ({ open, handleClose, data }) => {
 
         <Divider sx={{ m: 2 }} />
 
-        {/* Payload Section */}
+        {/* summary Section */}
 
         <Grid container spacing={2}>
-          {Object.entries(payload).map(([key, value]) => (
+          {Object.entries(summary).map(([key, value]) => (
             <Grid size={{ xs: 12, sm: 4 }} key={key}>
               <Box
                 sx={{
@@ -615,6 +617,7 @@ const ViewRequestDialog = ({ open, handleClose, data }) => {
 };
 
 export default ViewRequestDialog;
+
 
 
 
@@ -887,54 +890,121 @@ import { alpha } from "@mui/material/styles";
 
 export const DiffText = memo(({ value, otherValue, type }) => {
   if (value === null || value === undefined) {
-    return (
-      <Typography variant="body2" color="text.secondary">
-        —
-      </Typography>
-    );
+    return null;
   }
 
-  const formatItem = (item) => {
-    if (typeof item !== "object" || item === null) return item;
-    if (item.name && item.mode) return `[Param] ${item.name} (${item.dataType}) - ${item.mode}`;
-    if (item.tableName && item.filters) return `[Filter] Table: ${item.tableName}, Conditions: ${JSON.stringify(item.filters)}`;
-    if (item.dbColumn || item.operator) return `[Rule] ${item.dbColumn} ${item.operator} ${item.scopeValue}`;
-    if (item.paramName) return `${item.paramName}: ${item.paramValue || item.label || "N/A"}`;
-    return JSON.stringify(item);
-  };
-
+  // 1. Handle Arrays (e.g., Array of Filter Objects or Parameters)
   if (Array.isArray(value)) {
     const otherArr = Array.isArray(otherValue) ? otherValue : [];
+
+    const isObjectArray =
+      value.length > 0 && typeof value[0] === "object" && value[0] !== null;
+
+    const itemsToRender = isObjectArray
+      ? value.filter((item) => {
+          const itemStr = JSON.stringify(item);
+          return !otherArr.some(
+            (otherItem) => JSON.stringify(otherItem) === itemStr,
+          );
+        })
+      : value;
+
+    if (itemsToRender.length === 0) return null;
+
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
-        {value.map((item, idx) => {
-          const itemStr = JSON.stringify(item);
-          const existsInOther = otherArr.some((o) => JSON.stringify(o) === itemStr);
-          const isRemoved = type === "old" && !existsInOther;
-          const isAdded = type === "new" && !existsInOther;
+        {itemsToRender.map((item, idx) => {
+          // A. Handle Object items inside the array
+          if (typeof item === "object" && item !== null) {
+            // ---> THE FIX: Highly intelligent object pairing <---
+            // We must find the corresponding object in the other array so we don't
+            // accidentally treat unchanged fields (like OP: IN) as deleted.
+            let bestMatch = undefined;
+            if (otherArr.length > 0) {
+              // 1st Try: Match by known identifiers
+              const idKeys = [
+                "dbColumn",
+                "paramName",
+                "cgl",
+                "name",
+                "id",
+                "code",
+              ];
+              for (let key of idKeys) {
+                if (item[key]) {
+                  bestMatch = otherArr.find((x) => x[key] === item[key]);
+                  if (bestMatch) break;
+                }
+              }
+
+              // 2nd Try: Match by the parent key (like "CGL" in your screenshot)
+              if (!bestMatch) {
+                const itemFirstKey = Object.keys(item)[0];
+                if (itemFirstKey) {
+                  bestMatch = otherArr.find(
+                    (x) => Object.keys(x)[0] === itemFirstKey,
+                  );
+                }
+              }
+
+              // Ultimate Fallback: Match by index
+              if (!bestMatch) {
+                bestMatch = otherArr[idx];
+              }
+            }
+
+            return (
+              <Box
+                key={idx}
+                sx={{
+                  pl: 1,
+                  borderLeft: (theme) => `2px solid ${theme.palette.divider}`,
+                  mb: 1,
+                }}
+              >
+                <DiffText value={item} otherValue={bestMatch} type={type} />
+              </Box>
+            );
+          }
+
+          // B. Handle Primitive items inside the array (like your VALUE list)
+          // ---> THE FIX: Only strike-through if the array exists on the other side, but this specific item is missing.
+          const isExplicitlyRemoved =
+            type === "old" &&
+            Array.isArray(otherValue) &&
+            !otherArr.includes(item);
+          const isExplicitlyAdded =
+            type === "new" &&
+            Array.isArray(otherValue) &&
+            !otherArr.includes(item);
 
           return (
             <Typography
               key={idx}
               variant="body2"
               sx={(theme) => ({
-                textDecoration: isRemoved ? "line-through" : "none",
-                color: isRemoved ? "error.main" : isAdded ? "success.main" : "text.primary",
-                fontWeight: isAdded ? "bold" : "normal",
-                bgcolor: isAdded
-                  ? alpha(theme.palette.success.main, 0.1)
-                  : isRemoved
-                    ? alpha(theme.palette.error.main, 0.1)
+                color: isExplicitlyRemoved
+                  ? "error.main"
+                  : isExplicitlyAdded
+                    ? "success.main"
+                    : "text.secondary",
+                textDecoration: isExplicitlyRemoved ? "line-through" : "none",
+                fontWeight: isExplicitlyAdded ? "bold" : "normal",
+                bgcolor: isExplicitlyAdded
+                  ? alpha(theme.palette.success.main, 0.15)
+                  : isExplicitlyRemoved
+                    ? alpha(theme.palette.error.main, 0.15)
                     : "transparent",
                 px: 0.5,
                 borderRadius: 1,
-                display: "block",
+                display: "inline-block",
+                mr: 0.5,
                 mb: 0.5,
                 fontSize: "0.75rem",
                 fontFamily: "monospace",
               })}
             >
-              • {formatItem(item)}
+              • {item}
             </Typography>
           );
         })}
@@ -942,28 +1012,141 @@ export const DiffText = memo(({ value, otherValue, type }) => {
     );
   }
 
+  // 2. Handle Objects (Recursively diff each key)
   if (typeof value === "object" && value !== null) {
     return (
-      <Box sx={{ pl: 1, borderLeft: (theme) => `1px solid ${theme.palette.divider}` }}>
-        {Object.entries(value).map(([key, val]) => (
-          <Box key={key} sx={{ mb: 1 }}>
-            <Typography variant="caption" sx={{ fontWeight: "bold", color: "text.secondary", display: "block" }}>
-              {key.toUpperCase()}:
-            </Typography>
-            <DiffText value={val} otherValue={otherValue ? otherValue[key] : undefined} type={type} />
-          </Box>
-        ))}
+      <Box
+        sx={{
+          pl: 1,
+          borderLeft: (theme) => `1px solid ${theme.palette.divider}`,
+        }}
+      >
+        {Object.entries(value).map(([key, val]) => {
+          if (
+            val === null ||
+            val === "" ||
+            (Array.isArray(val) && val.length === 0)
+          )
+            return null;
+
+          return (
+            <Box key={key} sx={{ mb: 1 }}>
+              <Typography
+                variant="caption"
+                sx={{
+                  fontWeight: "bold",
+                  color: "text.secondary",
+                  display: "block",
+                }}
+              >
+                {key.toUpperCase()}:
+              </Typography>
+              <DiffText
+                value={val}
+                otherValue={otherValue ? otherValue[key] : undefined}
+                type={type}
+              />
+            </Box>
+          );
+        })}
       </Box>
     );
   }
 
+  // 3. Handle Primitives (Strings, Numbers)
   const isChanged = value !== otherValue;
+
+  // Handle stringified arrays (e.g., "[1001, 1002]")
+  if (
+    isChanged &&
+    typeof value === "string" &&
+    typeof otherValue === "string" &&
+    value.trim().startsWith("[") &&
+    value.trim().endsWith("]") &&
+    otherValue.trim().startsWith("[") &&
+    otherValue.trim().endsWith("]")
+  ) {
+    try {
+      const valArr = JSON.parse(value);
+      const otherArr = JSON.parse(otherValue);
+
+      if (Array.isArray(valArr) && Array.isArray(otherArr)) {
+        return (
+          <Box
+            sx={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 0.5,
+              alignItems: "center",
+            }}
+          >
+            <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+              [
+            </Typography>
+            {valArr.map((v, i) => {
+              const existsInOther = otherArr.includes(v);
+              const isRemoved = type === "old" && !existsInOther;
+              const isAdded = type === "new" && !existsInOther;
+
+              const isExplicitlyRemoved = type === "old" && !existsInOther;
+
+              return (
+                <Typography
+                  key={i}
+                  variant="body2"
+                  component="span"
+                  sx={(theme) => ({
+                    color: isRemoved
+                      ? "error.main"
+                      : isAdded
+                        ? "success.main"
+                        : "text.primary",
+                    textDecoration: isExplicitlyRemoved
+                      ? "line-through"
+                      : "none",
+                    fontWeight: isAdded ? "bold" : "normal",
+                    bgcolor: isAdded
+                      ? alpha(theme.palette.success.main, 0.15)
+                      : isRemoved
+                        ? alpha(theme.palette.error.main, 0.15)
+                        : "transparent",
+                    px: 0.5,
+                    borderRadius: 1,
+                    fontSize: "0.8rem",
+                    fontFamily: "monospace",
+                  })}
+                >
+                  {typeof v === "string" ? `"${v}"` : v}
+                  {i < valArr.length - 1 ? "," : ""}
+                </Typography>
+              );
+            })}
+            <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+              ]
+            </Typography>
+          </Box>
+        );
+      }
+    } catch (e) {
+      // Fallback
+    }
+  }
+
+  // ---> THE FIX: Prevent parent-deletion from striking out standard primitive text.
+  // We strictly only line-through standard primitives if they were purposefully emptied (null or "").
+  const isExplicitlyRemoved =
+    type === "old" && (otherValue === null || otherValue === "");
+
   return (
     <Typography
       variant="body2"
       sx={(theme) => ({
-        color: isChanged ? (type === "old" ? "error.main" : "success.main") : "text.primary",
-        textDecoration: isChanged && type === "old" ? "line-through" : "none",
+        color: isChanged
+          ? type === "old"
+            ? "error.main"
+            : "success.main"
+          : "text.primary",
+        textDecoration: isExplicitlyRemoved ? "line-through" : "none",
         fontWeight: isChanged && type === "new" ? "bold" : "normal",
         wordBreak: "break-all",
       })}
@@ -995,7 +1178,20 @@ import { ViewWeek } from "@mui/icons-material";
 
 const GridCell = memo(({ cell, cellKey, hasDiff, isSelected, onCellClick, side }) => {
   const cellStyle = cell?.style || {};
-  let rawValue = cell?.value ?? cell?.expression ?? "";
+  // let rawValue = cell?.value ?? cell?.expression ?? "";
+
+  let rawValue = "";
+  if (cell?.value !== null && cell?.value !== undefined && cell?.value !== "") {
+    rawValue = cell.value; // For standard TEXT cells
+  } else if (cell?.expression) {
+    rawValue = cell.expression; // For FORMULA cells
+  } else if (cell?.source) {
+    // For DB_SUM, DB_VALUE, etc., show a summary like "[DB_SUM] INR_BALANCE"
+    rawValue = `[${cell.type || "DB"}] ${cell.source.column || ""}`.trim();
+  } else if (cell?.type && cell.type !== "TEXT") {
+    // Fallback for any other complex type without a value
+    rawValue = `[${cell.type}]`;
+  }
   const displayValue = typeof rawValue === "object" && rawValue !== null ? JSON.stringify(rawValue) : String(rawValue);
 
   return (
@@ -1176,11 +1372,11 @@ export const DetailedAnalysisPanel = ({ selectedCellKey, selectedColumnKey, diff
                       <Typography variant="caption" fontWeight="bold" color="primary">{field.toUpperCase()}</Typography>
                     </Box>
                     <Stack direction="row" divider={<Divider orientation="vertical" flexItem />} spacing={0}>
-                      <Box sx={{ flex: 1, p: 1.5, bgcolor: alpha(theme.palette.error.main, 0.05) }}>
+                      <Box sx={{ flex: 1, width: "50%", minWidth: 0, overflowX: "auto", p: 1.5, bgcolor: alpha(theme.palette.error.main, 0.05) }}>
                         <Typography variant="caption" color="error" display="block" gutterBottom fontWeight="bold">WAS:</Typography>
                         <DiffText value={diff.oldValue} otherValue={diff.newValue} type="old" />
                       </Box>
-                      <Box sx={{ flex: 1, p: 1.5, bgcolor: alpha(theme.palette.success.main, 0.05) }}>
+                      <Box sx={{ flex: 1, width: "50%", minWidth: 0, overflowX: "auto", p: 1.5, bgcolor: alpha(theme.palette.success.main, 0.05) }}>
                         <Typography variant="caption" color="success.main" display="block" gutterBottom fontWeight="bold">NOW:</Typography>
                         <DiffText value={diff.newValue} otherValue={diff.oldValue} type="new" />
                       </Box>
@@ -1203,11 +1399,11 @@ export const DetailedAnalysisPanel = ({ selectedCellKey, selectedColumnKey, diff
                           <Typography variant="caption" fontWeight="bold" color="primary">{field.toUpperCase()}</Typography>
                         </Box>
                         <Stack direction="row" divider={<Divider orientation="vertical" flexItem />} spacing={0}>
-                          <Box sx={{ flex: 1, p: 1.5, bgcolor: alpha(theme.palette.error.main, 0.05) }}>
+                          <Box sx={{ flex: 1, width: "50%", minWidth: 0, overflowX: "auto", p: 1.5, bgcolor: alpha(theme.palette.error.main, 0.05) }}>
                             <Typography variant="caption" color="error" display="block" gutterBottom fontWeight="bold">WAS:</Typography>
                             <DiffText value={diff.oldValue} otherValue={diff.newValue} type="old" />
                           </Box>
-                          <Box sx={{ flex: 1, p: 1.5, bgcolor: alpha(theme.palette.success.main, 0.05) }}>
+                          <Box sx={{ flex: 1, width: "50%", minWidth: 0, overflowX: "auto", p: 1.5, bgcolor: alpha(theme.palette.success.main, 0.05) }}>
                             <Typography variant="caption" color="success.main" display="block" gutterBottom fontWeight="bold">NOW:</Typography>
                             <DiffText value={diff.newValue} otherValue={diff.oldValue} type="new" />
                           </Box>
