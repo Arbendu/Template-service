@@ -1,0 +1,306 @@
+// ReportConfigResponse
+
+package com.fincore.analyticsservice.dto;
+
+import java.util.List;
+
+public record ReportConfigResponse(
+        String reportCode,
+        String displayName,
+        List<ViewConfig> views
+) {
+}
+
+
+
+
+
+
+
+
+
+
+
+// ReportConfigService
+
+package com.fincore.analyticsservice.service;
+
+import com.fincore.analyticsservice.dto.HeadSearchResponse;
+import com.fincore.analyticsservice.dto.MetricConfig;
+import com.fincore.analyticsservice.dto.ReportConfigResponse;
+import com.fincore.analyticsservice.dto.ViewConfig;
+import com.fincore.analyticsservice.model.DrReport;
+import com.fincore.analyticsservice.model.DrReportView;
+import com.fincore.analyticsservice.model.DrViewDimension;
+import com.fincore.analyticsservice.repository.DrReportRepository;
+import com.fincore.analyticsservice.repository.RbParsedTemplateRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+
+import java.util.*;
+
+@Service
+public class ReportConfigService {
+
+    private static final Integer ROLE_ADMIN = 10;
+    private static final Logger log = LoggerFactory.getLogger(ReportConfigService.class);
+    private final DrReportRepository reportRepository;
+    private final RbParsedTemplateRepository templateRepository; // <-- NEW
+
+
+    public ReportConfigService(DrReportRepository reportRepository, RbParsedTemplateRepository templateRepository) {
+        this.reportRepository = reportRepository;
+        this.templateRepository = templateRepository;
+    }
+
+    /**
+     * Fetches UI metadata.
+     * Caches the response by User Roles to ensure users only see their permitted views.
+     */
+    @Transactional(readOnly = true)
+    @Cacheable(value = "uiReportConfig", key = "#roleId")
+    public List<ReportConfigResponse> getPermittedConfigurations(Integer roleId) {
+        log.info("Fetching Oracle UI configurations for roles: {}", roleId);
+
+        List<DrReport> allActiveReports = reportRepository.findAllActiveReportsWithViews();
+        List<ReportConfigResponse> permittedReports = new ArrayList<>();
+
+        for (DrReport report : allActiveReports) {
+            List<ViewConfig> permittedViews = processViews(report.getViews(), roleId);
+           
+            // Only return the report if the user has access to at least one view inside it
+            if (!permittedViews.isEmpty()) {
+                permittedReports.add(new ReportConfigResponse(
+                        report.getReportCode(),
+                        report.getDisplayName(),
+                        permittedViews
+                ));
+            }
+        }
+
+        if (permittedReports.isEmpty()) {
+            log.warn("User with role {} requested config but has zero report permissions.", roleId);
+            throw new AccessDeniedException("You do not have permission to view any reports.");
+        }
+
+        return permittedReports;
+    }
+
+    private List<ViewConfig> processViews(Set<DrReportView> views, Integer roleId) {
+
+        List<ViewConfig> permittedViews = new ArrayList<>();
+
+        for (DrReportView view : views) {
+            if (hasAccess(roleId, view.getRequiredRoleIds())) {
+
+                // 1. Map Hierarchy (Must be strictly ordered by drillLevel)
+                List<String> logicalHierarchy = view.getDimensions().stream()
+                        .filter(dim -> dim.getDrillLevel() != null && dim.getDrillLevel() < 90)
+                        .sorted(Comparator.comparing(DrViewDimension::getDrillLevel))
+                        .map(DrViewDimension::getLogicalName)
+                        .toList();
+
+                // 2. Map Metrics
+                List<MetricConfig> logicalMetrics = view.getMetrics().stream()
+                        .map(m -> new MetricConfig(m.getLogicalName(), m.getDisplayName()))//Cannot resolve method 'getDisplayName' in 'DrViewMetric'
+                        .toList();
+
+                permittedViews.add(new ViewConfig(
+                        view.getViewCode(),
+                        // Assuming you have a displayName in DrReportView, otherwise use viewCode
+                        view.getDisplayName(),
+                        logicalHierarchy,
+                        logicalMetrics
+                ));
+            }
+        }
+        return permittedViews;
+    }
+
+    private boolean hasAccess(Integer roleId, String requiredRoleIds) {
+
+        // admin has access of everything
+        if (ROLE_ADMIN.equals(roleId)) {
+            return true;
+        }
+
+        // If no role is required, it's public. Otherwise, check user roles.
+        // Allow access to all the roles
+        if (requiredRoleIds == null || requiredRoleIds.isBlank() || "NULL".equalsIgnoreCase(requiredRoleIds.trim())) {
+            return true;
+        }
+
+        List<String> allowedRoles = Arrays.asList(requiredRoleIds.split(","));
+
+        // return true if allowed roles contains the role id
+        return allowedRoles.contains(String.valueOf(roleId));
+    }
+
+    public List<HeadSearchResponse> searchHeads(String reportName, String searchText) {
+        return templateRepository.searchHeads(reportName, searchText.trim());
+    }
+}
+
+
+
+
+
+
+
+// Error
+2026-08-07T12:27:48.028+05:30 ERROR 33892 --- [AnalyticsService] [omcat-handler-1] c.f.a.exception.GlobalExceptionHandler   : Unhandled Exception occurred: 
+
+org.springframework.http.converter.HttpMessageNotWritableException: Could not write JSON: Cannot cast java.util.LinkedHashMap to com.fincore.analyticsservice.dto.ReportConfigResponse
+	at org.springframework.http.converter.AbstractJacksonHttpMessageConverter.writeInternal(AbstractJacksonHttpMessageConverter.java:444) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.http.converter.AbstractSmartHttpMessageConverter.write(AbstractSmartHttpMessageConverter.java:116) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.web.servlet.mvc.method.annotation.AbstractMessageConverterMethodProcessor.writeWithMessageConverters(AbstractMessageConverterMethodProcessor.java:342) ~[spring-webmvc-7.0.8.jar:7.0.8]
+	at org.springframework.web.servlet.mvc.method.annotation.HttpEntityMethodProcessor.handleReturnValue(HttpEntityMethodProcessor.java:261) ~[spring-webmvc-7.0.8.jar:7.0.8]
+	at org.springframework.web.servlet.mvc.method.annotation.ResponseEntityReturnValueHandler.handleReturnValue(ResponseEntityReturnValueHandler.java:80) ~[spring-webmvc-7.0.8.jar:7.0.8]
+	at org.springframework.web.method.support.HandlerMethodReturnValueHandlerComposite.handleReturnValue(HandlerMethodReturnValueHandlerComposite.java:77) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.web.servlet.mvc.method.annotation.ServletInvocableHandlerMethod.invokeAndHandle(ServletInvocableHandlerMethod.java:135) ~[spring-webmvc-7.0.8.jar:7.0.8]
+	at org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter.invokeHandlerMethod(RequestMappingHandlerAdapter.java:934) ~[spring-webmvc-7.0.8.jar:7.0.8]
+	at org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter.handleInternal(RequestMappingHandlerAdapter.java:853) ~[spring-webmvc-7.0.8.jar:7.0.8]
+	at org.springframework.web.servlet.mvc.method.AbstractHandlerMethodAdapter.handle(AbstractHandlerMethodAdapter.java:86) ~[spring-webmvc-7.0.8.jar:7.0.8]
+	at org.springframework.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:963) ~[spring-webmvc-7.0.8.jar:7.0.8]
+	at org.springframework.web.servlet.DispatcherServlet.doService(DispatcherServlet.java:866) ~[spring-webmvc-7.0.8.jar:7.0.8]
+	at org.springframework.web.servlet.FrameworkServlet.processRequest(FrameworkServlet.java:1000) ~[spring-webmvc-7.0.8.jar:7.0.8]
+	at org.springframework.web.servlet.FrameworkServlet.doGet(FrameworkServlet.java:892) ~[spring-webmvc-7.0.8.jar:7.0.8]
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:622) ~[tomcat-embed-core-11.0.24.jar:6.1]
+	at org.springframework.web.servlet.FrameworkServlet.service(FrameworkServlet.java:874) ~[spring-webmvc-7.0.8.jar:7.0.8]
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:710) ~[tomcat-embed-core-11.0.24.jar:6.1]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:132) ~[tomcat-embed-core-11.0.24.jar:11.0.24]
+	at org.apache.tomcat.websocket.server.WsFilter.doFilter(WsFilter.java:59) ~[tomcat-embed-websocket-11.0.24.jar:11.0.24]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:111) ~[tomcat-embed-core-11.0.24.jar:11.0.24]
+	at org.springframework.web.filter.CompositeFilter$VirtualFilterChain.doFilter(CompositeFilter.java:108) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.security.web.FilterChainProxy.lambda$doFilterInternal$2(FilterChainProxy.java:235) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$FilterObservation$SimpleFilterObservation.lambda$wrap$1(ObservationFilterChainDecorator.java:491) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$AroundFilterObservation$SimpleAroundFilterObservation.lambda$wrap$1(ObservationFilterChainDecorator.java:353) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator.lambda$wrapSecured$0(ObservationFilterChainDecorator.java:84) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$VirtualFilterChain.doFilter(ObservationFilterChainDecorator.java:131) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.access.intercept.AuthorizationFilter.doFilter(AuthorizationFilter.java:101) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.wrapFilter(ObservationFilterChainDecorator.java:243) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.doFilter(ObservationFilterChainDecorator.java:230) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$VirtualFilterChain.doFilter(ObservationFilterChainDecorator.java:140) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.access.ExceptionTranslationFilter.doFilter(ExceptionTranslationFilter.java:126) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.access.ExceptionTranslationFilter.doFilter(ExceptionTranslationFilter.java:120) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.wrapFilter(ObservationFilterChainDecorator.java:243) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.doFilter(ObservationFilterChainDecorator.java:230) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$VirtualFilterChain.doFilter(ObservationFilterChainDecorator.java:140) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.session.SessionManagementFilter.doFilter(SessionManagementFilter.java:132) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.session.SessionManagementFilter.doFilter(SessionManagementFilter.java:86) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.wrapFilter(ObservationFilterChainDecorator.java:243) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.doFilter(ObservationFilterChainDecorator.java:230) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$VirtualFilterChain.doFilter(ObservationFilterChainDecorator.java:140) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.authentication.AnonymousAuthenticationFilter.doFilter(AnonymousAuthenticationFilter.java:100) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.wrapFilter(ObservationFilterChainDecorator.java:243) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.doFilter(ObservationFilterChainDecorator.java:230) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$VirtualFilterChain.doFilter(ObservationFilterChainDecorator.java:140) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.servletapi.SecurityContextHolderAwareRequestFilter.doFilter(SecurityContextHolderAwareRequestFilter.java:181) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.wrapFilter(ObservationFilterChainDecorator.java:243) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.doFilter(ObservationFilterChainDecorator.java:230) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$VirtualFilterChain.doFilter(ObservationFilterChainDecorator.java:140) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.savedrequest.RequestCacheAwareFilter.doFilter(RequestCacheAwareFilter.java:63) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.wrapFilter(ObservationFilterChainDecorator.java:243) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.doFilter(ObservationFilterChainDecorator.java:230) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$VirtualFilterChain.doFilter(ObservationFilterChainDecorator.java:140) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at com.fincore.commonutilities.security.ContextRbacFilter.doFilterInternal(ContextRbacFilter.java:161) ~[common-utilities-0.0.1-SNAPSHOT.jar:0.0.1-SNAPSHOT]
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.wrapFilter(ObservationFilterChainDecorator.java:243) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.doFilter(ObservationFilterChainDecorator.java:230) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$VirtualFilterChain.doFilter(ObservationFilterChainDecorator.java:140) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.authentication.logout.LogoutFilter.doFilter(LogoutFilter.java:110) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.authentication.logout.LogoutFilter.doFilter(LogoutFilter.java:96) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.wrapFilter(ObservationFilterChainDecorator.java:243) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.doFilter(ObservationFilterChainDecorator.java:230) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$VirtualFilterChain.doFilter(ObservationFilterChainDecorator.java:140) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.web.filter.CorsFilter.doFilterInternal(CorsFilter.java:91) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.wrapFilter(ObservationFilterChainDecorator.java:243) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.doFilter(ObservationFilterChainDecorator.java:230) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$VirtualFilterChain.doFilter(ObservationFilterChainDecorator.java:140) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.header.HeaderWriterFilter.doHeadersAfter(HeaderWriterFilter.java:90) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.header.HeaderWriterFilter.doFilterInternal(HeaderWriterFilter.java:75) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.wrapFilter(ObservationFilterChainDecorator.java:243) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.doFilter(ObservationFilterChainDecorator.java:230) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$VirtualFilterChain.doFilter(ObservationFilterChainDecorator.java:140) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.context.SecurityContextHolderFilter.doFilter(SecurityContextHolderFilter.java:82) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.context.SecurityContextHolderFilter.doFilter(SecurityContextHolderFilter.java:69) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.wrapFilter(ObservationFilterChainDecorator.java:243) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.doFilter(ObservationFilterChainDecorator.java:230) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$VirtualFilterChain.doFilter(ObservationFilterChainDecorator.java:140) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.context.request.async.WebAsyncManagerIntegrationFilter.doFilterInternal(WebAsyncManagerIntegrationFilter.java:62) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.wrapFilter(ObservationFilterChainDecorator.java:243) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.doFilter(ObservationFilterChainDecorator.java:230) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$VirtualFilterChain.doFilter(ObservationFilterChainDecorator.java:140) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.session.DisableEncodeUrlFilter.doFilterInternal(DisableEncodeUrlFilter.java:42) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.wrapFilter(ObservationFilterChainDecorator.java:243) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$AroundFilterObservation$SimpleAroundFilterObservation.lambda$wrap$0(ObservationFilterChainDecorator.java:336) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.doFilter(ObservationFilterChainDecorator.java:227) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$VirtualFilterChain.doFilter(ObservationFilterChainDecorator.java:140) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.FilterChainProxy.doFilterInternal(FilterChainProxy.java:237) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.FilterChainProxy.doFilter(FilterChainProxy.java:195) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.web.filter.CompositeFilter$VirtualFilterChain.doFilter(CompositeFilter.java:113) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.web.filter.ServletRequestPathFilter.doFilter(ServletRequestPathFilter.java:52) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.web.filter.CompositeFilter$VirtualFilterChain.doFilter(CompositeFilter.java:113) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.web.filter.CompositeFilter.doFilter(CompositeFilter.java:74) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.security.config.annotation.web.configuration.WebSecurityConfiguration$CompositeFilterChainProxy.doFilter(WebSecurityConfiguration.java:317) ~[spring-security-config-7.1.0.jar:7.1.0]
+	at org.springframework.web.filter.DelegatingFilterProxy.invokeDelegate(DelegatingFilterProxy.java:355) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.web.filter.DelegatingFilterProxy.doFilter(DelegatingFilterProxy.java:272) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:111) ~[tomcat-embed-core-11.0.24.jar:11.0.24]
+	at org.springframework.web.filter.RequestContextFilter.doFilterInternal(RequestContextFilter.java:100) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:111) ~[tomcat-embed-core-11.0.24.jar:11.0.24]
+	at org.springframework.web.filter.FormContentFilter.doFilterInternal(FormContentFilter.java:93) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:111) ~[tomcat-embed-core-11.0.24.jar:11.0.24]
+	at org.springframework.web.filter.ServerHttpObservationFilter.doFilterInternal(ServerHttpObservationFilter.java:110) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:111) ~[tomcat-embed-core-11.0.24.jar:11.0.24]
+	at org.springframework.web.filter.CharacterEncodingFilter.doFilterInternal(CharacterEncodingFilter.java:199) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:111) ~[tomcat-embed-core-11.0.24.jar:11.0.24]
+	at org.apache.catalina.core.StandardWrapperValve.invoke(StandardWrapperValve.java:165) ~[tomcat-embed-core-11.0.24.jar:11.0.24]
+	at org.apache.catalina.core.StandardContextValve.invoke(StandardContextValve.java:77) ~[tomcat-embed-core-11.0.24.jar:11.0.24]
+	at org.apache.catalina.authenticator.AuthenticatorBase.invoke(AuthenticatorBase.java:535) ~[tomcat-embed-core-11.0.24.jar:11.0.24]
+	at org.apache.catalina.core.StandardHostValve.invoke(StandardHostValve.java:115) ~[tomcat-embed-core-11.0.24.jar:11.0.24]
+	at org.apache.catalina.valves.ErrorReportValve.invoke(ErrorReportValve.java:86) ~[tomcat-embed-core-11.0.24.jar:11.0.24]
+	at org.apache.catalina.core.StandardEngineValve.invoke(StandardEngineValve.java:71) ~[tomcat-embed-core-11.0.24.jar:11.0.24]
+	at org.apache.catalina.connector.CoyoteAdapter.service(CoyoteAdapter.java:347) ~[tomcat-embed-core-11.0.24.jar:11.0.24]
+	at org.apache.coyote.http11.Http11Processor.service(Http11Processor.java:406) ~[tomcat-embed-core-11.0.24.jar:11.0.24]
+	at org.apache.coyote.AbstractProcessorLight.process(AbstractProcessorLight.java:71) ~[tomcat-embed-core-11.0.24.jar:11.0.24]
+	at org.apache.coyote.AbstractProtocol$ConnectionHandler.process(AbstractProtocol.java:1307) ~[tomcat-embed-core-11.0.24.jar:11.0.24]
+	at org.apache.tomcat.util.net.NioEndpoint$SocketProcessor.doRun(NioEndpoint.java:2036) ~[tomcat-embed-core-11.0.24.jar:11.0.24]
+	at org.apache.tomcat.util.net.SocketProcessorBase.run(SocketProcessorBase.java:74) ~[tomcat-embed-core-11.0.24.jar:11.0.24]
+	at java.base/java.lang.VirtualThread.run(VirtualThread.java:329) ~[na:na]
+Caused by: tools.jackson.databind.DatabindException: Cannot cast java.util.LinkedHashMap to com.fincore.analyticsservice.dto.ReportConfigResponse
+ at [No location information] (through reference chain: java.util.ArrayList[0]->java.util.LinkedHashMap["reportCode"])
+	at tools.jackson.databind.DatabindException.wrapWithPath(DatabindException.java:132) ~[jackson-databind-3.1.4.jar:3.1.4]
+	at tools.jackson.databind.ser.std.StdSerializer.wrapAndThrow(StdSerializer.java:275) ~[jackson-databind-3.1.4.jar:3.1.4]
+	at tools.jackson.databind.ser.UnrolledBeanSerializer.serializeNonFiltered(UnrolledBeanSerializer.java:215) ~[jackson-databind-3.1.4.jar:3.1.4]
+	at tools.jackson.databind.ser.UnrolledBeanSerializer.serialize(UnrolledBeanSerializer.java:179) ~[jackson-databind-3.1.4.jar:3.1.4]
+	at tools.jackson.databind.ser.jdk.CollectionSerializer.serializeContentsUsingImpl(CollectionSerializer.java:216) ~[jackson-databind-3.1.4.jar:3.1.4]
+	at tools.jackson.databind.ser.jdk.CollectionSerializer.serializeContentsImpl(CollectionSerializer.java:136) ~[jackson-databind-3.1.4.jar:3.1.4]
+	at tools.jackson.databind.ser.jdk.CollectionSerializer.serialize(CollectionSerializer.java:119) ~[jackson-databind-3.1.4.jar:3.1.4]
+	at tools.jackson.databind.ser.jdk.CollectionSerializer.serialize(CollectionSerializer.java:25) ~[jackson-databind-3.1.4.jar:3.1.4]
+	at tools.jackson.databind.ser.SerializationContextExt._serialize(SerializationContextExt.java:456) ~[jackson-databind-3.1.4.jar:3.1.4]
+	at tools.jackson.databind.ser.SerializationContextExt.serializeValue(SerializationContextExt.java:387) ~[jackson-databind-3.1.4.jar:3.1.4]
+	at tools.jackson.databind.ObjectWriter$Prefetch.serialize(ObjectWriter.java:1380) ~[jackson-databind-3.1.4.jar:3.1.4]
+	at tools.jackson.databind.ObjectWriter.writeValue(ObjectWriter.java:982) ~[jackson-databind-3.1.4.jar:3.1.4]
+	at org.springframework.http.converter.AbstractJacksonHttpMessageConverter.writeInternal(AbstractJacksonHttpMessageConverter.java:436) ~[spring-web-7.0.8.jar:7.0.8]
+	... 123 common frames omitted
+Caused by: java.lang.ClassCastException: Cannot cast java.util.LinkedHashMap to com.fincore.analyticsservice.dto.ReportConfigResponse
+	at java.base/java.lang.Class.cast(Class.java:4090) ~[na:na]
+	at tools.jackson.databind.ser.BeanPropertyWriter.get(BeanPropertyWriter.java:790) ~[jackson-databind-3.1.4.jar:3.1.4]
+	at tools.jackson.databind.ser.BeanPropertyWriter.serializeAsProperty(BeanPropertyWriter.java:604) ~[jackson-databind-3.1.4.jar:3.1.4]
+	at tools.jackson.databind.ser.UnrolledBeanSerializer.serializeNonFiltered(UnrolledBeanSerializer.java:203) ~[jackson-databind-3.1.4.jar:3.1.4]
+	... 133 common frames omitted
+
+2026-08-07T12:27:48.032+05:30  WARN 33892 --- [AnalyticsService] [omcat-handler-1] .m.m.a.ExceptionHandlerExceptionResolver : Resolved [org.springframework.http.converter.HttpMessageNotWritableException: Could not write JSON: Cannot cast java.util.LinkedHashMap to com.fincore.analyticsservice.dto.ReportConfigResponse]
