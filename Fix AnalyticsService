@@ -145,6 +145,121 @@ public class ReportConfigService {
 
 
 
+
+// Controller
+
+package com.fincore.analyticsservice.controller;
+
+//import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import com.fincore.analyticsservice.dto.DrillDownRequest;
+import com.fincore.analyticsservice.dto.DrillDownResponse;
+import com.fincore.analyticsservice.dto.HeadSearchResponse;
+import com.fincore.analyticsservice.dto.ReportConfigResponse;
+import com.fincore.analyticsservice.repository.RbParsedTemplateRepository;
+import com.fincore.analyticsservice.service.ReportConfigService;
+import com.fincore.analyticsservice.service.SemanticDrillDownService;
+import com.fincore.commonutilities.jwt.JwtUtil;
+import jakarta.validation.Valid;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+import java.util.List;
+
+/**
+ * Enterprise REST Controller for the Analytics Drill-Down Engine.
+ * Follows clean architecture: the controller solely handles HTTP routing,
+ * token extraction, and delegates core business logic to the service layer.
+ *
+ *  @author SHUBHANKAR DAS [Emp ID: V1018405]
+ *  <a href="mailto:shubhankar.das.cbstcs@sbi.co.in">shubhankar.das.cbstcs@sbi.co.in</a>
+ *  @version 1.0.0
+ *  @since 2026-06-09
+ */
+@Slf4j
+@RestController
+@RequestMapping("/api/analytics")
+public class AnalyticsController {
+
+    private final SemanticDrillDownService semanticDrillDownService;
+    private final JwtUtil jwtUtil;
+    private final ReportConfigService configService;
+
+    public AnalyticsController(SemanticDrillDownService semanticDrillDownService, JwtUtil jwtUtil,
+                               ReportConfigService configService, JsonMapper jsonMapper,
+                               RbParsedTemplateRepository templateRepository) {
+        this.semanticDrillDownService = semanticDrillDownService;
+        this.jwtUtil = jwtUtil;
+        this.configService = configService;
+    }
+
+    /**
+     * POST /api/analytics/drill-down
+     * Executes the dynamic drill-down query against Apache Druid.
+     * * @param request The logical JSON payload from the React frontend.
+     * @param token The JWT authorization token.
+     * @return DrillDownResponse containing aggregated data and metadata.
+     */
+    @PostMapping("/drill-down")
+    public ResponseEntity<DrillDownResponse> executeDrillDown(
+            @Valid @RequestBody DrillDownRequest request,
+            @RequestHeader("Authorization") String token) {
+
+        Integer roleId = jwtUtil.getUserRoleFromToken(token);
+        DrillDownResponse response = semanticDrillDownService.executeDrillDown(request, roleId);
+
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * GET /api/analytics/config
+     * UI calls this immediately on application load to figure out which reports
+     * and dropdowns this specific user is allowed to see.
+     */
+    @GetMapping("/config")
+    public ResponseEntity<List<ReportConfigResponse>> getUIConfiguration(
+            @RequestHeader("Authorization") String token) {
+
+        Integer roleId = jwtUtil.getUserRoleFromToken(token);
+
+        // Fetch only configurations permitted for this Role ID
+        List<ReportConfigResponse> config = configService.getPermittedConfigurations(roleId);
+
+        return ResponseEntity.ok(config);
+    }
+
+
+    /**
+     * GET /api/analytics/heads/search?reportName=ysa_report&search=100
+     * Autocomplete endpoint for the Frontend Code input field.
+     */
+    @GetMapping("/heads/search")
+    public ResponseEntity<List<HeadSearchResponse>> searchHeads(
+            @RequestParam("reportName") String reportName,
+            @RequestParam("search") String searchText,
+            @RequestHeader("Authorization") String token) {
+
+        log.info("Executing autocomplete search for report: [{}], query: [{}]", reportName, searchText);
+
+        // Security check: validate token (throws exception if invalid)
+        jwtUtil.getUserRoleFromToken(token);
+
+        // Optional: limit search text to prevent heavy DB queries on 1 character
+        if (searchText == null || searchText.trim().length() < 2) {
+            return ResponseEntity.badRequest().build(); // Force user to type at least 2 chars
+        }
+
+        List<HeadSearchResponse> suggestions = configService.searchHeads(reportName, searchText.trim());
+
+        log.info("suggestions : {}", suggestions );
+
+        return ResponseEntity.ok(suggestions);
+    }
+}
+
+
+
+
 // Error
 
 2026-08-07T12:27:48.028+05:30 ERROR 33892 --- [AnalyticsService] [omcat-handler-1] c.f.a.exception.GlobalExceptionHandler   : Unhandled Exception occurred: 
