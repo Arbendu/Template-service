@@ -3167,3 +3167,237 @@ export const VariantsPanel = ({
 
 
 
+
+
+
+// VirtualizedRowList
+
+import { memo, useRef } from "react";
+import { Box } from "@mui/material";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { RowItem } from "./RowItem";
+
+const ROW_ITEM_ESTIMATED_SIZE = 76;
+const ROW_LIST_MAX_HEIGHT = 400;
+
+export const VirtualizedRowList = memo(
+  ({
+    rows,
+    draggedRowIndex,
+    dropTargetIndex,
+    onDragStart,
+    onDragOver,
+    onDragEnd,
+    onInsertClick,
+    onRemoveRow,
+  }) => {
+    const parentRef = useRef(null);
+
+    const rowVirtualizer = useVirtualizer({
+      count: rows.length,
+      getScrollElement: () => parentRef.current,
+      estimateSize: () => ROW_ITEM_ESTIMATED_SIZE,
+      overscan: 6,
+    });
+
+    const virtualItems = rowVirtualizer.getVirtualItems();
+    const totalSize = rowVirtualizer.getTotalSize();
+
+    const containerHeight = Math.min(
+      ROW_LIST_MAX_HEIGHT,
+      Math.max(ROW_ITEM_ESTIMATED_SIZE, rows.length * ROW_ITEM_ESTIMATED_SIZE),
+    );
+
+    return (
+      <Box
+        ref={parentRef}
+        sx={{
+          maxHeight: ROW_LIST_MAX_HEIGHT,
+          height: containerHeight,
+          overflow: "auto",
+          border: "1px solid #e0e0e0",
+          borderRadius: 1,
+          bgcolor: "background.paper",
+        }}
+      >
+        <Box
+          sx={{
+            height: totalSize,
+            position: "relative",
+          }}
+        >
+          {virtualItems.map((virtualRow) => {
+            const row = rows[virtualRow.index];
+
+            return (
+              <Box
+                key={row.id}
+                sx={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  transform: `translateY(${virtualRow.start}px)`,
+                }}
+              >
+                <RowItem
+                  row={row}
+                  index={virtualRow.index}
+                  isDragging={draggedRowIndex === virtualRow.index}
+                  isDropTarget={dropTargetIndex === virtualRow.index}
+                  onDragStart={() => onDragStart(virtualRow.index)}
+                  onDragOver={(e) => onDragOver(e, virtualRow.index)}
+                  onDragEnd={onDragEnd}
+                  onInsertClick={(e) => onInsertClick(e, virtualRow.index)}
+                  onRemove={() => onRemoveRow(row.id, virtualRow.index)}
+                />
+              </Box>
+            );
+          })}
+        </Box>
+      </Box>
+    );
+  },
+);
+
+VirtualizedRowList.displayName = "VirtualizedRowList";
+
+
+
+
+
+
+
+// TopToolbar
+
+import AppBar from "@mui/material/AppBar";
+import Toolbar from "@mui/material/Toolbar";
+import Typography from "@mui/material/Typography";
+import Button from "@mui/material/Button";
+import IconButton from "@mui/material/IconButton";
+import Box from "@mui/material/Box";
+import CircularProgress from "@mui/material/CircularProgress";
+import Chip from "@mui/material/Chip";
+import SaveIcon from "@mui/icons-material/Save";
+import DownloadIcon from "@mui/icons-material/Download";
+import UploadIcon from "@mui/icons-material/Upload";
+import TableChartIcon from "@mui/icons-material/TableChart";
+import TuneIcon from "@mui/icons-material/Tune";
+import SpeedIcon from "@mui/icons-material/Speed";
+import FullscreenIcon from "@mui/icons-material/Fullscreen";
+import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
+import ReceiptLongIcon from "@mui/icons-material/ReceiptLong";
+import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+
+export const TopToolbar = ({
+  onBack,
+  onExport,
+  onSave,
+  onSaveVariants,
+  onImport,
+  onGenerateTestData,
+  reportName,
+  saving = false,
+  templateSaved = false,
+  variantsCount = 0,
+  isFullscreen,
+  toggleFullscreen,
+}) => {
+  return (
+    <AppBar
+      position="static"
+      // color="default"
+      elevation={0}
+      sx={{ borderRadius: 0 /* , borderBottom: "1px solid #e0e0e0" */ }}
+    >
+      <Toolbar>
+        <IconButton edge="start" color="primary" sx={{ mr: 2 }}>
+          <ReceiptLongIcon />
+        </IconButton>
+
+        <Typography
+          variant="h6"
+          component="div"
+          sx={{ flexGrow: 1, fontWeight: 600, color: "text.primary" }}
+        >
+          {/* reportName ||  */ "Report Template Builder"}
+        </Typography>
+
+        <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
+          {onBack && (
+            <Button
+              startIcon={<ArrowBackIcon />}
+              onClick={onBack}
+              sx={{ color: "text.secondary" }}
+              size="small"
+            >
+              Back
+            </Button>
+          )}
+          <Button
+            variant="outlined"
+            startIcon={<UploadIcon />}
+            onClick={onImport}
+            size="small"
+          >
+            Import
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<DownloadIcon />}
+            onClick={onExport}
+            size="small"
+          >
+            Export Template
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={
+              saving ? (
+                <CircularProgress size={16} color="inherit" />
+              ) : (
+                <SaveIcon />
+              )
+            }
+            onClick={onSave}
+            size="small"
+            disabled={saving}
+          >
+            Save Template
+          </Button>
+          {/* <Button
+            variant="outlined"
+            color="secondary"
+            startIcon={<TuneIcon />}
+            onClick={onSaveVariants}
+            size="small"
+            disabled={saving || !templateSaved}
+            title={!templateSaved ? "Save template first" : "Save variants"}
+          >
+            Save Variants
+            {variantsCount > 0 && (
+              <Chip
+                label={variantsCount}
+                size="small"
+                sx={{ ml: 1, height: 20, fontSize: "0.7rem" }}
+              />
+            )}
+          </Button> */}
+          {/* The full screen button */}
+          <IconButton
+            onClick={toggleFullscreen}
+            sx={{
+              /*  position: "absolute",
+                        top: 8,
+                        right: 8, */
+              zIndex: 10,
+              color: isFullscreen ? "white" : "inherit", // Change color when in fullscreen
+            }}
+          >
+            {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
+          </IconButton>
+        </Box>
+      </Toolbar>
+    </AppBar>
+  );
+};
