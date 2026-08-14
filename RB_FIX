@@ -1,5 +1,4 @@
-
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import TextField from "@mui/material/TextField";
 import InputAdornment from "@mui/material/InputAdornment";
 import IconButton from "@mui/material/IconButton";
@@ -17,7 +16,13 @@ import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import TuneIcon from "@mui/icons-material/Tune";
 import { useAppDispatch, useAppSelector } from "../../store";
 import { setSelectedCell } from "../../store/templateSlice";
-import { selectRows } from "../../store/selectors";
+import {
+  selectRowOrder,
+  selectRowsEntities,
+  selectCellsEntities,
+} from "../../store/selectors";
+
+const DEBOUNCE_MS = 250;
 
 const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -43,15 +48,19 @@ const makeMatcher = (query, matchCase, matchExactWord) => {
   return (text) => !!text && text.toLowerCase().includes(q);
 };
 
-const findRowMatch = (row, testText) => {
+// Scans raw entity dicts directly — no per-row object materialization.
+const findRowMatch = (row, cellsById, testText) => {
   if (testText(row.id)) {
     return { rowId: row.id, cellId: row.cellIds?.[0] || null };
   }
-  if (row.rowType === "DYNAMIC" && testText(row.dynamicConfig?.table)) {
-    return { rowId: row.id, cellId: null };
+  if (row.rowType === "DYNAMIC") {
+    return testText(row.dynamicConfig?.table) ? { rowId: row.id, cellId: null } : null;
   }
-  for (const cell of row.cells || []) {
-    if (testText(getCellSearchText(cell)) || testText(cell?.id)) {
+  const cellIds = row.cellIds || [];
+  for (let i = 0; i < cellIds.length; i++) {
+    const cell = cellsById[cellIds[i]];
+    if (!cell) continue;
+    if (testText(getCellSearchText(cell)) || testText(cell.id)) {
       return { rowId: row.id, cellId: cell.id };
     }
   }
@@ -60,30 +69,60 @@ const findRowMatch = (row, testText) => {
 
 export const ReportSearchBar = () => {
   const dispatch = useAppDispatch();
-  const rows = useAppSelector(selectRows);
+  const rowOrder = useAppSelector(selectRowOrder);
+  const rowsById = useAppSelector(selectRowsEntities);
+  const cellsById = useAppSelector(selectCellsEntities);
 
+  const [inputValue, setInputValue] = useState("");
   const [query, setQuery] = useState("");
   const [matchCase, setMatchCase] = useState(false);
   const [matchExactWord, setMatchExactWord] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [optionsAnchor, setOptionsAnchor] = useState(null);
 
+  const inputRef = useRef(null);
+  const lastNavigatedKeyRef = useRef(null);
+
+  // Debounce raw typing before running the scan.
+  useEffect(() => {
+    const t = setTimeout(() => setQuery(inputValue.trim()), DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [inputValue]);
+
+  // Cmd/Ctrl+F focuses the search box; Escape clears it.
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   const matches = useMemo(() => {
-    const q = query.trim();
-    if (!q) return [];
-    const testText = makeMatcher(q, matchCase, matchExactWord);
+    if (!query) return [];
+    const testText = makeMatcher(query, matchCase, matchExactWord);
     const result = [];
-    rows.forEach((row) => {
-      const match = findRowMatch(row, testText);
+    for (let i = 0; i < rowOrder.length; i++) {
+      const row = rowsById[rowOrder[i]];
+      if (!row) continue;
+      const match = findRowMatch(row, cellsById, testText);
       if (match) result.push(match);
-    });
+    }
     return result;
-  }, [rows, query, matchCase, matchExactWord]);
+  }, [rowOrder, rowsById, cellsById, query, matchCase, matchExactWord]);
 
   const navigateToIndex = useCallback(
     (idx) => {
       const match = matches[idx];
       if (!match) return;
+      const key = `${match.rowId}:${match.cellId || ""}`;
+      if (lastNavigatedKeyRef.current === key) return;
+      lastNavigatedKeyRef.current = key;
+
       dispatch(setSelectedCell({ rowId: match.rowId, cellId: match.cellId || "" }));
       window.dispatchEvent(
         new CustomEvent("report-search-navigate", { detail: { rowId: match.rowId } }),
@@ -92,11 +131,14 @@ export const ReportSearchBar = () => {
     [matches, dispatch],
   );
 
+  // Only re-jump when the search itself changes — never when matches is
+  // merely recomputed as a side effect of navigation (this was the revert bug).
   useEffect(() => {
     setCurrentIndex(0);
+    lastNavigatedKeyRef.current = null;
     if (matches.length > 0) navigateToIndex(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [matches]);
+  }, [query, matchCase, matchExactWord]);
 
   const handleNext = useCallback(() => {
     if (matches.length === 0) return;
@@ -113,36 +155,54 @@ export const ReportSearchBar = () => {
   }, [matches, currentIndex, navigateToIndex]);
 
   const handleKeyDown = (e) => {
-    if (e.key !== "Enter") return;
-    e.preventDefault();
-    e.shiftKey ? handlePrev() : handleNext();
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.shiftKey ? handlePrev() : handleNext();
+    } else if (e.key === "Escape") {
+      handleClear();
+      inputRef.current?.blur();
+    }
   };
 
   const handleClear = () => {
+    setInputValue("");
     setQuery("");
     setCurrentIndex(0);
   };
 
+  const hasQuery = inputValue.trim().length > 0;
+  const noResults = query.length > 0 && matches.length === 0;
+
   return (
     <Box sx={{ display: "flex", alignItems: "center" }}>
       <TextField
+        inputRef={inputRef}
         size="small"
-        placeholder="Search row ID, value, expression..."
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Search row ID, value, expression... (Ctrl+F)"
+        value={inputValue}
+        onChange={(e) => setInputValue(e.target.value)}
         onKeyDown={handleKeyDown}
-        sx={{ width: 260 }}
+        error={noResults}
+        sx={{ width: 280 }}
         InputProps={{
           startAdornment: (
             <InputAdornment position="start">
-              <SearchIcon fontSize="small" />
+              <SearchIcon fontSize="small" color={noResults ? "error" : "action"} />
             </InputAdornment>
           ),
           endAdornment: (
             <InputAdornment position="end">
-              {query && (
-                <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
-                  {matches.length > 0 ? `${currentIndex + 1}/${matches.length}` : "0/0"}
+              {hasQuery && (
+                <Typography
+                  variant="caption"
+                  color={noResults ? "error" : "text.secondary"}
+                  sx={{ mr: 0.5, whiteSpace: "nowrap" }}
+                >
+                  {query.length === 0
+                    ? "…"
+                    : noResults
+                      ? "No results"
+                      : `${currentIndex + 1}/${matches.length}`}
                 </Typography>
               )}
               <IconButton size="small" onClick={handlePrev} disabled={matches.length === 0}>
@@ -158,7 +218,7 @@ export const ReportSearchBar = () => {
               >
                 <TuneIcon fontSize="small" />
               </IconButton>
-              {query && (
+              {hasQuery && (
                 <IconButton size="small" onClick={handleClear}>
                   <CloseIcon fontSize="small" />
                 </IconButton>
@@ -204,18 +264,6 @@ export const ReportSearchBar = () => {
 
 
 
-// TopToolbar.jsx
-import { ReportSearchBar } from "./ReportSearchBar"; // adjust path
-
-
-
-
-<Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
-  {onBack && ( ... )}
-
-  <ReportSearchBar />
-
-  <Button variant="outlined" startIcon={<UploadIcon />} onClick={onImport} size="small">
 
 
 
@@ -226,15 +274,18 @@ import { ReportSearchBar } from "./ReportSearchBar"; // adjust path
 
 
 
-
-// ReportCanvas.jsx
+const rowIndexMap = useMemo(() => {
+  const map = new Map();
+  rowOrder.forEach((id, i) => map.set(id, i));
+  return map;
+}, [rowOrder]);
 
 useEffect(() => {
   const handleSearchNavigate = (e) => {
     const { rowId } = e.detail || {};
     if (!rowId) return;
-    const index = rowOrder.indexOf(rowId);
-    if (index === -1) return;
+    const index = rowIndexMap.get(rowId);
+    if (index === undefined) return;
 
     rowVirtualizerRef.current.scrollToIndex(index, {
       align: "center",
@@ -250,15 +301,4 @@ useEffect(() => {
 
   window.addEventListener("report-search-navigate", handleSearchNavigate);
   return () => window.removeEventListener("report-search-navigate", handleSearchNavigate);
-}, [rowOrder]);
-
-
-
-
-
-
-
-
-
-
-
+}, [rowIndexMap]);
