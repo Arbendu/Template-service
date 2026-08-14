@@ -1,1 +1,1700 @@
+// templateSlice.js
 
+import { createSlice, nanoid } from "@reduxjs/toolkit";
+
+export const PDF_WIDTH_MULTIPLIER = 0.75;
+export const DEFAULT_RELATIVE_WIDTH = 1;
+
+const getInitialState = () => ({
+  templateMeta: {
+    templateId: "",
+    version: 1,
+    pageSize: "A4",
+    pageOrientation: "portrait",
+  },
+  reportMeta: {
+    reportName: "",
+    reportId: "",
+    extras: [
+      // { name: "Report Date", value: "4545" },
+    ],
+  },
+  columns: [],
+  rowOrder: [],
+  rows: {},
+  cells: {},
+  variants: [],
+  globalParams: [],
+  selectedCell: null,
+  formulaMode: false,
+  templateSaved: false,
+  saving: false,
+  rowHeights: {},
+});
+
+const initialState = getInitialState();
+
+const templateSlice = createSlice({
+  name: "template",
+  initialState,
+  reducers: {
+    setTemplate: (state, action) => {
+      const { templateMeta, reportMeta, reportData, variants, globalParams } =
+        action.payload;
+
+      state.templateMeta = templateMeta;
+      state.reportMeta = reportMeta;
+      state.columns = reportData.columns;
+      state.variants = variants;
+      state.globalParams = globalParams;
+
+      const newCells = {};
+      const newRows = {};
+      const newRowOrder = [];
+
+      reportData.rows.forEach((row) => {
+        const rowId = row.id;
+        newRowOrder.push(rowId);
+
+        const cellIds = [];
+        if (row.rowType !== "DYNAMIC" && row.cells) {
+          row.cells.forEach((cell) => {
+            const cellId = cell.id || nanoid();
+            cellIds.push(cellId);
+            newCells[cellId] = { ...cell, id: cellId };
+          });
+        }
+
+        newRows[rowId] = {
+          id: rowId,
+          rowType: row.rowType,
+          cellIds,
+          dynamicConfig: row.dynamicConfig,
+          height: row.height || 60,
+        };
+      });
+
+      state.cells = newCells;
+      state.rows = newRows;
+      state.rowOrder = newRowOrder;
+    },
+
+    setTemplateMeta: (state, action) => {
+      state.templateMeta = { ...state.templateMeta, ...action.payload };
+    },
+
+    setReportMeta: (state, action) => {
+      state.reportMeta = { ...state.reportMeta, ...action.payload };
+    },
+
+    addColumn: (state) => {
+      const newColumn = {
+        id: `C__${state.columns.length + 1}`,
+        name: `Column ${state.columns.length + 1}`,
+        format: {},
+      };
+      state.columns.push(newColumn);
+
+      state.rowOrder.forEach((rowId) => {
+        const row = state.rows[rowId];
+        if (row.rowType !== "DYNAMIC") {
+          const newCellId = nanoid();
+          row.cellIds.push(newCellId);
+          state.cells[newCellId] = {
+            id: newCellId,
+            type: "TEXT",
+            value: "",
+          };
+        }
+      });
+    },
+
+    updateColumn: (state, action) => {
+      const { index, column } = action.payload;
+      if (state.columns[index]) {
+        state.columns[index] = { ...state.columns[index], ...column };
+      }
+    },
+
+    updateColumnFormat: (state, action) => {
+      const { index, format } = action.payload;
+      if (state.columns[index]) {
+        state.columns[index] = {
+          ...state.columns[index],
+          format: { ...state.columns[index].format, ...format },
+        };
+      }
+    },
+
+    removeColumn: (state, action) => {
+      const { colId, index } = action.payload;
+      state.columns = state.columns.filter((c) => c.id !== colId);
+
+      state.rowOrder.forEach((rowId) => {
+        const row = state.rows[rowId];
+        if (row.rowType !== "DYNAMIC" && row.cellIds.length > index) {
+          const removedCellId = row.cellIds[index];
+          delete state.cells[removedCellId];
+          row.cellIds.splice(index, 1);
+        }
+      });
+    },
+
+    // addRow: (state, action) => {
+    //   const { row, insertAt } = action.payload;
+    //   const rowId = row.id;
+
+    //   const cellIds = [];
+    //   if (row.rowType !== "DYNAMIC") {
+    //     state.columns.forEach(() => {
+    //       const cellId = nanoid();
+    //       cellIds.push(cellId);
+    //       state.cells[cellId] = {
+    //         id: cellId,
+    //         type: "TEXT",
+    //         value: "",
+    //       };
+    //     });
+    //   }
+
+    //   state.rows[rowId] = {
+    //     id: rowId,
+    //     rowType: row.rowType,
+    //     cellIds,
+    //     dynamicConfig: row.dynamicConfig,
+    //     height: 60,
+    //   };
+
+    //   if (insertAt !== undefined) {
+    //     state.rowOrder.splice(insertAt, 0, rowId);
+    //   } else {
+    //     state.rowOrder.push(rowId);
+    //   }
+    // },
+
+    addRow: (state, action) => {
+      const { row, insertAt } = action.payload;
+      const rowId = row.id;
+
+      const cellIds = [];
+      if (row.rowType !== "DYNAMIC") {
+        state.columns.forEach((_, colIndex) => {
+          const cellId = nanoid();
+          cellIds.push(cellId);
+
+          // If copying from another row, reuse that column's cell content
+          // (minus its old id/rowId, which must stay unique per cell).
+          const sourceCell = row.cells?.[colIndex];
+          state.cells[cellId] = sourceCell
+            ? { ...sourceCell, id: cellId }
+            : { id: cellId, type: "TEXT", value: "" };
+        });
+      }
+
+      state.rows[rowId] = {
+        id: rowId,
+        rowType: row.rowType,
+        cellIds,
+        dynamicConfig: row.dynamicConfig,
+        height: 60,
+      };
+
+      if (insertAt !== undefined) {
+        state.rowOrder.splice(insertAt, 0, rowId);
+      } else {
+        state.rowOrder.push(rowId);
+      }
+    },
+
+    
+
+    updateRow: (state, action) => {
+      const { rowId, row } = action.payload;
+      if (state.rows[rowId]) {
+        state.rows[rowId] = { ...state.rows[rowId], ...row };
+      }
+    },
+
+    removeRow: (state, action) => {
+      const { rowId } = action.payload;
+      const row = state.rows[rowId];
+
+      if (row) {
+        row.cellIds.forEach((cellId) => {
+          delete state.cells[cellId];
+        });
+        delete state.rows[rowId];
+        delete state.rowHeights[rowId];
+        state.rowOrder = state.rowOrder.filter((id) => id !== rowId);
+      }
+    },
+
+    reorderRows: (state, action) => {
+      const { fromIndex, toIndex } = action.payload;
+      const [removed] = state.rowOrder.splice(fromIndex, 1);
+      state.rowOrder.splice(toIndex, 0, removed);
+    },
+
+    updateCell: (state, action) => {
+      const { cellId, cell } = action.payload;
+      if (state.cells[cellId]) {
+        state.cells[cellId] = { ...state.cells[cellId], ...cell };
+      }
+    },
+
+    updateCellRender: (state, action) => {
+      const { cellId, render } = action.payload;
+      if (state.cells[cellId]) {
+        state.cells[cellId].render = {
+          ...state.cells[cellId].render,
+          ...render,
+        };
+      }
+    },
+
+    updateCellFormat: (state, action) => {
+      const { cellId, format } = action.payload;
+      if (state.cells[cellId]) {
+        state.cells[cellId].format = {
+          ...state.cells[cellId].format,
+          ...format,
+        };
+      }
+    },
+
+    updateCellSource: (state, action) => {
+      const { cellId, source } = action.payload;
+      if (state.cells[cellId]) {
+        state.cells[cellId].source = {
+          ...state.cells[cellId].source,
+          ...source,
+        };
+      }
+    },
+
+    updateDynamicConfig: (state, action) => {
+      const { rowId, config } = action.payload;
+      if (state.rows[rowId]) {
+        state.rows[rowId].dynamicConfig = {
+          ...state.rows[rowId].dynamicConfig,
+          ...config,
+        };
+      }
+    },
+
+    setSelectedCell: (state, action) => {
+      state.selectedCell = action.payload;
+    },
+
+    setFormulaMode: (state, action) => {
+      state.formulaMode = action.payload;
+    },
+
+    setVariants: (state, action) => {
+      state.variants = action.payload;
+    },
+
+    addVariant: (state, action) => {
+      state.variants.push(action.payload);
+    },
+
+    updateVariant: (state, action) => {
+      const { index, variant } = action.payload;
+      if (state.variants[index]) {
+        state.variants[index] = variant;
+      }
+    },
+
+    removeVariant: (state, action) => {
+      state.variants.splice(action.payload, 1);
+    },
+
+    setGlobalParams: (state, action) => {
+      state.globalParams = action.payload;
+    },
+
+    addGlobalVariable: (state, action) => {
+      state.globalParams.push(action.payload);
+    },
+
+    updateGlobalVariable: (state, action) => {
+      const { index, global } = action.payload;
+      if (state.globalParams[index]) {
+        state.globalParams[index] = global;
+      }
+    },
+
+    removeGlobalVariable: (state, action) => {
+      state.globalParams.splice(action.payload, 1);
+    },
+
+    setSaving: (state, action) => {
+      state.saving = action.payload;
+    },
+
+    setTemplateSaved: (state, action) => {
+      state.templateSaved = action.payload;
+    },
+
+    setRowHeight: (state, action) => {
+      const { rowId, height } = action.payload;
+      state.rowHeights[rowId] = height;
+      if (state.rows[rowId]) {
+        state.rows[rowId].height = height;
+      }
+    },
+
+    resetTemplate: () => getInitialState(),
+  },
+});
+
+export const {
+  setTemplate,
+  setTemplateMeta,
+  setReportMeta,
+  addColumn,
+  updateColumn,
+  updateColumnFormat,
+  removeColumn,
+  addRow,
+  updateRow,
+  removeRow,
+  reorderRows,
+  updateCell,
+  updateCellRender,
+  updateCellFormat,
+  updateCellSource,
+  updateDynamicConfig,
+  setSelectedCell,
+  setFormulaMode,
+  setVariants,
+  addVariant,
+  updateVariant,
+  removeVariant,
+  setGlobalParams,
+  addGlobalVariable,
+  updateGlobalVariable,
+  removeGlobalVariable,
+  setSaving,
+  setTemplateSaved,
+  setRowHeight,
+  resetTemplate,
+} = templateSlice.actions;
+
+export default templateSlice.reducer;
+
+
+
+
+
+
+
+
+
+// selector.js
+
+import { createSelector } from "@reduxjs/toolkit";
+
+const selectTemplate = (state) => state.template.present;
+
+export const selectTemplateMeta = createSelector(
+  [selectTemplate],
+  (template) => template.templateMeta,
+);
+
+export const selectReportMeta = createSelector(
+  [selectTemplate],
+  (template) => template.reportMeta,
+);
+
+export const selectColumns = createSelector(
+  [selectTemplate],
+  (template) => template.columns,
+);
+
+export const selectRowOrder = createSelector(
+  [selectTemplate],
+  (template) => template.rowOrder,
+);
+
+export const selectRowsEntities = createSelector(
+  [selectTemplate],
+  (template) => template.rows,
+);
+
+export const selectCellsEntities = createSelector(
+  [selectTemplate],
+  (template) => template.cells,
+);
+
+export const selectRows = createSelector(
+  [selectRowOrder, selectRowsEntities, selectCellsEntities],
+  (rowOrder, rows, cells) => {
+    return rowOrder.map((rowId) => {
+      const row = rows[rowId];
+      const rowCells = row.cellIds.map((cellId) => cells[cellId]);
+      return {
+        ...row,
+        cells: rowCells,
+      };
+    });
+  },
+);
+
+export const selectRowById = createSelector(
+  [selectRowsEntities, selectCellsEntities, (_, rowId) => rowId],
+  (rows, cells, rowId) => {
+    const row = rows[rowId];
+    if (!row) return null;
+    const rowCells = row.cellIds.map((cellId) => cells[cellId]);
+    return {
+      ...row,
+      cells: rowCells,
+    };
+  },
+);
+
+export const selectVariants = createSelector(
+  [selectTemplate],
+  (template) => template.variants,
+);
+
+export const selectGlobals = createSelector(
+  [selectTemplate],
+  (template) => template.globalParams,
+);
+
+export const selectSelectedCell = createSelector(
+  [selectTemplate],
+  (template) => template.selectedCell,
+);
+
+export const selectFormulaMode = createSelector(
+  [selectTemplate],
+  (template) => template.formulaMode,
+);
+
+export const selectSaving = createSelector(
+  [selectTemplate],
+  (template) => template.saving,
+);
+
+export const selectTemplateSaved = createSelector(
+  [selectTemplate],
+  (template) => template.templateSaved,
+);
+
+export const selectRowCount = createSelector(
+  [selectRowOrder],
+  (rowOrder) => rowOrder.length,
+);
+
+export const selectColumnCount = createSelector(
+  [selectColumns],
+  (columns) => columns.length,
+);
+
+export const selectCellById = createSelector(
+  [selectCellsEntities, (_, cellId) => cellId],
+  (cells, cellId) => cells[cellId],
+);
+
+export const selectSelectedRow = createSelector(
+  [selectRowsEntities, selectSelectedCell],
+  (rows, selectedCell) => (selectedCell ? rows[selectedCell.rowId] : null),
+);
+
+export const selectSelectedCellData = createSelector(
+  [selectCellsEntities, selectSelectedCell],
+  (cells, selectedCell) => {
+    if (!selectedCell) return null;
+    return cells[selectedCell.cellId] || null;
+  },
+);
+
+export const selectSelectedColumn = createSelector(
+  [selectColumns, selectSelectedRow, selectCellsEntities, selectSelectedCell],
+  (columns, row, cells, selectedCell) => {
+    if (!row || !selectedCell) return null;
+    const cellIndex = row.cellIds.indexOf(selectedCell.cellId);
+    return cellIndex >= 0 ? columns[cellIndex] : null;
+  },
+);
+
+// Optimized: Build span map once and cache it
+const buildSpanMapOptimized = createSelector(
+  [selectRowOrder, selectRowsEntities, selectCellsEntities],
+  (rowOrder, rows, cells) => {
+    const spanMap = new Map();
+
+    for (let rowIndex = 0; rowIndex < rowOrder.length; rowIndex++) {
+      const rowId = rowOrder[rowIndex];
+      const row = rows[rowId];
+
+      if (row.rowType === "DYNAMIC") continue;
+
+      for (let cellIndex = 0; cellIndex < row.cellIds.length; cellIndex++) {
+        const cellId = row.cellIds[cellIndex];
+        const cell = cells[cellId];
+
+        if (!cell) continue;
+
+        const colspan = cell.render?.colspan || 1;
+        const rowspan = cell.render?.rowspan || 1;
+
+        if (colspan > 1 || rowspan > 1) {
+          spanMap.set(`${rowId}-${cellId}`, {
+            colspan,
+            rowspan,
+            rowIndex,
+            cellIndex,
+          });
+        }
+      }
+    }
+
+    return spanMap;
+  },
+);
+
+// Optimized: Use the cached span map
+export const selectHiddenCells = createSelector(
+  [selectRowOrder, selectRowsEntities, buildSpanMapOptimized],
+  (rowOrder, rows, spanMap) => {
+    const hidden = new Set();
+
+    // Iterate through cells with spans only (much faster)
+    spanMap.forEach((span, key) => {
+      const [rowId, cellId] = key.split("-");
+      const { colspan, rowspan, rowIndex, cellIndex } = span;
+      const row = rows[rowId];
+
+      // Hide cells affected by colspan
+      for (let c = 1; c < colspan; c++) {
+        const hiddenCellId = row.cellIds[cellIndex + c];
+        if (hiddenCellId) {
+          hidden.add(`${rowId}-${hiddenCellId}`);
+        }
+      }
+
+      // Hide cells affected by rowspan
+      for (let r = 1; r < rowspan; r++) {
+        const targetRowId = rowOrder[rowIndex + r];
+        if (!targetRowId) continue;
+
+        const targetRow = rows[targetRowId];
+        if (!targetRow || targetRow.rowType === "DYNAMIC") continue;
+
+        for (let c = 0; c < colspan; c++) {
+          const hiddenCellId = targetRow.cellIds[cellIndex + c];
+          if (hiddenCellId) {
+            hidden.add(`${targetRowId}-${hiddenCellId}`);
+          }
+        }
+      }
+    });
+
+    return hidden;
+  },
+);
+
+// export const selectTableNames = createSelector(
+//   [selectRowsEntities, selectCellsEntities],
+//   (rows, cells) => {
+//     const tables = new Set();
+
+//     Object.values(rows).forEach((row) => {
+//       row.cellIds.forEach((cellId) => {
+//         const cell = cells[cellId];
+//         if (cell?.source?.table) {
+//           tables.add(cell.source.table);
+//         }
+
+//       });
+
+//       if (row.dynamicConfig?.table) {
+//         tables.add(row.dynamicConfig.table);
+//       }
+//     });
+
+//     return Array.from(tables);
+//   },
+// );
+
+export const selectTableNames = createSelector(
+  [selectRowsEntities, selectCellsEntities],
+  (rows, cells) => {
+    const tables = new Set();
+
+    Object.values(rows).forEach((row) => {
+      // 1. Extract table from Row Dynamic Config
+      if (row.dynamicConfig?.table) {
+        tables.add(row.dynamicConfig.table);
+      }
+
+      // 2. Iterate through cells associated with the row
+      if (Array.isArray(row.cellIds)) {
+        row.cellIds.forEach((cellId) => {
+          const cell = cells[cellId];
+
+          if (!cell) return;
+
+          // A. Extract table from Cell Source
+          if (cell.source?.table) {
+            tables.add(cell.source.table);
+          }
+
+          // B. Extract tables from Cell Variables
+          // We check if variables exist and iterate over the values (e.g., variable N, M, etc.)
+          if (cell.variables) {
+            Object.values(cell.variables).forEach((variable) => {
+              // Ensure variable is an object and has a table property
+              if (variable && typeof variable === "object" && variable.table) {
+                tables.add(variable.table);
+              }
+            });
+          }
+        });
+      }
+    });
+
+    return Array.from(tables);
+  },
+);
+
+export const selectDynamicRowIds = createSelector(
+  [selectRowsEntities],
+  (rows) =>
+    Object.values(rows)
+      .filter((row) => row.rowType === "DYNAMIC")
+      .map((row) => row.id),
+);
+
+export const selectExistingRowIds = createSelector(
+  [selectRowOrder],
+  (rowOrder) => rowOrder,
+);
+
+export const selectTemplateForExport = createSelector(
+  [
+    selectTemplateMeta,
+    selectReportMeta,
+    selectColumns,
+    selectRows,
+    selectVariants,
+    selectGlobals,
+  ],
+  (templateMeta, reportMeta, columns, rows, variants, globalParams) => {
+    const formattedColumns = columns.map((col) => ({
+      id: col.id,
+      name: col.name,
+      format: col.format ? { ...col.format } : { width: 150, align: "left" },
+      templateColumnFilters: col.templateColumnFilters,
+    }));
+
+    // Format rows with cells array (remove cells property, use inline structure)
+    const formattedRows = rows.map((row) => {
+      if (row.rowType === "DYNAMIC") {
+        return {
+          rowType: row.rowType,
+          id: row.id,
+          dynamicConfig: row.dynamicConfig,
+        };
+      }
+
+      return {
+        rowType: row.rowType,
+        id: row.id,
+        cells: row.cells.map((cell) => {
+          const formattedCell = {
+            type: cell.type,
+          };
+
+          if (cell.value !== undefined) {
+            formattedCell.value = cell.value;
+          }
+
+          if (cell.source) {
+            formattedCell.source = cell.source;
+          }
+
+          if (cell.expression) {
+            formattedCell.expression = cell.expression;
+          }
+
+          if (cell.variables) {
+            formattedCell.variables = cell.variables;
+          }
+
+          if (cell.render) {
+            formattedCell.render = cell.render;
+          }
+
+          if (cell.format) {
+            formattedCell.format = cell.format;
+          }
+
+          return formattedCell;
+        }),
+      };
+    });
+
+    return {
+      templateMeta,
+      reportMeta,
+      reportData: {
+        columns: formattedColumns,
+        rows: formattedRows,
+      },
+      variants,
+      globalParams,
+    };
+  },
+);
+
+export const selectTemplateColumns = createSelector(
+  [selectColumns],
+  (columns) => columns.map((col) => ({ id: col.id, name: col.name })),
+);
+
+export const selectRowHeights = createSelector(
+  [selectTemplate],
+  (template) => template.rowHeights,
+);
+
+export const selectRowHeight = createSelector(
+  [selectRowsEntities, (_, rowId) => rowId],
+  (rows, rowId) => rows[rowId]?.height || 60,
+);
+
+
+
+
+
+
+
+
+// ReportCanvas.jsx
+
+import { useRef, useMemo, useCallback, memo, useEffect, useState } from "react";
+import Box from "@mui/material/Box";
+import Paper from "@mui/material/Paper";
+import Typography from "@mui/material/Typography";
+import Chip from "@mui/material/Chip";
+import GlobalStyles from "@mui/material/GlobalStyles";
+import { alpha } from "@mui/material/styles";
+import { useVirtualizer, elementScroll } from "@tanstack/react-virtual";
+import { useAppDispatch, useAppSelector } from "../../store";
+import { setSelectedCell } from "../../store/templateSlice";
+import {
+  selectRowOrder,
+  selectColumns,
+  selectSelectedCell,
+  selectFormulaMode,
+  selectReportMeta,
+  selectHiddenCells,
+} from "../../store/selectors";
+
+
+const ROW_HIGHLIGHT_ANIMATION_NAME = "reportRowAddedPulse";
+const ROW_HIGHLIGHT_DURATION_MS = 3000;
+
+const RowHighlightGlobalStyles = () => (
+  <GlobalStyles
+    styles={(theme) => {
+      const tint = theme.palette.info.main;
+      return {
+        [`@keyframes ${ROW_HIGHLIGHT_ANIMATION_NAME}`]: {
+          "0%": {
+            backgroundColor: alpha(tint, 0),
+            boxShadow: `inset 0 0 0 0px ${alpha(tint, 0)}`,
+          },
+          "8%": {
+            backgroundColor: alpha(tint, 0.32),
+            boxShadow: `inset 0 0 0 2px ${alpha(tint, 0.65)}`,
+          },
+          "75%": {
+            backgroundColor: alpha(tint, 0.22),
+            boxShadow: `inset 0 0 0 2px ${alpha(tint, 0.45)}`,
+          },
+          "100%": {
+            backgroundColor: alpha(tint, 0),
+            boxShadow: `inset 0 0 0 0px ${alpha(tint, 0)}`,
+          },
+        },
+      };
+    }}
+  />
+);
+
+const getRowTypeColor = (type) => {
+  const colors = {
+    HEADER: "#1976d2",
+    DATA: "#2c8aa8",
+    SEPARATOR: "#757575",
+    DYNAMIC: "#388e3c",
+    FOOTER: "#f57c00",
+  };
+  return colors[type] || "#757575";
+};
+
+const getCellValue = (cell) => {
+  if (cell.type === "TEXT") return cell.value || "Click to edit";
+  if (cell.type === "FORMULA") return `= ${cell.expression || "formula"}`;
+  if (cell.type?.startsWith("DB_")) {
+    const table = cell.source?.table || "";
+    const column = cell.source?.column || "";
+    if (!table || !column) return `${cell.type}(?)`;
+    const aggType = cell.type.replace("DB_", "");
+    if (cell.type === "DB_VALUE") {
+      return `${table}.${column}`;
+    }
+    return `${aggType}(${table}.${column})`;
+  }
+  return "Empty cell";
+};
+
+const CellComponent = memo(
+  ({
+    cellId,
+    rowId,
+    colId,
+    isHighlighted,
+    cellIndex,
+    isSelected,
+    formulaMode,
+    columnWidths,
+    columnAlign,
+    isHidden,
+    onCellClick,
+  }) => {
+    const cell = useAppSelector(
+      (state) => state.template.present.cells[cellId],
+      (a, b) => {
+        if (!a && !b) return true;
+        if (!a || !b) return false;
+        return (
+          a.id === b.id &&
+          a.type === b.type &&
+          a.value === b.value &&
+          a.expression === b.expression &&
+          a.source?.table === b.source?.table &&
+          a.source?.column === b.source?.column &&
+          a.render?.colspan === b.render?.colspan &&
+          a.render?.rowspan === b.render?.rowspan &&
+          a.render?.bold === b.render?.bold &&
+          a.render?.align === b.render?.align &&
+          a.format?.bgColor === b.format?.bgColor
+        );
+      },
+    );
+
+    const handleClick = useCallback(() => {
+      onCellClick(rowId, cellId, colId);
+    }, [rowId, cellId, colId, onCellClick]);
+
+    const colspan = cell?.render?.colspan || 1;
+    const rowspan = cell?.render?.rowspan || 1;
+
+    const cellWidth = useMemo(() => {
+      let totalWidth = 0;
+      for (let i = 0; i < colspan && cellIndex + i < columnWidths.length; i++) {
+        totalWidth += columnWidths[cellIndex + i];
+      }
+      return totalWidth;
+    }, [colspan, cellIndex, columnWidths]);
+
+    if (isHidden || !cell) return null;
+
+    return (
+      <Box
+        onClick={handleClick}
+        sx={{
+          cursor: formulaMode ? "crosshair" : "pointer",
+          position: "relative",
+          bgcolor:
+            cell.format?.bgColor && cell.format.bgColor !== "#ffffff"
+              ? cell.format.bgColor
+              : isSelected
+                ? "#e3f2fd"
+                : formulaMode
+                  ? "#fff9c4"
+                  : "white",
+          animation: isHighlighted ? `${ROW_HIGHLIGHT_ANIMATION_NAME} ${ROW_HIGHLIGHT_DURATION_MS}ms cubic-bezier(0.22, 1, 0.36, 1)` : "none",
+          border: isSelected ? "2px solid #1976d2" : "1px solid #e0e0e0",
+          boxSizing: "border-box",
+          fontWeight: cell.render?.bold ? 600 : 400,
+          textAlign: cell.render?.align || columnAlign || "left",
+          width: `${cellWidth}px`,
+          minWidth: `${cellWidth}px`,
+          gridColumn: colspan > 1 ? `span ${colspan}` : undefined,
+          gridRow: rowspan > 1 ? `span ${rowspan}` : undefined,
+          p: 1,
+          zIndex: isSelected ? 10 : 1,
+          overflow: "hidden",
+          "&:hover": {
+            bgcolor: isSelected
+              ? "#e3f2fd"
+              : formulaMode
+                ? "#fff59d"
+                : "#f5f5f5",
+            zIndex: isSelected ? 10 : 2,
+          },
+        }}
+      >
+        <Typography
+          variant="body2"
+          sx={{
+            fontSize: "0.8rem",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            wordBreak: "break-all",
+          }}
+        >
+          {getCellValue(cell)}
+        </Typography>
+        {colspan > 1 && (
+          <Chip
+            label={`cs:${colspan}`}
+            size="small"
+            sx={{
+              position: "absolute",
+              top: 2,
+              right: 2,
+              height: 16,
+              fontSize: "0.6rem",
+            }}
+          />
+        )}
+        {rowspan > 1 && (
+          <Chip
+            label={`rs:${rowspan}`}
+            size="small"
+            color="secondary"
+            sx={{
+              position: "absolute",
+              top: colspan > 1 ? 20 : 2,
+              right: 2,
+              height: 16,
+              fontSize: "0.6rem",
+            }}
+          />
+        )}
+      </Box>
+    );
+  },
+  (prevProps, nextProps) => {
+    return (
+      prevProps.cellId === nextProps.cellId &&
+      prevProps.isSelected === nextProps.isSelected &&
+      prevProps.formulaMode === nextProps.formulaMode &&
+      prevProps.isHidden === nextProps.isHidden &&
+      prevProps.columnWidths === nextProps.columnWidths &&
+      prevProps.columnAlign === nextProps.columnAlign
+    );
+  },
+);
+
+CellComponent.displayName = "CellComponent";
+
+const RowContent = memo(
+  ({
+    rowId,
+    gridTemplateColumns,
+    columnWidths,
+    selectedCellId,
+    formulaMode,
+    hiddenCellsMap,
+    isHighlighted,
+    onCellClick,
+    onDynamicRowClick,
+  }) => {
+    const row = useAppSelector((state) => state.template.present.rows[rowId]);
+
+    useEffect(() => {
+      if(isHighlighted) {
+        console.log("Highlighted row: ", rowId);
+      }
+    }, [isHighlighted, rowId])
+
+    const columns = useAppSelector(selectColumns);
+
+    const handleDynamicClick = useCallback(() => {
+      onDynamicRowClick(rowId);
+    }, [rowId, onDynamicRowClick]);
+
+    if (!row) return null;
+
+    return (
+      <Box
+        sx={{
+          display: "flex",
+          borderLeft: `3px solid ${getRowTypeColor(row.rowType)}`,
+          "&:hover": { bgcolor: "#f9f9f9" },
+          minHeight: 60,
+          position: "relative",
+          //backgroundColor: isHighlighted ? "red" : "transparent"
+          animation: isHighlighted
+            ? `${ROW_HIGHLIGHT_ANIMATION_NAME} ${ROW_HIGHLIGHT_DURATION_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`
+            : "none",
+        }}
+      >
+        <Box
+          sx={{
+            bgcolor: "#fafafa",
+            borderRight: "1px solid #e0e0e0",
+            textAlign: "center",
+            width: 80,
+            minWidth: 80,
+            flexShrink: 0,
+            p: 0.5,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "flex-start",
+            paddingTop: 1,
+          }}
+        >
+          <Typography
+            variant="caption"
+            display="block"
+            color="text.secondary"
+            sx={{ fontSize: "0.65rem" }}
+          >
+            {row.id}
+          </Typography>
+          <Chip
+            label={row.rowType}
+            size="small"
+            sx={{
+              fontSize: "0.6rem",
+              height: 18,
+              bgcolor: getRowTypeColor(row.rowType),
+              color: "white",
+              fontWeight: 600,
+              mt: 0.5,
+            }}
+          />
+        </Box>
+
+        {row.rowType === "DYNAMIC" ? (
+          <Box
+            onClick={handleDynamicClick}
+            sx={{
+              flex: 1,
+              bgcolor: selectedCellId === null ? "#c8e6c9" : "#e8f5e9",
+              fontStyle: "italic",
+              color: "text.secondary",
+              cursor: formulaMode ? "not-allowed" : "pointer",
+              border:
+                selectedCellId === null
+                  ? "2px solid #388e3c"
+                  : "1px solid #e0e0e0",
+              opacity: formulaMode ? 0.6 : 1,
+              p: 1,
+              "&:hover": { bgcolor: formulaMode ? "#e8f5e9" : "#c8e6c9" },
+            }}
+          >
+            Dynamic rows from {row.dynamicConfig?.table || "database"} - Click
+            to configure
+            {formulaMode && (
+              <Typography variant="caption" display="block" color="error">
+                (Cannot use in formulas)
+              </Typography>
+            )}
+          </Box>
+        ) : (
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns,
+              flex: 1,
+            }}
+          >
+            {row.cellIds?.map((cellId, cellIndex) => {
+              const column = columns[cellIndex];
+              if (!column) return null;
+
+              return (
+                <CellComponent
+                  key={cellId}
+                  cellId={cellId}
+                  rowId={rowId}
+                  isHighlighted={isHighlighted}
+                  colId={column.id}
+                  cellIndex={cellIndex}
+                  isSelected={selectedCellId === cellId}
+                  formulaMode={formulaMode}
+                  columnWidths={columnWidths}
+                  columnAlign={column.format?.align || "left"}
+                  isHidden={hiddenCellsMap.get(`${rowId}-${cellId}`) || false}
+                  onCellClick={onCellClick}
+                />
+              );
+            })}
+          </Box>
+        )}
+      </Box>
+    );
+  },
+  (prevProps, nextProps) => {
+    return (
+      prevProps.rowId === nextProps.rowId &&
+      prevProps.selectedCellId === nextProps.selectedCellId &&
+      prevProps.formulaMode === nextProps.formulaMode &&
+      prevProps.hiddenCellsMap === nextProps.hiddenCellsMap &&
+      prevProps.isHighlighted === nextProps.isHighlighted &&
+      prevProps.gridTemplateColumns === nextProps.gridTemplateColumns &&
+      prevProps.columnWidths === nextProps.columnWidths
+    );
+  },
+);
+
+RowContent.displayName = "RowContent";
+
+export const ReportCanvas = memo(() => {
+  const dispatch = useAppDispatch();
+  const parentRef = useRef(null);
+  const headerScrollRef = useRef(null);
+
+  const rowOrder = useAppSelector(selectRowOrder);
+  const columns = useAppSelector(selectColumns);
+  const selectedCell = useAppSelector(selectSelectedCell);
+  const formulaMode = useAppSelector(selectFormulaMode);
+  const reportMeta = useAppSelector(selectReportMeta);
+  const hiddenCells = useAppSelector(selectHiddenCells);
+  const rows = useAppSelector((state) => state.template.present.rows);
+
+  const hiddenCellsMap = useMemo(() => {
+    const map = new Map();
+    hiddenCells.forEach((key) => map.set(key, true));
+    return map;
+  }, [hiddenCells]);
+
+  const calculateColumnWidths = useMemo(() => {
+    if (!parentRef.current) return columns.map(() => 150);
+
+    const containerWidth = parentRef.current.clientWidth - 80;
+    const hasAnyWidth = columns.some((col) => col.format?.width);
+
+    if (!hasAnyWidth) {
+      const equalWidth = Math.floor(containerWidth / columns.length);
+      return columns.map(() => equalWidth);
+    }
+
+    const totalSpecifiedWidth = columns.reduce(
+      (sum, col) => sum + (col.format?.width || 1),
+      0,
+    );
+    return columns.map((col) => {
+      const colWidth = col.format?.width || 1;
+      return Math.floor((colWidth / totalSpecifiedWidth) * containerWidth);
+    });
+  }, [columns, parentRef.current?.clientWidth]);
+
+  const gridTemplateColumns = useMemo(
+    () => calculateColumnWidths.map((width) => `${width}px`).join(" "),
+    [calculateColumnWidths],
+  );
+
+  const easeInOutQuint = (t) =>
+    t < 0.5 ? 16 * t * t * t * t * t : 1 - Math.pow(-2 * t + 2, 5) / 2;
+
+  const ANIMATION_DURATION_MS = 400;
+  const MAX_ANIMATED_DISTANCE_PX = 4000; // ~ a few thousand rows' worth
+
+  const scrollAnimationRef = useRef(null);
+
+  const smoothScrollToFn = useCallback((offset, canSmooth, instance) => {
+    const scrollElement = instance.scrollElement;
+    if (!scrollElement) return;
+
+    const start = scrollElement.scrollTop;
+    const distance = Math.abs(offset - start);
+    const wantsAnimation = canSmooth?.behavior === "smooth";
+
+    if (!wantsAnimation || distance > MAX_ANIMATED_DISTANCE_PX) {
+      scrollAnimationRef.current = null; // cancel any in-flight animation
+      elementScroll(offset, { ...canSmooth, behavior: "auto" }, instance);
+      return;
+    }
+
+    const startTime = (scrollAnimationRef.current = Date.now());
+
+    const run = () => {
+      // A newer scroll request (or unmount) superseded this one — bail out.
+      if (scrollAnimationRef.current !== startTime) return;
+
+      const elapsed = (Date.now() - startTime) / ANIMATION_DURATION_MS;
+      const progress = easeInOutQuint(Math.min(elapsed, 1));
+      const interpolated = start + (offset - start) * progress;
+
+      elementScroll(interpolated, { ...canSmooth, behavior: "auto" }, instance);
+
+      if (elapsed < 1) {
+        requestAnimationFrame(run);
+      }
+    };
+
+    requestAnimationFrame(run);
+  }, []);
+
+  const rowVirtualizer = useVirtualizer({
+    count: rowOrder.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: useCallback(() => 60, []),
+    overscan: 12,
+    scrollToFn: smoothScrollToFn,
+  });
+
+  const rowVirtualizerRef = useRef(rowVirtualizer);
+  rowVirtualizerRef.current = rowVirtualizer;
+
+  // ---- Scroll-to & highlight a newly added row ----
+  // Detected by diffing rowOrder against its previous value rather than a
+  // dedicated Redux action, so this works regardless of which flow added
+  // the row (Add Row dialog, duplicate, undo of a delete, etc).
+  const [highlightedRowId, setHighlightedRowId] = useState(null);
+  const prevRowOrderRef = useRef(rowOrder);
+  const highlightTimeoutRef = useRef(null);
+
+  useEffect(() => {
+    const prevOrder = prevRowOrderRef.current;
+    prevRowOrderRef.current = rowOrder;
+
+    if (prevOrder === rowOrder || rowOrder.length <= prevOrder.length) {
+      return;
+    }
+
+    const prevIds = new Set(prevOrder);
+    const addedRowId = rowOrder.find((id) => !prevIds.has(id));
+    console.log("Added Row: ", addedRowId);
+    
+    if (!addedRowId) return;
+
+    const addedIndex = rowOrder.indexOf(addedRowId);
+
+    rowVirtualizerRef.current.scrollToIndex(addedIndex, {
+      align: "center",
+      behavior: "smooth",
+    });
+
+    setHighlightedRowId(addedRowId);
+    console.log("HighlightedRowId set to: ", addedRowId);
+    
+    if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
+    highlightTimeoutRef.current = setTimeout(() => {
+      setHighlightedRowId(null);
+    }, ROW_HIGHLIGHT_DURATION_MS);
+  }, [rowOrder]);
+
+  // Guard against a highlight timer or in-flight scroll animation trying to
+  // update state after the canvas has unmounted.
+  useEffect(() => {
+    return () => {
+      scrollAnimationRef.current = null;
+      if (highlightTimeoutRef.current)
+        clearTimeout(highlightTimeoutRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (highlightTimeoutRef.current)
+        clearTimeout(highlightTimeoutRef.current);
+    };
+  }, []);
+
+  const handleCellClick = useCallback(
+    (rowId, cellId, colId) => {
+      const row = rows[rowId];
+
+      if (formulaMode) {
+        // console.log("Ok inside", `cell_${rowId}_${colId}`);
+        if (row?.rowType === "DYNAMIC") return;
+        const cellRef = `cell_${rowId}_${colId}`;
+        window.dispatchEvent(
+          new CustomEvent("formula-cell-selected", { detail: cellRef }),
+        );
+      } else {
+        dispatch(setSelectedCell({ rowId, cellId }));
+      }
+    },
+    [rows, dispatch, formulaMode],
+  );
+
+  const handleDynamicRowClick = useCallback(
+    (rowId) => {
+      if (!formulaMode) {
+        dispatch(setSelectedCell({ rowId, cellId: "" }));
+      }
+    },
+    [dispatch, formulaMode],
+  );
+
+
+  const handleScroll = useCallback(() => {
+    if (parentRef.current && headerScrollRef.current) {
+      headerScrollRef.current.scrollLeft = parentRef.current.scrollLeft;
+    }
+  }, []);
+
+  const virtualItems = rowVirtualizer.getVirtualItems();
+
+  return (
+    <>
+      <RowHighlightGlobalStyles />
+      <Box
+        sx={{
+          flex: 1,
+          // bgcolor: formulaMode ? "#fff3e0" : "#f5f7fa",
+          p: 3,
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          cursor: formulaMode ? "crosshair" : "default",
+        }}
+      >
+        <Paper
+          elevation={3}
+          sx={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            bgcolor: "white",
+            p: 2,
+            overflow: "hidden",
+            boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
+          }}
+        >
+          {formulaMode && (
+            <Box
+              sx={{
+                mb: 2,
+                p: 1.5,
+                bgcolor: "#ff9800",
+                color: "white",
+                borderRadius: 1,
+                textAlign: "center",
+              }}
+            >
+              <Typography variant="body2" fontWeight={600}>
+                Formula Building Mode - Click cells to add to formula (Dynamic
+                rows excluded)
+              </Typography>
+            </Box>
+          )}
+
+          <Box
+            sx={{
+              mb: 2,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <Typography variant="h6" fontWeight={600}>
+              {reportMeta.reportName || "Untitled Report"}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {columns.length} cols × {rowOrder.length} rows
+            </Typography>
+          </Box>
+
+          {columns.length === 0 ? (
+            <Box sx={{ textAlign: "center", py: 8, color: "text.secondary" }}>
+              <Typography variant="body1" gutterBottom>
+                Add columns from the left panel to get started
+              </Typography>
+            </Box>
+          ) : (
+            <Box
+              sx={{
+                flex: 1,
+                overflow: "hidden",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              <Box
+                sx={{
+                  flexShrink: 0,
+                  display: "flex",
+                  bgcolor: "#f5f5f5",
+                  borderBottom: "2px solid #e0e0e0",
+                  overflow: "hidden",
+                  position: "sticky",
+                  top: 0,
+                  zIndex: 100,
+                }}
+              >
+                <Box
+                  sx={{
+                    width: 83,
+                    minWidth: 80,
+                    fontWeight: 600,
+                    fontSize: "0.75rem",
+                    color: "text.secondary",
+                    borderRight: "1px solid #e0e0e0",
+                    // borderLeft: `3px solid ${getRowTypeColor("HEADER")}`,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    p: 1,
+                    flexShrink: 0,
+                    // position: "sticky",
+                    // left: 0,
+                    bgcolor: "#f5f5f5",
+                    zIndex: 101,
+                  }}
+                >
+                  #
+                </Box>
+                <Box
+                  ref={headerScrollRef}
+                  sx={{
+                    flex: 1,
+                    overflowX: "hidden",
+                    overflowY: "hidden",
+                  }}
+                >
+                  <Box
+                    sx={{
+                      display: "grid",
+                      gridTemplateColumns,
+                    }}
+                  >
+                    {columns.map((col) => (
+                      <Box
+                        key={col.id}
+                        sx={{
+                          fontWeight: 600,
+                          fontSize: "0.8rem",
+                          p: 1,
+                          borderRight: "1px solid #e0e0e0",
+                        }}
+                      >
+                        {col.name}
+                        <Typography
+                          variant="caption"
+                          display="block"
+                          color="text.secondary"
+                          sx={{ fontSize: "0.65rem" }}
+                        >
+                          {col.id} {/* ({col.format?.width || 150}px) */}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Box>
+                </Box>
+              </Box>
+
+              <Box
+                ref={parentRef}
+                onScroll={handleScroll}
+                sx={{
+                  flex: 1,
+                  overflow: "auto",
+                  position: "relative",
+                  willChange: "transform",
+                }}
+              >
+                <Box
+                  sx={{
+                    height: `${rowVirtualizer.getTotalSize()}px`,
+                    width: "100%",
+                    position: "relative",
+                  }}
+                >
+                  {virtualItems.map((virtualRow) => {
+                    const rowId = rowOrder[virtualRow.index];
+
+                    return (
+                      <Box
+                        key={virtualRow.key}
+                        data-index={virtualRow.index}
+                        sx={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          width: "100%",
+                          transform: `translateY(${virtualRow.start}px)`,
+                        }}
+                      >
+                        <RowContent
+                          rowId={rowId}
+                          gridTemplateColumns={gridTemplateColumns}
+                          columnWidths={calculateColumnWidths}
+                          selectedCellId={selectedCell?.cellId || null}
+                          formulaMode={formulaMode}
+                          hiddenCellsMap={hiddenCellsMap}
+                          isHighlighted={rowId === highlightedRowId}
+                          onCellClick={handleCellClick}
+                          onDynamicRowClick={handleDynamicRowClick}
+                        />
+                      </Box>
+                    );
+                  })}
+                </Box>
+              </Box>
+            </Box>
+          )}
+
+          {rowOrder.length === 0 && columns.length > 0 && (
+            <Box sx={{ textAlign: "center", py: 8, color: "text.secondary" }}>
+              <Typography variant="body1" gutterBottom>
+                Add rows from the left panel
+              </Typography>
+            </Box>
+          )}
+        </Paper>
+      </Box>
+    </>
+  );
+});
+
+ReportCanvas.displayName = "ReportCanvas";
+
+
+
+
+
+
+
+
+
+
+// TopToolbar.jsx
+
+import AppBar from "@mui/material/AppBar";
+import Toolbar from "@mui/material/Toolbar";
+import Typography from "@mui/material/Typography";
+import Button from "@mui/material/Button";
+import IconButton from "@mui/material/IconButton";
+import Box from "@mui/material/Box";
+import CircularProgress from "@mui/material/CircularProgress";
+import Chip from "@mui/material/Chip";
+import SaveIcon from "@mui/icons-material/Save";
+import DownloadIcon from "@mui/icons-material/Download";
+import UploadIcon from "@mui/icons-material/Upload";
+import TableChartIcon from "@mui/icons-material/TableChart";
+import TuneIcon from "@mui/icons-material/Tune";
+import SpeedIcon from "@mui/icons-material/Speed";
+import FullscreenIcon from "@mui/icons-material/Fullscreen";
+import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
+import ReceiptLongIcon from "@mui/icons-material/ReceiptLong";
+import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+
+export const TopToolbar = ({
+  onBack,
+  onExport,
+  onSave,
+  onSaveVariants,
+  onImport,
+  onGenerateTestData, 
+  reportName,
+  saving = false,
+  templateSaved = false,
+  variantsCount = 0,
+  isFullscreen,
+  toggleFullscreen,
+}) => {
+  return (
+    <AppBar
+      position="static"
+      // color="default"
+      elevation={0}
+      sx={{ borderRadius: 0 /* , borderBottom: "1px solid #e0e0e0" */ }}
+    >
+      <Toolbar>
+        <IconButton edge="start" color="primary" sx={{ mr: 2 }}>
+          <ReceiptLongIcon />
+        </IconButton>
+
+        <Typography
+          variant="h6"
+          component="div"
+          sx={{ flexGrow: 1, fontWeight: 600, color: "text.primary" }}
+        >
+          {/* reportName ||  */ "Report Template Builder"}
+        </Typography>
+
+        <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
+          {onBack && (
+            <Button
+              startIcon={<ArrowBackIcon />}
+              onClick={onBack}
+              sx={{ color: "text.secondary" }}
+              size="small"
+            >
+              Back
+            </Button>
+          )}
+          <Button
+            variant="outlined"
+            startIcon={<UploadIcon />}
+            onClick={onImport}
+            size="small"
+          >
+            Import
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<DownloadIcon />}
+            onClick={onExport}
+            size="small"
+          >
+            Export Template
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={
+              saving ? (
+                <CircularProgress size={16} color="inherit" />
+              ) : (
+                <SaveIcon />
+              )
+            }
+            onClick={onSave}
+            size="small"
+            disabled={saving}
+          >
+            Save Template
+          </Button>
+          {/* <Button
+            variant="outlined"
+            color="secondary"
+            startIcon={<TuneIcon />}
+            onClick={onSaveVariants}
+            size="small"
+            disabled={saving || !templateSaved}
+            title={!templateSaved ? "Save template first" : "Save variants"}
+          >
+            Save Variants
+            {variantsCount > 0 && (
+              <Chip
+                label={variantsCount}
+                size="small"
+                sx={{ ml: 1, height: 20, fontSize: "0.7rem" }}
+              />
+            )}
+          </Button> */}
+          {/* The full screen button */}
+          <IconButton
+            onClick={toggleFullscreen}
+            sx={{
+              /*  position: "absolute",
+                        top: 8,
+                        right: 8, */
+              zIndex: 10,
+              color: isFullscreen ? "white" : "inherit", // Change color when in fullscreen
+            }}
+          >
+            {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
+          </IconButton>
+        </Box>
+      </Toolbar>
+    </AppBar>
+  );
+};
