@@ -1,1 +1,264 @@
 
+import { useState, useMemo, useCallback, useEffect } from "react";
+import TextField from "@mui/material/TextField";
+import InputAdornment from "@mui/material/InputAdornment";
+import IconButton from "@mui/material/IconButton";
+import Popper from "@mui/material/Popper";
+import Paper from "@mui/material/Paper";
+import ClickAwayListener from "@mui/material/ClickAwayListener";
+import Checkbox from "@mui/material/Checkbox";
+import FormControlLabel from "@mui/material/FormControlLabel";
+import Typography from "@mui/material/Typography";
+import Box from "@mui/material/Box";
+import SearchIcon from "@mui/icons-material/Search";
+import CloseIcon from "@mui/icons-material/Close";
+import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
+import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
+import TuneIcon from "@mui/icons-material/Tune";
+import { useAppDispatch, useAppSelector } from "../../store";
+import { setSelectedCell } from "../../store/templateSlice";
+import { selectRows } from "../../store/selectors";
+
+const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const getCellSearchText = (cell) => {
+  if (!cell) return "";
+  if (cell.type === "TEXT") return cell.value || "";
+  if (cell.type === "FORMULA") return cell.expression || "";
+  if (cell.type?.startsWith("DB_")) {
+    return `${cell.source?.table || ""}.${cell.source?.column || ""}`;
+  }
+  return "";
+};
+
+const makeMatcher = (query, matchCase, matchExactWord) => {
+  if (matchExactWord) {
+    const re = new RegExp(`\\b${escapeRegExp(query)}\\b`, matchCase ? "" : "i");
+    return (text) => !!text && re.test(text);
+  }
+  if (matchCase) {
+    return (text) => !!text && text.includes(query);
+  }
+  const q = query.toLowerCase();
+  return (text) => !!text && text.toLowerCase().includes(q);
+};
+
+const findRowMatch = (row, testText) => {
+  if (testText(row.id)) {
+    return { rowId: row.id, cellId: row.cellIds?.[0] || null };
+  }
+  if (row.rowType === "DYNAMIC" && testText(row.dynamicConfig?.table)) {
+    return { rowId: row.id, cellId: null };
+  }
+  for (const cell of row.cells || []) {
+    if (testText(getCellSearchText(cell)) || testText(cell?.id)) {
+      return { rowId: row.id, cellId: cell.id };
+    }
+  }
+  return null;
+};
+
+export const ReportSearchBar = () => {
+  const dispatch = useAppDispatch();
+  const rows = useAppSelector(selectRows);
+
+  const [query, setQuery] = useState("");
+  const [matchCase, setMatchCase] = useState(false);
+  const [matchExactWord, setMatchExactWord] = useState(false);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [optionsAnchor, setOptionsAnchor] = useState(null);
+
+  const matches = useMemo(() => {
+    const q = query.trim();
+    if (!q) return [];
+    const testText = makeMatcher(q, matchCase, matchExactWord);
+    const result = [];
+    rows.forEach((row) => {
+      const match = findRowMatch(row, testText);
+      if (match) result.push(match);
+    });
+    return result;
+  }, [rows, query, matchCase, matchExactWord]);
+
+  const navigateToIndex = useCallback(
+    (idx) => {
+      const match = matches[idx];
+      if (!match) return;
+      dispatch(setSelectedCell({ rowId: match.rowId, cellId: match.cellId || "" }));
+      window.dispatchEvent(
+        new CustomEvent("report-search-navigate", { detail: { rowId: match.rowId } }),
+      );
+    },
+    [matches, dispatch],
+  );
+
+  useEffect(() => {
+    setCurrentIndex(0);
+    if (matches.length > 0) navigateToIndex(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matches]);
+
+  const handleNext = useCallback(() => {
+    if (matches.length === 0) return;
+    const next = (currentIndex + 1) % matches.length;
+    setCurrentIndex(next);
+    navigateToIndex(next);
+  }, [matches, currentIndex, navigateToIndex]);
+
+  const handlePrev = useCallback(() => {
+    if (matches.length === 0) return;
+    const prev = (currentIndex - 1 + matches.length) % matches.length;
+    setCurrentIndex(prev);
+    navigateToIndex(prev);
+  }, [matches, currentIndex, navigateToIndex]);
+
+  const handleKeyDown = (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    e.shiftKey ? handlePrev() : handleNext();
+  };
+
+  const handleClear = () => {
+    setQuery("");
+    setCurrentIndex(0);
+  };
+
+  return (
+    <Box sx={{ display: "flex", alignItems: "center" }}>
+      <TextField
+        size="small"
+        placeholder="Search row ID, value, expression..."
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={handleKeyDown}
+        sx={{ width: 260 }}
+        InputProps={{
+          startAdornment: (
+            <InputAdornment position="start">
+              <SearchIcon fontSize="small" />
+            </InputAdornment>
+          ),
+          endAdornment: (
+            <InputAdornment position="end">
+              {query && (
+                <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
+                  {matches.length > 0 ? `${currentIndex + 1}/${matches.length}` : "0/0"}
+                </Typography>
+              )}
+              <IconButton size="small" onClick={handlePrev} disabled={matches.length === 0}>
+                <KeyboardArrowUpIcon fontSize="small" />
+              </IconButton>
+              <IconButton size="small" onClick={handleNext} disabled={matches.length === 0}>
+                <KeyboardArrowDownIcon fontSize="small" />
+              </IconButton>
+              <IconButton
+                size="small"
+                onClick={(e) => setOptionsAnchor(optionsAnchor ? null : e.currentTarget)}
+                color={matchCase || matchExactWord ? "primary" : "default"}
+              >
+                <TuneIcon fontSize="small" />
+              </IconButton>
+              {query && (
+                <IconButton size="small" onClick={handleClear}>
+                  <CloseIcon fontSize="small" />
+                </IconButton>
+              )}
+            </InputAdornment>
+          ),
+        }}
+      />
+
+      <Popper open={Boolean(optionsAnchor)} anchorEl={optionsAnchor} placement="bottom-end" sx={{ zIndex: 1300 }}>
+        <ClickAwayListener onClickAway={() => setOptionsAnchor(null)}>
+          <Paper sx={{ p: 1 }}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  size="small"
+                  checked={matchCase}
+                  onChange={(e) => setMatchCase(e.target.checked)}
+                />
+              }
+              label={<Typography variant="body2">Match case</Typography>}
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  size="small"
+                  checked={matchExactWord}
+                  onChange={(e) => setMatchExactWord(e.target.checked)}
+                />
+              }
+              label={<Typography variant="body2">Match exact word</Typography>}
+            />
+          </Paper>
+        </ClickAwayListener>
+      </Popper>
+    </Box>
+  );
+};
+
+
+
+
+
+
+
+// TopToolbar.jsx
+import { ReportSearchBar } from "./ReportSearchBar"; // adjust path
+
+
+
+
+<Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
+  {onBack && ( ... )}
+
+  <ReportSearchBar />
+
+  <Button variant="outlined" startIcon={<UploadIcon />} onClick={onImport} size="small">
+
+
+
+
+
+
+
+
+
+
+
+// ReportCanvas.jsx
+
+useEffect(() => {
+  const handleSearchNavigate = (e) => {
+    const { rowId } = e.detail || {};
+    if (!rowId) return;
+    const index = rowOrder.indexOf(rowId);
+    if (index === -1) return;
+
+    rowVirtualizerRef.current.scrollToIndex(index, {
+      align: "center",
+      behavior: "smooth",
+    });
+
+    setHighlightedRowId(rowId);
+    if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
+    highlightTimeoutRef.current = setTimeout(() => {
+      setHighlightedRowId(null);
+    }, ROW_HIGHLIGHT_DURATION_MS);
+  };
+
+  window.addEventListener("report-search-navigate", handleSearchNavigate);
+  return () => window.removeEventListener("report-search-navigate", handleSearchNavigate);
+}, [rowOrder]);
+
+
+
+
+
+
+
+
+
+
+
