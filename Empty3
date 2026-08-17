@@ -1,745 +1,1239 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
-import {
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Button,
-  IconButton,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  TextField,
-  Autocomplete,
-  Box,
-  Typography,
-  CircularProgress,
-  FormHelperText,
-  Popper,
-  Paper,
-  List,
-  ListItemButton,
-  ListItemText,
-  Chip,
-  ClickAwayListener,
-} from "@mui/material";
+// ReportSearchBar
+
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import InputBase from "@mui/material/InputBase";
+import IconButton from "@mui/material/IconButton";
+import Typography from "@mui/material/Typography";
+import Box from "@mui/material/Box";
+import Tooltip from "@mui/material/Tooltip";
+import SearchIcon from "@mui/icons-material/Search";
 import CloseIcon from "@mui/icons-material/Close";
-import InfoIcon from "@mui/icons-material/Info";
-import QueryStatsIcon from "@mui/icons-material/QueryStats";
-import { fetchHeads } from "../api/analyticsApi";
-import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
-import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
-import { DatePicker } from "@mui/x-date-pickers/DatePicker";
-import dayjs from "dayjs";
+import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
+import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
+import { useAppDispatch, useAppSelector } from "../../store";
+import { setSelectedCell } from "../../store/templateSlice";
+import {
+  selectRowOrder,
+  selectRowsEntities,
+  selectCellsEntities,
+} from "../../store/selectors";
 
-import "dayjs/locale/en-gb";
+const DEBOUNCE_MS = 250;
+const COLLAPSED_WIDTH = 36;
+const EXPANDED_WIDTH = 360;
 
-// ADDED: cap on simultaneous head code selection
-const MAX_HEADS = 5;
+const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-// ADDED: fixed dialog dimensions so the box never resizes as content changes
-const DIALOG_WIDTH = 520;
-const DIALOG_HEIGHT = 680;
+const getCellSearchText = (cell) => {
+  if (!cell) return "";
+  if (cell.type === "TEXT") return cell.value || "";
+  if (cell.type === "FORMULA") return cell.expression || "";
+  if (cell.type?.startsWith("DB_")) {
+    return `${cell.source?.table || ""}.${cell.source?.column || ""}`;
+  }
+  return "";
+};
 
-export default function FilterDialog({
-  open,
-  onClose,
-  onApply,
-  reportsConfig = [],
-  currentFilters,
-  callApi,
-  user,
-  isApplying,
-}) {
-  const userCircleCode = user?.circleCode;
-  const userCircleName = user?.circleName;
-  const userBranchCode = user?.branch;
-  const userBranchName = user?.branchName;
+const makeMatcher = (query, matchCase, matchExactWord) => {
+  if (matchExactWord) {
+    const re = new RegExp(`\\b${escapeRegExp(query)}\\b`, matchCase ? "" : "i");
+    return (text) => !!text && re.test(text);
+  }
+  if (matchCase) {
+    return (text) => !!text && text.includes(query);
+  }
+  const q = query.toLowerCase();
+  return (text) => !!text && text.toLowerCase().includes(q);
+};
 
-  const [reportCode, setReportCode] = useState("");
-  const [viewCode, setViewCode] = useState("");
-
-  // CHANGED: head (single object) -> heads (array, max MAX_HEADS)
-  const [heads, setHeads] = useState([]);
-
-  const [reportDate, setReportDate] = useState("");
-
-  const [dateInputValue, setDateInputValue] = useState("");
-  const [datePickerKey, setDatePickerKey] = useState(0);
-
-  const [entity, setEntity] = useState(null);
-  const [entityInputValue, setEntityInputValue] = useState("");
-  const [entityOptions, setEntityOptions] = useState([]);
-  const [isEntityLoading, setIsEntityLoading] = useState(false);
-
-  const [headInputValue, setHeadInputValue] = useState("");
-  const [headOptions, setHeadOptions] = useState([]);
-  const [isHeadsLoading, setIsHeadsLoading] = useState(false);
-
-  // ADDED: dropdown open state + anchor ref for the search-only head field
-  const [isHeadDropdownOpen, setIsHeadDropdownOpen] = useState(false);
-  const headFieldRef = useRef(null);
-
-  const isCircleScope = viewCode.includes("CIRCLE");
-  const isBranchScope = viewCode.includes("BRANCH");
-  const MIN_ALLOWED_DATE = dayjs("2026-03-31").startOf("day");
-
-  const [etlDate, setEtlDate] = useState(null);
-
-  // Sync state when dialog opens
-  useEffect(() => {
-    if (open) {
-      setReportCode(currentFilters?.reportCode || "");
-      setViewCode(currentFilters?.viewCode || "");
-
-      setHeads(currentFilters?.heads || []);
-      setHeadInputValue("");
-      setHeadOptions([]);
-      setIsHeadDropdownOpen(false);
-
-      const initialDate = currentFilters?.reportDate || "";
-      setReportDate(initialDate);
-      setDateInputValue(
-        initialDate ? dayjs(initialDate).format("DD/MM/YYYY") : "",
-      );
-
-      // Restore Entity
-      if (currentFilters?.entityCode && currentFilters?.entityName) {
-        setEntity({
-          code: currentFilters.entityCode,
-          name: currentFilters.entityName,
-        });
-        setEntityInputValue(
-          `${currentFilters.entityCode} - ${currentFilters.entityName}`,
-        );
-      } else {
-        setEntity(null);
-        setEntityInputValue("");
-        setEntityOptions([]);
-      }
+const findRowMatch = (row, cellsById, testText) => {
+  if (testText(row.id)) {
+    return { rowId: row.id, cellId: row.cellIds?.[0] || null };
+  }
+  if (row.rowType === "DYNAMIC") {
+    return testText(row.dynamicConfig?.table)
+      ? { rowId: row.id, cellId: null }
+      : null;
+  }
+  const cellIds = row.cellIds || [];
+  for (let i = 0; i < cellIds.length; i++) {
+    const cell = cellsById[cellIds[i]];
+    if (!cell) continue;
+    if (testText(getCellSearchText(cell)) || testText(cell.id)) {
+      return { rowId: row.id, cellId: cell.id };
     }
-  }, [open, currentFilters]);
+  }
+  return null;
+};
 
-  const availableViews = useMemo(() => {
-    if (!reportCode) return [];
-    const report = reportsConfig.find((r) => r.reportCode === reportCode);
-    if (!report?.views) return [];
-    return [...report.views].sort((a, b) =>
-      a.displayName.localeCompare(b.displayName),
-    );
-  }, [reportCode, reportsConfig]);
+// Flat icon button: no circular ripple/hover background.
+const FlatIconButton = ({ children, sx, ...props }) => (
+  <IconButton
+    size="small"
+    disableRipple
+    disableFocusRipple
+    sx={{
+      p: 0.25,
+      bgcolor: "transparent",
+      color: "primary.main",
+      borderRadius: "50%",
+      "&:hover": { bgcolor: "action.hover", color: "primary.dark" },
+      ...sx,
+    }}
+    {...props}
+  >
+    {children}
+  </IconButton>
+);
 
-  // --- ENTITY FETCHING & AUTO-FILL LOGIC --- (unchanged)
-  useEffect(() => {
-    const delayDebounceFn = setTimeout(async () => {
-      if (entityInputValue && entityInputValue.length >= 2) {
-        setIsEntityLoading(true);
-        try {
-          let response;
-          let mappedData = [];
-
-          if (isCircleScope) {
-            response = await callApi(
-              `/CM/common-master/circle-codes`,
-              {},
-              "GET",
-            );
-            const data = response?.data || [];
-            mappedData = data.map((c) => ({
-              code: c.circleCode,
-              name: c.circleName,
-            }));
-          } else if (isBranchScope) {
-            response = await callApi(
-              `/CM/common-master/branches-code-name-only?q=${entityInputValue}&circleCode=`,
-              {},
-              "GET",
-            );
-            const data = response?.data || [];
-            mappedData = data.map((b) => ({ code: b.code, name: b.name }));
-          }
-
-          setEntityOptions(mappedData);
-        } catch (error) {
-          console.error("Error fetching entities:", error);
-          setEntityOptions([]);
-        } finally {
-          setIsEntityLoading(false);
-        }
-      } else {
-        setEntityOptions(entity ? [entity] : []);
-      }
-    }, 500);
-
-    return () => clearTimeout(delayDebounceFn);
-  }, [
-    entityInputValue,
-    isCircleScope,
-    isBranchScope,
-    callApi,
-    entity,
-    userCircleCode,
-    userCircleName,
-    userBranchCode,
-    userBranchName,
-  ]);
-
-  // --- HEAD CODE FETCHING LOGIC ---
-  // CHANGED: this field is now search-only — it no longer falls back to
-  // showing selected heads as options. It only ever holds live search results.
-  useEffect(() => {
-    const delayDebounceFn = setTimeout(async () => {
-      if (headInputValue && headInputValue.length >= 2 && reportCode) {
-        setIsHeadsLoading(true);
-        const data = await fetchHeads(callApi, reportCode, headInputValue);
-        setHeadOptions(data);
-        setIsHeadsLoading(false);
-        setIsHeadDropdownOpen(true);
-      } else {
-        setHeadOptions([]);
-        setIsHeadDropdownOpen(false);
-      }
-    }, 500);
-    return () => clearTimeout(delayDebounceFn);
-  }, [headInputValue, reportCode, callApi]);
-
-  // --- SYSTEM DATE FETCHING LOGIC --- (unchanged)
-  useEffect(() => {
-    const fetchSystemDate = async () => {
-      if (!open) return;
-      try {
-        const dateRes = await callApi("/PS/file/fincore-date", {}, "GET");
-        const etlRaw = dateRes?.data?.userDate;
-        const etl = etlRaw
-          ? dayjs(etlRaw.split("T")[0]).endOf("day")
-          : dayjs().endOf("day");
-        setEtlDate(etl);
-      } catch (e) {
-        console.error("Date error:", e);
-        setEtlDate(dayjs().endOf("day"));
-      }
-    };
-    fetchSystemDate();
-  }, [open, callApi]);
-
-  // ADDED: select a head from the dropdown — appends to heads[], clears
-  // the search field, and closes the dropdown so the user can search again.
-  const handleSelectHead = (option) => {
-    const alreadySelected = heads.some((h) => h.headCode === option.headCode);
-    if (alreadySelected || heads.length >= MAX_HEADS) return;
-
-    setHeads((prev) => [...prev, option]);
-    setHeadInputValue("");
-    setHeadOptions([]);
-    setIsHeadDropdownOpen(false);
-  };
-
-  // ADDED: remove a chip
-  const handleRemoveHead = (headCode) => {
-    setHeads((prev) => prev.filter((h) => h.headCode !== headCode));
-  };
-
-  const handleReset = () => {
-    setReportCode("");
-    setViewCode("");
-
-    setHeads([]);
-    setHeadInputValue("");
-    setHeadOptions([]);
-    setIsHeadDropdownOpen(false);
-
-    setEntity(null);
-    setEntityInputValue("");
-    setEntityOptions([]);
-
-    setReportDate("");
-    setDateInputValue("");
-    setDatePickerKey((prev) => prev + 1);
-  };
-
-  const handleApply = () => {
-    if (dateValidation.error) return;
-    onApply({
-      reportCode,
-      viewCode,
-      // Array of up to MAX_HEADS {headCode, headName} objects.
-      // Payload/API mapping to be wired up separately once backend is ready.
-      heads,
-      entityCode: entity?.code || "",
-      entityName: entity?.name || "",
-      reportDate,
-    });
-  };
-
-  const handlePaste = (event) => {
-    event.preventDefault();
-  };
-
-  const dateValidation = useMemo(() => {
-    const minDateStr = MIN_ALLOWED_DATE.format("DD/MM/YYYY");
-    const maxLimit = etlDate || dayjs().endOf("day");
-    const maxDateStr = maxLimit.format("DD/MM/YYYY");
-
-    if (!dateInputValue && !reportDate) {
-      return {
-        error: false,
-        text: `Allowed Range: ${minDateStr} - ${maxDateStr}`,
-      };
-    }
-
-    const containsMaskCharacters = /[a-zA-Z]/.test(dateInputValue);
-    const selectedDate = dayjs(reportDate);
-
-    if (containsMaskCharacters || !selectedDate.isValid()) {
-      return { error: true, text: "Please enter a valid date." };
-    }
-
-    if (selectedDate.year() < 2000) {
-      return { error: true, text: `Date cannot be prior to ${minDateStr}` };
-    }
-
-    if (selectedDate.isBefore(MIN_ALLOWED_DATE, "day")) {
-      return { error: true, text: `Date cannot be prior to ${minDateStr}` };
-    }
-
-    if (selectedDate.isAfter(maxLimit, "day")) {
-      return {
-        error: true,
-        text: `Future dates beyond ${maxDateStr} are not allowed.`,
-      };
-    }
-
-    return {
-      error: false,
-      text: `Allowed Range: ${minDateStr} - ${maxDateStr}`,
-    };
-  }, [reportDate, dateInputValue, etlDate, MIN_ALLOWED_DATE]);
-
-  const isApplyEnabled = useMemo(() => {
-    if (
-      !reportCode ||
-      !viewCode ||
-      heads.length === 0 ||
-      heads.length > MAX_HEADS ||
-      !reportDate ||
-      dateValidation.error
-    ) {
-      return false;
-    }
-    if (isCircleScope || isBranchScope) return !!entity?.code;
-    return true;
-  }, [
-    reportCode,
-    viewCode,
-    heads,
-    entity,
-    reportDate,
-    isCircleScope,
-    isBranchScope,
-    dateValidation.error,
-  ]);
-
-  return (
-    <Dialog
-      open={open}
-      onClose={(event, reason) => {
-        if (reason === "backdropClick") return;
-        if (reason === "escapeKeyDown") return;
-        onClose();
-      }}
-      // CHANGED: fixed, non-growing dialog box via PaperProps
-      PaperProps={{
-        sx: {
-          width: DIALOG_WIDTH,
-          maxWidth: DIALOG_WIDTH,
-          height: DIALOG_HEIGHT,
-          maxHeight: DIALOG_HEIGHT,
-        },
+// VSCode-style "Aa" / "ab" inline toggle.
+const OptionToggle = ({ label, underline, active, onClick, title }) => (
+  <Tooltip title={title}>
+    <Box
+      onClick={onClick}
+      sx={{
+        width: 22,
+        height: 22,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        borderRadius: "3px",
+        cursor: "pointer",
+        fontSize: "0.7rem",
+        fontWeight: 600,
+        lineHeight: 1,
+        color: active ? "primary.main" : "text.secondary",
+        bgcolor: active ? "action.selected" : "transparent",
+        border: active ? "1px solid" : "1px solid transparent",
+        borderColor: active ? "primary.main" : "transparent",
+        textDecoration: underline ? "underline" : "none",
+        "&:hover": { bgcolor: active ? "action.selected" : "action.hover" },
       }}
     >
-      <DialogTitle
+      {label}
+    </Box>
+  </Tooltip>
+);
+
+export const ReportSearchBar = () => {
+  const dispatch = useAppDispatch();
+  const rowOrder = useAppSelector(selectRowOrder);
+  const rowsById = useAppSelector(selectRowsEntities);
+  const cellsById = useAppSelector(selectCellsEntities);
+
+  const [expanded, setExpanded] = useState(false);
+  const [inputValue, setInputValue] = useState("");
+  const [query, setQuery] = useState("");
+  const [matchCase, setMatchCase] = useState(false);
+  const [matchExactWord, setMatchExactWord] = useState(false);
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  const inputRef = useRef(null);
+  const containerRef = useRef(null);
+  const lastNavigatedKeyRef = useRef(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => setQuery(inputValue.trim()), DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [inputValue]);
+
+  const collapseIfEmpty = useCallback(() => {
+    if (!inputValue.trim()) setExpanded(false);
+  }, [inputValue]);
+
+  const handleExpand = () => {
+    setExpanded(true);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  // Collapse on outside click when there's no active query.
+  useEffect(() => {
+    if (!expanded) return;
+    const handleClickAway = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        collapseIfEmpty();
+      }
+    };
+    document.addEventListener("mousedown", handleClickAway);
+    return () => document.removeEventListener("mousedown", handleClickAway);
+  }, [expanded, collapseIfEmpty]);
+
+  // Ctrl/Cmd+F opens & focuses; Escape closes.
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        handleExpand();
+        inputRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  const matches = useMemo(() => {
+    if (!query) return [];
+    const testText = makeMatcher(query, matchCase, matchExactWord);
+    const result = [];
+    for (let i = 0; i < rowOrder.length; i++) {
+      const row = rowsById[rowOrder[i]];
+      if (!row) continue;
+      const match = findRowMatch(row, cellsById, testText);
+      if (match) result.push(match);
+    }
+    return result;
+  }, [rowOrder, rowsById, cellsById, query, matchCase, matchExactWord]);
+
+  const navigateToIndex = useCallback(
+    (idx) => {
+      const match = matches[idx];
+      if (!match) return;
+      const key = `${match.rowId}:${match.cellId || ""}`;
+      if (lastNavigatedKeyRef.current === key) return;
+      lastNavigatedKeyRef.current = key;
+
+      dispatch(
+        setSelectedCell({ rowId: match.rowId, cellId: match.cellId || "" }),
+      );
+      window.dispatchEvent(
+        new CustomEvent("report-search-navigate", {
+          detail: { rowId: match.rowId },
+        }),
+      );
+    },
+    [matches, dispatch],
+  );
+
+  // Re-jump only when the search itself changes, not on every matches recompute.
+  useEffect(() => {
+    setCurrentIndex(0);
+    lastNavigatedKeyRef.current = null;
+    if (matches.length > 0) navigateToIndex(0);
+    else if (query) {
+        dispatch(setSelectedCell(null));
+        window.dispatchEvent(new CustomEvent("report-search-clear"));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, matchCase, matchExactWord]);
+
+  const handleNext = useCallback(() => {
+    if (matches.length === 0) return;
+    const next = (currentIndex + 1) % matches.length;
+    setCurrentIndex(next);
+    navigateToIndex(next);
+  }, [matches, currentIndex, navigateToIndex]);
+
+  const handlePrev = useCallback(() => {
+    if (matches.length === 0) return;
+    const prev = (currentIndex - 1 + matches.length) % matches.length;
+    setCurrentIndex(prev);
+    navigateToIndex(prev);
+  }, [matches, currentIndex, navigateToIndex]);
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.shiftKey ? handlePrev() : handleNext();
+    } else if (e.key === "Escape") {
+      handleClear();
+      inputRef.current?.blur();
+      setExpanded(false);
+    }
+  };
+
+  const handleClear = () => {
+    setInputValue("");
+    setQuery("");
+    setCurrentIndex(0);
+    lastNavigatedKeyRef.current = null;
+    dispatch(setSelectedCell(null));
+    window.dispatchEvent(new CustomEvent("report-search-clear"));
+  };
+
+  useEffect(() => {
+    return () => {
+        dispatch(setSelectedCell(null));
+        window.dispatchEvent(new CustomEvent("report-search-clear"));
+    }
+  }, []);
+
+  const hasQuery = inputValue.trim().length > 0;
+  const noResults = query.length > 0 && matches.length === 0;
+
+  return (
+    <Box
+      ref={containerRef}
+      sx={{
+        display: "flex",
+        alignItems: "center",
+        height: 40,
+        width: expanded ? EXPANDED_WIDTH : COLLAPSED_WIDTH,
+        transition: "width 220ms cubic-bezier(0.4, 0, 0.2, 1)",
+        overflow: "hidden",
+        borderRadius: 1,
+        border: "1px solid",
+        borderColor: expanded ? "divider" : "transparent",
+        bgcolor: expanded ? "none" : "transparent",
+        px: expanded ? 1 : 0,
+        color: "primary.main",
+      }}
+    >
+      <Tooltip title="Search data">
+        <FlatIconButton
+          onClick={expanded ? handleNext : handleExpand}
+          sx={{
+            flexShrink: 0,
+            p: 0.6,
+            bgcolor: expanded ? "transparent" : "action.hover",
+            "&:hover": { bgcolor: expanded ? "transparent" : "action.hover" },
+          }}
+        >
+          <SearchIcon color={noResults ? "error.main" : "primary.main"} />
+        </FlatIconButton>
+      </Tooltip>
+
+      <InputBase
+        inputRef={inputRef}
+        placeholder="Search rows..."
+        value={inputValue}
+        onChange={(e) => setInputValue(e.target.value)}
+        onKeyDown={handleKeyDown}
+        sx={{
+          ml: 1,
+          flex: 1,
+          fontSize: "0.85rem",
+          minWidth: 0,
+          opacity: expanded ? 1 : 0,
+          transition: "opacity 150ms ease 80ms",
+        }}
+      />
+
+      <Box
         sx={{
           display: "flex",
-          justifyContent: "space-between",
           alignItems: "center",
-          gap: 2,
+          gap: 0.5,
           flexShrink: 0,
+          whiteSpace: "nowrap",
+        }}
+      >
+        {hasQuery && (
+          <Typography
+            variant="caption"
+            color={noResults ? "error" : "text.secondary"}
+            sx={{ minWidth: 40, textAlign: "center" }}
+          >
+            {query.length === 0
+              ? "…"
+              : noResults
+                ? "No results"
+                : `${currentIndex + 1} of ${matches.length}`}
+          </Typography>
+        )}
+
+        <OptionToggle
+          label="Aa"
+          active={matchCase}
+          onClick={() => setMatchCase((v) => !v)}
+          title="Match case"
+        />
+        <OptionToggle
+          label="ab"
+          underline
+          active={matchExactWord}
+          onClick={() => setMatchExactWord((v) => !v)}
+          title="Match whole word"
+        />
+
+        <Box sx={{ display: "flex", flexDirection: "column", ml: 0.5 }}>
+          <FlatIconButton
+            onClick={handlePrev}
+            disabled={matches.length === 0}
+            sx={{ p: 0 }}
+          >
+            <KeyboardArrowUpIcon sx={{ fontSize: "1rem" }} />
+          </FlatIconButton>
+          <FlatIconButton
+            onClick={handleNext}
+            disabled={matches.length === 0}
+            sx={{ p: 0 }}
+          >
+            <KeyboardArrowDownIcon sx={{ fontSize: "1rem" }} />
+          </FlatIconButton>
+        </Box>
+
+        <FlatIconButton
+          onClick={() => {
+            handleClear();
+            setExpanded(false);
+          }}
+        >
+          <CloseIcon fontSize="small" />
+        </FlatIconButton>
+      </Box>
+    </Box>
+  );
+};
+
+
+
+
+
+
+
+
+
+
+// ReportCanvas
+
+import { useRef, useMemo, useCallback, memo, useEffect, useState } from "react";
+import Box from "@mui/material/Box";
+import Paper from "@mui/material/Paper";
+import Typography from "@mui/material/Typography";
+import Chip from "@mui/material/Chip";
+import GlobalStyles from "@mui/material/GlobalStyles";
+import { alpha } from "@mui/material/styles";
+import { useVirtualizer, elementScroll } from "@tanstack/react-virtual";
+import { useAppDispatch, useAppSelector } from "../../store";
+import { setSelectedCell } from "../../store/templateSlice";
+import {
+  selectRowOrder,
+  selectColumns,
+  selectSelectedCell,
+  selectFormulaMode,
+  selectReportMeta,
+  selectHiddenCells,
+} from "../../store/selectors";
+
+
+const ROW_HIGHLIGHT_ANIMATION_NAME = "reportRowAddedPulse";
+const ROW_HIGHLIGHT_DURATION_MS = 3000;
+
+const RowHighlightGlobalStyles = () => (
+  <GlobalStyles
+    styles={(theme) => {
+      const tint = theme.palette.info.main;
+      return {
+        [`@keyframes ${ROW_HIGHLIGHT_ANIMATION_NAME}`]: {
+          "0%": {
+            backgroundColor: alpha(tint, 0),
+            boxShadow: `inset 0 0 0 0px ${alpha(tint, 0)}`,
+          },
+          "8%": {
+            backgroundColor: alpha(tint, 0.32),
+            boxShadow: `inset 0 0 0 2px ${alpha(tint, 0.65)}`,
+          },
+          "75%": {
+            backgroundColor: alpha(tint, 0.22),
+            boxShadow: `inset 0 0 0 2px ${alpha(tint, 0.45)}`,
+          },
+          "100%": {
+            backgroundColor: alpha(tint, 0),
+            boxShadow: `inset 0 0 0 0px ${alpha(tint, 0)}`,
+          },
+        },
+      };
+    }}
+  />
+);
+
+const getRowTypeColor = (type) => {
+  const colors = {
+    HEADER: "#1976d2",
+    DATA: "#2c8aa8",
+    SEPARATOR: "#757575",
+    DYNAMIC: "#388e3c",
+    FOOTER: "#f57c00",
+  };
+  return colors[type] || "#757575";
+};
+
+const getCellValue = (cell) => {
+  if (cell.type === "TEXT") return cell.value || "Click to edit";
+  if (cell.type === "FORMULA") return `= ${cell.expression || "formula"}`;
+  if (cell.type?.startsWith("DB_")) {
+    const table = cell.source?.table || "";
+    const column = cell.source?.column || "";
+    if (!table || !column) return `${cell.type}(?)`;
+    const aggType = cell.type.replace("DB_", "");
+    if (cell.type === "DB_VALUE") {
+      return `${table}.${column}`;
+    }
+    return `${aggType}(${table}.${column})`;
+  }
+  return "Empty cell";
+};
+
+const CellComponent = memo(
+  ({
+    cellId,
+    rowId,
+    colId,
+    isHighlighted,
+    cellIndex,
+    isSelected,
+    formulaMode,
+    columnWidths,
+    columnAlign,
+    isHidden,
+    onCellClick,
+  }) => {
+    const cell = useAppSelector(
+      (state) => state.template.present.cells[cellId],
+      (a, b) => {
+        if (!a && !b) return true;
+        if (!a || !b) return false;
+        return (
+          a.id === b.id &&
+          a.type === b.type &&
+          a.value === b.value &&
+          a.expression === b.expression &&
+          a.source?.table === b.source?.table &&
+          a.source?.column === b.source?.column &&
+          a.render?.colspan === b.render?.colspan &&
+          a.render?.rowspan === b.render?.rowspan &&
+          a.render?.bold === b.render?.bold &&
+          a.render?.align === b.render?.align &&
+          a.format?.bgColor === b.format?.bgColor
+        );
+      },
+    );
+
+    const handleClick = useCallback(() => {
+      onCellClick(rowId, cellId, colId);
+    }, [rowId, cellId, colId, onCellClick]);
+
+    const colspan = cell?.render?.colspan || 1;
+    const rowspan = cell?.render?.rowspan || 1;
+
+    const cellWidth = useMemo(() => {
+      let totalWidth = 0;
+      for (let i = 0; i < colspan && cellIndex + i < columnWidths.length; i++) {
+        totalWidth += columnWidths[cellIndex + i];
+      }
+      return totalWidth;
+    }, [colspan, cellIndex, columnWidths]);
+
+    if (isHidden || !cell) return null;
+
+    return (
+      <Box
+        onClick={handleClick}
+        sx={{
+          cursor: formulaMode ? "crosshair" : "pointer",
+          position: "relative",
+          bgcolor:
+            cell.format?.bgColor && cell.format.bgColor !== "#ffffff"
+              ? cell.format.bgColor
+              : isSelected
+                ? "#e3f2fd"
+                : formulaMode
+                  ? "#fff9c4"
+                  : "white",
+          animation: isHighlighted ? `${ROW_HIGHLIGHT_ANIMATION_NAME} ${ROW_HIGHLIGHT_DURATION_MS}ms cubic-bezier(0.22, 1, 0.36, 1)` : "none",
+          border: isSelected ? "2px solid #1976d2" : "1px solid #e0e0e0",
+          boxSizing: "border-box",
+          fontWeight: cell.render?.bold ? 600 : 400,
+          textAlign: cell.render?.align || columnAlign || "left",
+          width: `${cellWidth}px`,
+          minWidth: `${cellWidth}px`,
+          gridColumn: colspan > 1 ? `span ${colspan}` : undefined,
+          gridRow: rowspan > 1 ? `span ${rowspan}` : undefined,
+          p: 1,
+          zIndex: isSelected ? 10 : 1,
+          overflow: "hidden",
+          "&:hover": {
+            bgcolor: isSelected
+              ? "#e3f2fd"
+              : formulaMode
+                ? "#fff59d"
+                : "#f5f5f5",
+            zIndex: isSelected ? 10 : 2,
+          },
         }}
       >
         <Typography
-          variant="h6"
-          fontWeight="bold"
-          sx={{ display: "flex", alignItems: "center", gap: 2 }}
+          variant="body2"
+          sx={{
+            fontSize: "0.8rem",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            wordBreak: "break-all",
+          }}
         >
-          <QueryStatsIcon /> Drill Down Filters
+          {getCellValue(cell)}
         </Typography>
-        <IconButton onClick={onClose} size="small" disabled={isApplying}>
-          <CloseIcon />
-        </IconButton>
-      </DialogTitle>
+        {colspan > 1 && (
+          <Chip
+            label={`cs:${colspan}`}
+            size="small"
+            sx={{
+              position: "absolute",
+              top: 2,
+              right: 2,
+              height: 16,
+              fontSize: "0.6rem",
+            }}
+          />
+        )}
+        {rowspan > 1 && (
+          <Chip
+            label={`rs:${rowspan}`}
+            size="small"
+            color="secondary"
+            sx={{
+              position: "absolute",
+              top: colspan > 1 ? 20 : 2,
+              right: 2,
+              height: 16,
+              fontSize: "0.6rem",
+            }}
+          />
+        )}
+      </Box>
+    );
+  },
+  (prevProps, nextProps) => {
+    return (
+      prevProps.cellId === nextProps.cellId &&
+      prevProps.isSelected === nextProps.isSelected &&
+      prevProps.formulaMode === nextProps.formulaMode &&
+      prevProps.isHidden === nextProps.isHidden &&
+      prevProps.columnWidths === nextProps.columnWidths &&
+      prevProps.columnAlign === nextProps.columnAlign
+    );
+  },
+);
 
-      {/* CHANGED: DialogContent scrolls internally — dialog itself stays fixed size */}
-      <DialogContent dividers sx={{ overflowY: "auto" }}>
-        <Box display="flex" flexDirection="column" gap={3} py={1}>
-          {/* Report Code Selection */}
-          <FormControl size="small" fullWidth>
-            <InputLabel id="dialog-report-label">Select Report *</InputLabel>
-            <Select
-              labelId="dialog-report-label"
-              value={reportCode}
-              label="Select Report *"
-              disabled={isApplying}
-              onChange={(e) => {
-                setReportCode(e.target.value);
-                setViewCode("");
-                setHeads([]);
-                setHeadInputValue("");
-                setHeadOptions([]);
-                setIsHeadDropdownOpen(false);
-                setEntity(null);
-                setEntityInputValue("");
-                setEntityOptions([]);
-              }}
-            >
-              {reportsConfig.map((report) => (
-                <MenuItem key={report.reportCode} value={report.reportCode}>
-                  {report.displayName}
-                </MenuItem>
-              ))}
-            </Select>
-            <FormHelperText
-              sx={{
-                fontStyle: "italic",
-                fontSize: "0.75rem",
-                display: "flex",
-                alignItems: "center",
-                gap: "4px",
-                lineHeight: 1.5,
-              }}
-            >
-              <InfoIcon sx={{ fontSize: "0.625rem" }} />
-              Please select a report to initiate drill-down analysis.
-            </FormHelperText>
-          </FormControl>
+CellComponent.displayName = "CellComponent";
 
-          {/* ================================================================= */}
-          {/* CHANGED BLOCK: Head Code — search-only field + overlay dropdown +  */}
-          {/* selected codes shown as chips below, in their own fixed-height row */}
-          {/* ================================================================= */}
-          <Box>
-            <ClickAwayListener onClickAway={() => setIsHeadDropdownOpen(false)}>
-              <Box ref={headFieldRef} sx={{ position: "relative" }}>
-                <TextField
-                  size="small"
-                  fullWidth
-                  label={`Search Head Code * (${heads.length}/${MAX_HEADS})`}
-                  variant="outlined"
-                  value={headInputValue}
-                  disabled={!reportCode || isApplying || heads.length >= MAX_HEADS}
-                  placeholder={
-                    heads.length >= MAX_HEADS
-                      ? `Maximum ${MAX_HEADS} selected`
-                      : "Type at least 2 characters..."
-                  }
-                  inputProps={{ maxLength: 50 }}
-                  onPaste={handlePaste}
-                  onChange={(e) => {
-                    const filteredValue = e.target.value
-                      .replace(/[^a-zA-Z0-9 ]/g, "")
-                      .replace(/\s{2,}/g, " ");
-                    setHeadInputValue(filteredValue);
-                  }}
-                  onFocus={() => {
-                    if (headOptions.length > 0) setIsHeadDropdownOpen(true);
-                  }}
-                  InputProps={{
-                    endAdornment: isHeadsLoading ? (
-                      <CircularProgress color="inherit" size={18} />
-                    ) : null,
-                  }}
-                  helperText={
-                    <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                      <InfoIcon sx={{ fontSize: "0.625rem" }} />
-                      <em>Search and click a result to add it below. Up to 5 head codes.</em>
-                    </span>
-                  }
+const RowContent = memo(
+  ({
+    rowId,
+    gridTemplateColumns,
+    columnWidths,
+    selectedCellId,
+    formulaMode,
+    hiddenCellsMap,
+    isHighlighted,
+    onCellClick,
+    onDynamicRowClick,
+  }) => {
+    const row = useAppSelector((state) => state.template.present.rows[rowId]);
+
+    useEffect(() => {
+      if(isHighlighted) {
+        console.log("Highlighted row: ", rowId);
+      }
+    }, [isHighlighted, rowId])
+
+    const columns = useAppSelector(selectColumns);
+
+    const handleDynamicClick = useCallback(() => {
+      onDynamicRowClick(rowId);
+    }, [rowId, onDynamicRowClick]);
+
+    if (!row) return null;
+
+    return (
+      <Box
+        sx={{
+          display: "flex",
+          borderLeft: `3px solid ${getRowTypeColor(row.rowType)}`,
+          "&:hover": { bgcolor: "#f9f9f9" },
+          minHeight: 60,
+          position: "relative",
+          //backgroundColor: isHighlighted ? "red" : "transparent"
+          animation: isHighlighted
+            ? `${ROW_HIGHLIGHT_ANIMATION_NAME} ${ROW_HIGHLIGHT_DURATION_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`
+            : "none",
+        }}
+      >
+        <Box
+          sx={{
+            bgcolor: "#fafafa",
+            borderRight: "1px solid #e0e0e0",
+            textAlign: "center",
+            width: 80,
+            minWidth: 80,
+            flexShrink: 0,
+            p: 0.5,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "flex-start",
+            paddingTop: 1,
+          }}
+        >
+          <Typography
+            variant="caption"
+            display="block"
+            color="text.secondary"
+            sx={{ fontSize: "0.65rem" }}
+          >
+            {row.id}
+          </Typography>
+          <Chip
+            label={row.rowType}
+            size="small"
+            sx={{
+              fontSize: "0.6rem",
+              height: 18,
+              bgcolor: getRowTypeColor(row.rowType),
+              color: "white",
+              fontWeight: 600,
+              mt: 0.5,
+            }}
+          />
+        </Box>
+
+        {row.rowType === "DYNAMIC" ? (
+          <Box
+            onClick={handleDynamicClick}
+            sx={{
+              flex: 1,
+              bgcolor: selectedCellId === null ? "#c8e6c9" : "#e8f5e9",
+              fontStyle: "italic",
+              color: "text.secondary",
+              cursor: formulaMode ? "not-allowed" : "pointer",
+              border:
+                selectedCellId === null
+                  ? "2px solid #388e3c"
+                  : "1px solid #e0e0e0",
+              opacity: formulaMode ? 0.6 : 1,
+              p: 1,
+              "&:hover": { bgcolor: formulaMode ? "#e8f5e9" : "#c8e6c9" },
+            }}
+          >
+            Dynamic rows from {row.dynamicConfig?.table || "database"} - Click
+            to configure
+            {formulaMode && (
+              <Typography variant="caption" display="block" color="error">
+                (Cannot use in formulas)
+              </Typography>
+            )}
+          </Box>
+        ) : (
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns,
+              flex: 1,
+            }}
+          >
+            {row.cellIds?.map((cellId, cellIndex) => {
+              const column = columns[cellIndex];
+              if (!column) return null;
+
+              return (
+                <CellComponent
+                  key={cellId}
+                  cellId={cellId}
+                  rowId={rowId}
+                  isHighlighted={isHighlighted}
+                  colId={column.id}
+                  cellIndex={cellIndex}
+                  isSelected={selectedCellId === cellId}
+                  formulaMode={formulaMode}
+                  columnWidths={columnWidths}
+                  columnAlign={column.format?.align || "left"}
+                  isHidden={hiddenCellsMap.get(`${rowId}-${cellId}`) || false}
+                  onCellClick={onCellClick}
                 />
+              );
+            })}
+          </Box>
+        )}
+      </Box>
+    );
+  },
+  (prevProps, nextProps) => {
+    return (
+      prevProps.rowId === nextProps.rowId &&
+      prevProps.selectedCellId === nextProps.selectedCellId &&
+      prevProps.formulaMode === nextProps.formulaMode &&
+      prevProps.hiddenCellsMap === nextProps.hiddenCellsMap &&
+      prevProps.isHighlighted === nextProps.isHighlighted &&
+      prevProps.gridTemplateColumns === nextProps.gridTemplateColumns &&
+      prevProps.columnWidths === nextProps.columnWidths
+    );
+  },
+);
 
-                {/* Overlay dropdown — does not affect layout/dialog size */}
-                <Popper
-                  open={isHeadDropdownOpen}
-                  anchorEl={headFieldRef.current}
-                  placement="bottom-start"
-                  style={{ zIndex: 1400, width: headFieldRef.current?.offsetWidth }}
-                >
-                  <Paper elevation={4} sx={{ maxHeight: 220, overflowY: "auto", mt: 0.5 }}>
-                    {isHeadsLoading ? (
-                      <Box sx={{ p: 1.5, display: "flex", alignItems: "center", gap: 1 }}>
-                        <CircularProgress size={16} />
-                        <Typography variant="body2" color="text.secondary">
-                          Searching...
-                        </Typography>
-                      </Box>
-                    ) : headOptions.length === 0 ? (
-                      <Box sx={{ p: 1.5 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          No match found
-                        </Typography>
-                      </Box>
-                    ) : (
-                      <List dense disablePadding>
-                        {headOptions.map((option) => {
-                          const alreadySelected = heads.some(
-                            (h) => h.headCode === option.headCode,
-                          );
-                          return (
-                            <ListItemButton
-                              key={option.headCode}
-                              disabled={alreadySelected || heads.length >= MAX_HEADS}
-                              onClick={() => handleSelectHead(option)}
-                            >
-                              <ListItemText
-                                primary={`${option.headCode} - ${option.headName}`}
-                                secondary={alreadySelected ? "Already selected" : null}
-                              />
-                            </ListItemButton>
-                          );
-                        })}
-                      </List>
-                    )}
-                  </Paper>
-                </Popper>
-              </Box>
-            </ClickAwayListener>
+RowContent.displayName = "RowContent";
 
-            {/* Selected head codes — fixed-height chip row directly under the search field */}
+export const ReportCanvas = memo(() => {
+  const dispatch = useAppDispatch();
+  const parentRef = useRef(null);
+  const headerScrollRef = useRef(null);
+
+  const rowOrder = useAppSelector(selectRowOrder);
+  const columns = useAppSelector(selectColumns);
+  const selectedCell = useAppSelector(selectSelectedCell);
+  const formulaMode = useAppSelector(selectFormulaMode);
+  const reportMeta = useAppSelector(selectReportMeta);
+  const hiddenCells = useAppSelector(selectHiddenCells);
+  const rows = useAppSelector((state) => state.template.present.rows);
+
+  const hiddenCellsMap = useMemo(() => {
+    const map = new Map();
+    hiddenCells.forEach((key) => map.set(key, true));
+    return map;
+  }, [hiddenCells]);
+
+  const calculateColumnWidths = useMemo(() => {
+    if (!parentRef.current) return columns.map(() => 150);
+
+    const containerWidth = parentRef.current.clientWidth - 80;
+    const hasAnyWidth = columns.some((col) => col.format?.width);
+
+    if (!hasAnyWidth) {
+      const equalWidth = Math.floor(containerWidth / columns.length);
+      return columns.map(() => equalWidth);
+    }
+
+    const totalSpecifiedWidth = columns.reduce(
+      (sum, col) => sum + (col.format?.width || 1),
+      0,
+    );
+    return columns.map((col) => {
+      const colWidth = col.format?.width || 1;
+      return Math.floor((colWidth / totalSpecifiedWidth) * containerWidth);
+    });
+  }, [columns, parentRef.current?.clientWidth]);
+
+  const gridTemplateColumns = useMemo(
+    () => calculateColumnWidths.map((width) => `${width}px`).join(" "),
+    [calculateColumnWidths],
+  );
+
+  const easeInOutQuint = (t) =>
+    t < 0.5 ? 16 * t * t * t * t * t : 1 - Math.pow(-2 * t + 2, 5) / 2;
+
+  const ANIMATION_DURATION_MS = 400;
+  const MAX_ANIMATED_DISTANCE_PX = 4000; // ~ a few thousand rows' worth
+
+  const scrollAnimationRef = useRef(null);
+
+  const smoothScrollToFn = useCallback((offset, canSmooth, instance) => {
+    const scrollElement = instance.scrollElement;
+    if (!scrollElement) return;
+
+    const start = scrollElement.scrollTop;
+    const distance = Math.abs(offset - start);
+    const wantsAnimation = canSmooth?.behavior === "smooth";
+
+    if (!wantsAnimation || distance > MAX_ANIMATED_DISTANCE_PX) {
+      scrollAnimationRef.current = null; // cancel any in-flight animation
+      elementScroll(offset, { ...canSmooth, behavior: "auto" }, instance);
+      return;
+    }
+
+    const startTime = (scrollAnimationRef.current = Date.now());
+
+    const run = () => {
+      // A newer scroll request (or unmount) superseded this one — bail out.
+      if (scrollAnimationRef.current !== startTime) return;
+
+      const elapsed = (Date.now() - startTime) / ANIMATION_DURATION_MS;
+      const progress = easeInOutQuint(Math.min(elapsed, 1));
+      const interpolated = start + (offset - start) * progress;
+
+      elementScroll(interpolated, { ...canSmooth, behavior: "auto" }, instance);
+
+      if (elapsed < 1) {
+        requestAnimationFrame(run);
+      }
+    };
+
+    requestAnimationFrame(run);
+  }, []);
+
+  const rowVirtualizer = useVirtualizer({
+    count: rowOrder.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: useCallback(() => 60, []),
+    overscan: 12,
+    scrollToFn: smoothScrollToFn,
+  });
+
+  const rowVirtualizerRef = useRef(rowVirtualizer);
+  rowVirtualizerRef.current = rowVirtualizer;
+
+  // ---- Scroll-to & highlight a newly added row ----
+  // Detected by diffing rowOrder against its previous value rather than a
+  // dedicated Redux action, so this works regardless of which flow added
+  // the row (Add Row dialog, duplicate, undo of a delete, etc).
+  const [highlightedRowId, setHighlightedRowId] = useState(null);
+  const prevRowOrderRef = useRef(rowOrder);
+  const highlightTimeoutRef = useRef(null);
+
+  useEffect(() => {
+    const prevOrder = prevRowOrderRef.current;
+    prevRowOrderRef.current = rowOrder;
+
+    if (prevOrder === rowOrder || rowOrder.length <= prevOrder.length) {
+      return;
+    }
+
+    const prevIds = new Set(prevOrder);
+    const addedRowId = rowOrder.find((id) => !prevIds.has(id));
+    console.log("Added Row: ", addedRowId);
+    
+    if (!addedRowId) return;
+
+    const addedIndex = rowOrder.indexOf(addedRowId);
+
+    rowVirtualizerRef.current.scrollToIndex(addedIndex, {
+      align: "center",
+      behavior: "smooth",
+    });
+
+    setHighlightedRowId(addedRowId);
+    console.log("HighlightedRowId set to: ", addedRowId);
+    
+    if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
+    highlightTimeoutRef.current = setTimeout(() => {
+      setHighlightedRowId(null);
+    }, ROW_HIGHLIGHT_DURATION_MS);
+  }, [rowOrder]);
+
+  // Guard against a highlight timer or in-flight scroll animation trying to
+  // update state after the canvas has unmounted.
+  useEffect(() => {
+    return () => {
+      scrollAnimationRef.current = null;
+      if (highlightTimeoutRef.current)
+        clearTimeout(highlightTimeoutRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (highlightTimeoutRef.current)
+        clearTimeout(highlightTimeoutRef.current);
+    };
+  }, []);
+
+  // useEffect(() => {
+  //   const handleSearchNavigate = (e) => {
+  //     const { rowId } = e.detail || {};
+  //     if (!rowId) return;
+  //     const index = rowOrder.indexOf(rowId);
+  //     if (index === -1) return;
+
+  //     rowVirtualizerRef.current.scrollToIndex(index, {
+  //       align: "center",
+  //       behavior: "smooth",
+  //     });
+
+  //     setHighlightedRowId(rowId);
+  //     if (highlightTimeoutRef.current)
+  //       clearTimeout(highlightTimeoutRef.current);
+  //     highlightTimeoutRef.current = setTimeout(() => {
+  //       setHighlightedRowId(null);
+  //     }, ROW_HIGHLIGHT_DURATION_MS);
+  //   };
+
+  //   window.addEventListener("report-search-navigate", handleSearchNavigate);
+  //   return () =>
+  //     window.removeEventListener(
+  //       "report-search-navigate",
+  //       handleSearchNavigate,
+  //     );
+  // }, [rowOrder]);
+
+  const rowIndexMap = useMemo(() => {
+    const map = new Map();
+    rowOrder.forEach((id, i) => map.set(id, i));
+    return map;
+  }, [rowOrder]);
+
+  useEffect(() => {
+    const handleSearchNavigate = (e) => {
+      const { rowId } = e.detail || {};
+      if (!rowId) return;
+      const index = rowIndexMap.get(rowId);
+      if (index === undefined) return;
+
+      rowVirtualizerRef.current.scrollToIndex(index, {
+        align: "center",
+        behavior: "smooth",
+      });
+
+      setHighlightedRowId(rowId);
+      if (highlightTimeoutRef.current)
+        clearTimeout(highlightTimeoutRef.current);
+      highlightTimeoutRef.current = setTimeout(() => {
+        setHighlightedRowId(null);
+      }, ROW_HIGHLIGHT_DURATION_MS);
+    };
+
+    window.addEventListener("report-search-navigate", handleSearchNavigate);
+    return () =>
+      window.removeEventListener(
+        "report-search-navigate",
+        handleSearchNavigate,
+      );
+  }, [rowIndexMap]);
+
+  useEffect(() => {
+    const handleSearchClear = () => {
+      if(highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
+      setHighlightedRowId(null);
+    }
+    window.addEventListener("report-search-clear", handleSearchClear);
+    return () =>
+      window.removeEventListener("report-search-clear", handleSearchClear);
+  }, []);
+
+  const handleCellClick = useCallback(
+    (rowId, cellId, colId) => {
+      const row = rows[rowId];
+
+      if (formulaMode) {
+        // console.log("Ok inside", `cell_${rowId}_${colId}`);
+        if (row?.rowType === "DYNAMIC") return;
+        const cellRef = `cell_${rowId}_${colId}`;
+        window.dispatchEvent(
+          new CustomEvent("formula-cell-selected", { detail: cellRef }),
+        );
+      } else {
+        dispatch(setSelectedCell({ rowId, cellId }));
+      }
+    },
+    [rows, dispatch, formulaMode],
+  );
+
+  const handleDynamicRowClick = useCallback(
+    (rowId) => {
+      if (!formulaMode) {
+        dispatch(setSelectedCell({ rowId, cellId: "" }));
+      }
+    },
+    [dispatch, formulaMode],
+  );
+
+
+  const handleScroll = useCallback(() => {
+    if (parentRef.current && headerScrollRef.current) {
+      headerScrollRef.current.scrollLeft = parentRef.current.scrollLeft;
+    }
+  }, []);
+
+  const virtualItems = rowVirtualizer.getVirtualItems();
+
+  return (
+    <>
+      <RowHighlightGlobalStyles />
+      <Box
+        sx={{
+          flex: 1,
+          // bgcolor: formulaMode ? "#fff3e0" : "#f5f7fa",
+          p: 3,
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          cursor: formulaMode ? "crosshair" : "default",
+        }}
+      >
+        <Paper
+          elevation={3}
+          sx={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            bgcolor: "white",
+            p: 2,
+            overflow: "hidden",
+            boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
+          }}
+        >
+          {formulaMode && (
             <Box
               sx={{
-                mt: 1,
-                minHeight: 40,
-                p: 1,
-                display: "flex",
-                flexWrap: "wrap",
-                gap: 0.75,
-                alignItems: "flex-start",
-                alignContent: "flex-start",
-                border: "1px solid",
-                borderColor: "divider",
+                mb: 2,
+                p: 1.5,
+                bgcolor: "#ff9800",
+                color: "white",
                 borderRadius: 1,
-                bgcolor: "action.hover",
-                maxHeight: 88,
-                overflowY: "auto",
+                textAlign: "center",
               }}
             >
-              {heads.length === 0 ? (
-                <Typography variant="caption" color="text.disabled" sx={{ px: 0.5 }}>
-                  No head codes selected yet
-                </Typography>
-              ) : (
-                heads.map((h) => (
-                  <Chip
-                    key={h.headCode}
-                    size="small"
-                    label={`${h.headCode} - ${h.headName}`}
-                    onDelete={isApplying ? undefined : () => handleRemoveHead(h.headCode)}
-                  />
-                ))
-              )}
+              <Typography variant="body2" fontWeight={600}>
+                Formula Building Mode - Click cells to add to formula (Dynamic
+                rows excluded)
+              </Typography>
             </Box>
-          </Box>
-          {/* ================================================================= */}
-          {/* END CHANGED BLOCK                                                  */}
-          {/* ================================================================= */}
-
-          {/* Scope Selection — unchanged */}
-          <FormControl
-            size="small"
-            fullWidth
-            disabled={!reportCode || isApplying}
-          >
-            <InputLabel id="dialog-scope-label">Select Scope *</InputLabel>
-            <Select
-              labelId="dialog-scope-label"
-              value={viewCode}
-              label="Select Scope *"
-              onChange={(e) => {
-                setViewCode(e.target.value);
-                setEntity(null);
-                setEntityInputValue("");
-                setEntityOptions([]);
-              }}
-            >
-              {availableViews.map((view) => (
-                <MenuItem key={view.viewCode} value={view.viewCode}>
-                  {view.displayName}
-                </MenuItem>
-              ))}
-            </Select>
-            <FormHelperText
-              sx={{
-                fontStyle: "italic",
-                fontSize: "0.75rem",
-                display: "flex",
-                alignItems: "center",
-                gap: "4px",
-                lineHeight: 1.5,
-              }}
-            >
-              <InfoIcon sx={{ fontSize: "0.625rem" }} />
-              Please select a scope.
-            </FormHelperText>
-          </FormControl>
-
-          {/* Conditional Autocomplete for Circle/Branch — unchanged */}
-          {(isCircleScope || isBranchScope) && (
-            <Autocomplete
-              key={isCircleScope ? "circle" : "branch"}
-              size="small"
-              autoHighlight
-              options={entityOptions}
-              sx={{
-                "& .MuiAutocomplete-popupIndicator": {
-                  backgroundColor: "transparent",
-                },
-                "& .MuiAutocomplete-popupIndicator:hover": {
-                  backgroundColor: "transparent",
-                },
-              }}
-              noOptionsText={
-                entityInputValue.length >= 2 && !isEntityLoading
-                  ? "No match found"
-                  : "Type at least 2 characters..."
-              }
-              inputValue={entityInputValue}
-              value={entity}
-              getOptionLabel={(option) =>
-                option ? `${option.code} - ${option.name}` : ""
-              }
-              onChange={(event, newValue) => setEntity(newValue)}
-              onInputChange={(event, newInputValue, reason) => {
-                if (reason === "reset") return;
-                const filteredValue = newInputValue
-                  .replace(/[^a-zA-Z0-9 ]/g, "")
-                  .replace(/\s{2,}/g, " ");
-                if (filteredValue !== entityInputValue) {
-                  setEntityInputValue(filteredValue);
-                }
-              }}
-              loading={isEntityLoading}
-              disabled={isApplying}
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label={`Search ${isCircleScope ? "Circle *" : "Branch Code *"}`}
-                  variant="outlined"
-                  inputProps={{
-                    ...params.inputProps,
-                    onPaste: handlePaste,
-                    autoComplete: "off",
-                    maxLength: 50,
-                  }}
-                  InputProps={{
-                    ...params.InputProps,
-                    endAdornment: (
-                      <React.Fragment>
-                        {isEntityLoading ? (
-                          <CircularProgress color="inherit" size={20} />
-                        ) : null}
-                        {params.InputProps.endAdornment}
-                      </React.Fragment>
-                    ),
-                  }}
-                  helperText={
-                    <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                      <InfoIcon sx={{ fontSize: "0.625rem" }} />
-                      <em>Type at least 2 alphanumeric characters to search.</em>
-                    </span>
-                  }
-                />
-              )}
-            />
           )}
 
-          {/* Report Date Picker — unchanged */}
-          <LocalizationProvider dateAdapter={AdapterDayjs} adapterLocale="en-gb">
-            <DatePicker
-              key={`picker-key-${datePickerKey}`}
-              label="Select Date *"
-              format="DD/MM/YYYY"
-              value={reportDate ? dayjs(reportDate) : null}
-              minDate={MIN_ALLOWED_DATE}
-              sx={{
-                "& .MuiIconButton-root": { backgroundColor: "transparent" },
-                "& .MuiIconButton-root:hover": { backgroundColor: "transparent" },
-              }}
-              maxDate={etlDate || dayjs().endOf("day")}
-              disabled={!reportCode || isApplying}
-              onInputChange={(e) => setDateInputValue(e.target.value)}
-              onChange={(newValue) => {
-                if (newValue && newValue.isValid()) {
-                  let correctedValue = newValue;
-                  if (correctedValue.year() < 100) {
-                    correctedValue = correctedValue.set(
-                      "year",
-                      correctedValue.year() + 2000,
-                    );
-                  }
-                  setReportDate(correctedValue.format("YYYY-MM-DD"));
-                  setDateInputValue(correctedValue.format("DD/MM/YYYY"));
-                } else {
-                  setReportDate("");
-                }
-              }}
-              slotProps={{
-                textField: {
-                  size: "small",
-                  fullWidth: true,
-                  placeholder: "DD/MM/YYYY",
-                  error: dateValidation.error,
-                  helperText: (
-                    <span
-                      style={{
-                        fontStyle: "italic",
-                        fontSize: "0.75rem",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "4px",
-                        marginTop: "4px",
-                        color: dateValidation.error ? "#d32f2f" : "inherit",
-                        fontWeight: dateValidation.error ? 600 : "normal",
-                      }}
-                    >
-                      <InfoIcon sx={{ fontSize: "0.625rem" }} />
-                      {dateValidation.text}
-                    </span>
-                  ),
-                },
-                day: { showDaysOutsideCurrentMonth: true },
-              }}
-            />
-          </LocalizationProvider>
-        </Box>
-      </DialogContent>
+          <Box
+            sx={{
+              mb: 2,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <Typography variant="h6" fontWeight={600}>
+              {reportMeta.reportName || "Untitled Report"}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {columns.length} cols × {rowOrder.length} rows
+            </Typography>
+          </Box>
 
-      <DialogActions sx={{ p: 2, px: 3, flexShrink: 0 }}>
-        <Button
-          onClick={handleReset}
-          color="inherit"
-          variant="outlined"
-          disabled={isApplying}
-        >
-          Reset
-        </Button>
-        <Button
-          onClick={handleApply}
-          color="primary"
-          variant="contained"
-          disabled={!isApplyEnabled || isApplying}
-        >
-          {isApplying ? "Applying..." : "Apply"}
-        </Button>
-      </DialogActions>
-    </Dialog>
+          {columns.length === 0 ? (
+            <Box sx={{ textAlign: "center", py: 8, color: "text.secondary" }}>
+              <Typography variant="body1" gutterBottom>
+                Add columns from the left panel to get started
+              </Typography>
+            </Box>
+          ) : (
+            <Box
+              sx={{
+                flex: 1,
+                overflow: "hidden",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              <Box
+                sx={{
+                  flexShrink: 0,
+                  display: "flex",
+                  bgcolor: "#f5f5f5",
+                  borderBottom: "2px solid #e0e0e0",
+                  overflow: "hidden",
+                  position: "sticky",
+                  top: 0,
+                  zIndex: 100,
+                }}
+              >
+                <Box
+                  sx={{
+                    width: 83,
+                    minWidth: 80,
+                    fontWeight: 600,
+                    fontSize: "0.75rem",
+                    color: "text.secondary",
+                    borderRight: "1px solid #e0e0e0",
+                    // borderLeft: `3px solid ${getRowTypeColor("HEADER")}`,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    p: 1,
+                    flexShrink: 0,
+                    // position: "sticky",
+                    // left: 0,
+                    bgcolor: "#f5f5f5",
+                    zIndex: 101,
+                  }}
+                >
+                  #
+                </Box>
+                <Box
+                  ref={headerScrollRef}
+                  sx={{
+                    flex: 1,
+                    overflowX: "hidden",
+                    overflowY: "hidden",
+                  }}
+                >
+                  <Box
+                    sx={{
+                      display: "grid",
+                      gridTemplateColumns,
+                    }}
+                  >
+                    {columns.map((col) => (
+                      <Box
+                        key={col.id}
+                        sx={{
+                          fontWeight: 600,
+                          fontSize: "0.8rem",
+                          p: 1,
+                          borderRight: "1px solid #e0e0e0",
+                        }}
+                      >
+                        {col.name}
+                        <Typography
+                          variant="caption"
+                          display="block"
+                          color="text.secondary"
+                          sx={{ fontSize: "0.65rem" }}
+                        >
+                          {col.id} {/* ({col.format?.width || 150}px) */}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Box>
+                </Box>
+              </Box>
+
+              <Box
+                ref={parentRef}
+                onScroll={handleScroll}
+                sx={{
+                  flex: 1,
+                  overflow: "auto",
+                  position: "relative",
+                  willChange: "transform",
+                }}
+              >
+                <Box
+                  sx={{
+                    height: `${rowVirtualizer.getTotalSize()}px`,
+                    width: "100%",
+                    position: "relative",
+                  }}
+                >
+                  {virtualItems.map((virtualRow) => {
+                    const rowId = rowOrder[virtualRow.index];
+
+                    return (
+                      <Box
+                        key={virtualRow.key}
+                        data-index={virtualRow.index}
+                        sx={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          width: "100%",
+                          transform: `translateY(${virtualRow.start}px)`,
+                        }}
+                      >
+                        <RowContent
+                          rowId={rowId}
+                          gridTemplateColumns={gridTemplateColumns}
+                          columnWidths={calculateColumnWidths}
+                          selectedCellId={selectedCell?.cellId || null}
+                          formulaMode={formulaMode}
+                          hiddenCellsMap={hiddenCellsMap}
+                          isHighlighted={rowId === highlightedRowId}
+                          onCellClick={handleCellClick}
+                          onDynamicRowClick={handleDynamicRowClick}
+                        />
+                      </Box>
+                    );
+                  })}
+                </Box>
+              </Box>
+            </Box>
+          )}
+
+          {rowOrder.length === 0 && columns.length > 0 && (
+            <Box sx={{ textAlign: "center", py: 8, color: "text.secondary" }}>
+              <Typography variant="body1" gutterBottom>
+                Add rows from the left panel
+              </Typography>
+            </Box>
+          )}
+        </Paper>
+      </Box>
+    </>
   );
-}
+});
+
+ReportCanvas.displayName = "ReportCanvas";
