@@ -1237,3 +1237,131 @@ export const ReportCanvas = memo(() => {
 });
 
 ReportCanvas.displayName = "ReportCanvas";
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+const CHUNK_SIZE = 2000;
+const MAX_MATCHES = 500;
+
+const searchIndex = useMemo(() => {
+  const idx = new Array(rowOrder.length);
+  for (let i = 0; i < rowOrder.length; i++) {
+    const rowId = rowOrder[i];
+    const row = rowsById[rowId];
+    if (!row) { idx[i] = null; continue; }
+
+    const texts = [{ cellId: row.cellIds?.[0] || null, text: row.id }];
+
+    if (row.rowType === "DYNAMIC") {
+      if (row.dynamicConfig?.table) {
+        texts.push({ cellId: null, text: row.dynamicConfig.table });
+      }
+    } else {
+      const cellIds = row.cellIds || [];
+      for (let c = 0; c < cellIds.length; c++) {
+        const cell = cellsById[cellIds[c]];
+        if (!cell) continue;
+        const text = getCellSearchText(cell);
+        if (text) texts.push({ cellId: cell.id, text });
+        if (cell.id) texts.push({ cellId: cell.id, text: cell.id });
+      }
+    }
+    idx[i] = { rowId, texts };
+  }
+  return idx;
+}, [rowOrder, rowsById, cellsById]);
+
+const [matches, setMatches] = useState([]);
+const [isSearching, setIsSearching] = useState(false);
+const searchTokenRef = useRef(0);
+
+const navigateToMatch = useCallback(
+  (match) => {
+    if (!match) return;
+    const key = `${match.rowId}:${match.cellId || ""}`;
+    if (lastNavigatedKeyRef.current === key) return;
+    lastNavigatedKeyRef.current = key;
+
+    dispatch(setSelectedCell({ rowId: match.rowId, cellId: match.cellId || "" }));
+    window.dispatchEvent(
+      new CustomEvent("report-search-navigate", { detail: { rowId: match.rowId } }),
+    );
+  },
+  [dispatch],
+);
+
+useEffect(() => {
+  const token = ++searchTokenRef.current;
+  lastNavigatedKeyRef.current = null;
+  setCurrentIndex(0);
+
+  if (!query) {
+    setMatches([]);
+    setIsSearching(false);
+    dispatch(setSelectedCell(null));
+    window.dispatchEvent(new CustomEvent("report-search-clear"));
+    return;
+  }
+
+  setIsSearching(true);
+  const testText = makeMatcher(query, matchCase, matchExactWord);
+  const result = [];
+  let i = 0;
+
+  const schedule =
+    typeof requestIdleCallback === "function"
+      ? (fn) => requestIdleCallback(fn, { timeout: 50 })
+      : (fn) => setTimeout(fn, 0);
+
+  const step = () => {
+    if (token !== searchTokenRef.current) return;
+
+    const end = Math.min(i + CHUNK_SIZE, searchIndex.length);
+    for (; i < end && result.length < MAX_MATCHES; i++) {
+      const entry = searchIndex[i];
+      if (!entry) continue;
+      for (const { cellId, text } of entry.texts) {
+        if (testText(text)) {
+          result.push({ rowId: entry.rowId, cellId });
+          break;
+        }
+      }
+    }
+
+    if (i < searchIndex.length && result.length < MAX_MATCHES) {
+      schedule(step);
+      return;
+    }
+
+    if (token !== searchTokenRef.current) return;
+
+    setMatches(result);
+    setIsSearching(false);
+
+    if (result.length > 0) {
+      navigateToMatch(result[0]);
+    } else {
+      dispatch(setSelectedCell(null));
+      window.dispatchEvent(new CustomEvent("report-search-clear"));
+    }
+  };
+
+  schedule(step);
+
+  return () => { searchTokenRef.current++; };
+}, [searchIndex, query, matchCase, matchExactWord, navigateToMatch, dispatch]);
