@@ -1365,3 +1365,95 @@ useEffect(() => {
 
   return () => { searchTokenRef.current++; };
 }, [searchIndex, query, matchCase, matchExactWord, navigateToMatch, dispatch]);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+const prevSearchKeyRef = useRef(null);
+
+useEffect(() => {
+  const token = ++searchTokenRef.current;
+  const searchKey = `${query}|${matchCase}|${matchExactWord}`;
+  const isNewSearch = prevSearchKeyRef.current !== searchKey;
+  prevSearchKeyRef.current = searchKey;
+
+  if (!query) {
+    setMatches([]);
+    setIsSearching(false);
+    if (isNewSearch) {
+      lastNavigatedKeyRef.current = null;
+      dispatch(setSelectedCell(null));
+      window.dispatchEvent(new CustomEvent("report-search-clear"));
+    }
+    return;
+  }
+
+  setIsSearching(true);
+  const testText = makeMatcher(query, matchCase, matchExactWord);
+  const result = [];
+  let i = 0;
+
+  const schedule =
+    typeof requestIdleCallback === "function"
+      ? (fn) => requestIdleCallback(fn, { timeout: 50 })
+      : (fn) => setTimeout(fn, 0);
+
+  const step = () => {
+    if (token !== searchTokenRef.current) return;
+
+    const end = Math.min(i + CHUNK_SIZE, searchIndex.length);
+    for (; i < end && result.length < MAX_MATCHES; i++) {
+      const entry = searchIndex[i];
+      if (!entry) continue;
+      for (const { cellId, text } of entry.texts) {
+        if (testText(text)) {
+          result.push({ rowId: entry.rowId, cellId });
+          break;
+        }
+      }
+    }
+
+    if (i < searchIndex.length && result.length < MAX_MATCHES) {
+      schedule(step);
+      return;
+    }
+
+    if (token !== searchTokenRef.current) return;
+
+    setMatches(result);
+    setIsSearching(false);
+
+    if (isNewSearch) {
+      setCurrentIndex(0);
+      lastNavigatedKeyRef.current = null;
+      if (result.length > 0) {
+        navigateToMatch(result[0]);
+      } else {
+        dispatch(setSelectedCell(null));
+        window.dispatchEvent(new CustomEvent("report-search-clear"));
+      }
+    } else {
+      setCurrentIndex((prev) => (prev < result.length ? prev : 0));
+    }
+  };
+
+  schedule(step);
+
+  return () => { searchTokenRef.current++; };
+}, [searchIndex, query, matchCase, matchExactWord, navigateToMatch, dispatch]);
