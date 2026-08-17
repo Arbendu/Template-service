@@ -4008,28 +4008,6 @@ export const selectHiddenCells = createSelector(
   },
 );
 
-// export const selectTableNames = createSelector(
-//   [selectRowsEntities, selectCellsEntities],
-//   (rows, cells) => {
-//     const tables = new Set();
-
-//     Object.values(rows).forEach((row) => {
-//       row.cellIds.forEach((cellId) => {
-//         const cell = cells[cellId];
-//         if (cell?.source?.table) {
-//           tables.add(cell.source.table);
-//         }
-
-//       });
-
-//       if (row.dynamicConfig?.table) {
-//         tables.add(row.dynamicConfig.table);
-//       }
-//     });
-
-//     return Array.from(tables);
-//   },
-// );
 
 export const selectTableNames = createSelector(
   [selectRowsEntities, selectCellsEntities],
@@ -4716,6 +4694,78 @@ export const ReportCanvas = memo(() => {
     };
   }, []);
 
+  // useEffect(() => {
+  //   const handleSearchNavigate = (e) => {
+  //     const { rowId } = e.detail || {};
+  //     if (!rowId) return;
+  //     const index = rowOrder.indexOf(rowId);
+  //     if (index === -1) return;
+
+  //     rowVirtualizerRef.current.scrollToIndex(index, {
+  //       align: "center",
+  //       behavior: "smooth",
+  //     });
+
+  //     setHighlightedRowId(rowId);
+  //     if (highlightTimeoutRef.current)
+  //       clearTimeout(highlightTimeoutRef.current);
+  //     highlightTimeoutRef.current = setTimeout(() => {
+  //       setHighlightedRowId(null);
+  //     }, ROW_HIGHLIGHT_DURATION_MS);
+  //   };
+
+  //   window.addEventListener("report-search-navigate", handleSearchNavigate);
+  //   return () =>
+  //     window.removeEventListener(
+  //       "report-search-navigate",
+  //       handleSearchNavigate,
+  //     );
+  // }, [rowOrder]);
+
+  const rowIndexMap = useMemo(() => {
+    const map = new Map();
+    rowOrder.forEach((id, i) => map.set(id, i));
+    return map;
+  }, [rowOrder]);
+
+  useEffect(() => {
+    const handleSearchNavigate = (e) => {
+      const { rowId } = e.detail || {};
+      if (!rowId) return;
+      const index = rowIndexMap.get(rowId);
+      if (index === undefined) return;
+
+      rowVirtualizerRef.current.scrollToIndex(index, {
+        align: "center",
+        behavior: "smooth",
+      });
+
+      setHighlightedRowId(rowId);
+      if (highlightTimeoutRef.current)
+        clearTimeout(highlightTimeoutRef.current);
+      highlightTimeoutRef.current = setTimeout(() => {
+        setHighlightedRowId(null);
+      }, ROW_HIGHLIGHT_DURATION_MS);
+    };
+
+    window.addEventListener("report-search-navigate", handleSearchNavigate);
+    return () =>
+      window.removeEventListener(
+        "report-search-navigate",
+        handleSearchNavigate,
+      );
+  }, [rowIndexMap]);
+
+  useEffect(() => {
+    const handleSearchClear = () => {
+      if(highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
+      setHighlightedRowId(null);
+    }
+    window.addEventListener("report-search-clear", handleSearchClear);
+    return () =>
+      window.removeEventListener("report-search-clear", handleSearchClear);
+  }, []);
+
   const handleCellClick = useCallback(
     (rowId, cellId, colId) => {
       const row = rows[rowId];
@@ -4995,6 +5045,7 @@ import FullscreenIcon from "@mui/icons-material/Fullscreen";
 import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
 import ReceiptLongIcon from "@mui/icons-material/ReceiptLong";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+import { ReportSearchBar } from "./ReportSearchBar";
 
 export const TopToolbar = ({
   onBack,
@@ -5041,6 +5092,9 @@ export const TopToolbar = ({
               Back
             </Button>
           )}
+
+          <ReportSearchBar />
+
           <Button
             variant="outlined"
             startIcon={<UploadIcon />}
@@ -5072,24 +5126,7 @@ export const TopToolbar = ({
           >
             Save Template
           </Button>
-          {/* <Button
-            variant="outlined"
-            color="secondary"
-            startIcon={<TuneIcon />}
-            onClick={onSaveVariants}
-            size="small"
-            disabled={saving || !templateSaved}
-            title={!templateSaved ? "Save template first" : "Save variants"}
-          >
-            Save Variants
-            {variantsCount > 0 && (
-              <Chip
-                label={variantsCount}
-                size="small"
-                sx={{ ml: 1, height: 20, fontSize: "0.7rem" }}
-              />
-            )}
-          </Button> */}
+          
           {/* The full screen button */}
           <IconButton
             onClick={toggleFullscreen}
@@ -5108,3 +5145,4 @@ export const TopToolbar = ({
     </AppBar>
   );
 };
+
