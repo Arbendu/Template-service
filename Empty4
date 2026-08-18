@@ -100,5 +100,45 @@ const getCellSearchText = (cell) => {
 
 
 
+const getVariableSearchText = (variableName, variable) => {
+  if (!variable) return "";
+  try {
+    const parts = [variableName, variable.type, variable.table, variable.column];
 
+    const filters = variable.filters || {};
+    Object.entries(filters).forEach(([filterColumn, conditions]) => {
+      parts.push(filterColumn);
+      toSearchArray(conditions).forEach((cond) => {
+        if (!cond) return;
+        parts.push(cond.op);
+        toSearchArray(cond.value).forEach((v) => parts.push(String(v)));
+      });
+    });
+
+    return parts.filter(Boolean).join(" ");
+  } catch {
+    return "";
+  }
+};
+
+const getCellSearchText = (cell) => {
+  if (!cell) return "";
+  try {
+    if (cell.type === "TEXT") return cell.value || "";
+    if (cell.type === "FORMULA") {
+      const variables = cell.variables || {};
+      const variablesText = Object.entries(variables)
+        .map(([name, variable]) => getVariableSearchText(name, variable))
+        .filter(Boolean)
+        .join(" ");
+      return [cell.expression || "", variablesText].filter(Boolean).join(" ");
+    }
+    if (cell.type?.startsWith("DB_")) {
+      return `${cell.source?.table || ""}.${cell.source?.column || ""}`;
+    }
+    return "";
+  } catch {
+    return "";
+  }
+};
 
