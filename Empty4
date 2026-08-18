@@ -1,1 +1,37 @@
+const getVariableSearchText = (variable) => {
+  if (!variable) return "";
+  const parts = [
+    variable.name,
+    variable.type,
+    variable.table,
+    variable.column,
+  ];
 
+  // ⚠️ Confirm this key — filters vs filterConditions depends on your slice shape.
+  const filters = variable.filters || variable.filterConditions || [];
+  filters.forEach((f) => {
+    parts.push(f.column, f.operator);
+    // ⚠️ Confirm this key too — values vs value depends on how "In List" stores its array.
+    (f.values || f.value || []).forEach((v) => parts.push(String(v)));
+  });
+
+  return parts.filter(Boolean).join(" ");
+};
+
+const getCellSearchText = (cell) => {
+  if (!cell) return "";
+  if (cell.type === "TEXT") return cell.value || "";
+  if (cell.type === "FORMULA") {
+    // ⚠️ Confirm this key — variables vs formulaVariables.
+    const variables = cell.variables || [];
+    const variablesText = variables
+      .map(getVariableSearchText)
+      .filter(Boolean)
+      .join(" ");
+    return [cell.expression || "", variablesText].filter(Boolean).join(" ");
+  }
+  if (cell.type?.startsWith("DB_")) {
+    return `${cell.source?.table || ""}.${cell.source?.column || ""}`;
+  }
+  return "";
+};
