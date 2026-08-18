@@ -91,3 +91,55 @@ const getCellSearchText = (cell) => {
     return "";
   }
 };
+
+
+
+
+
+
+
+
+
+
+
+
+const getVariableSearchText = (variable) => {
+  if (!variable) return "";
+  try {
+    const parts = [variable.name, variable.type, variable.table, variable.column];
+
+    const rawFilters = variable.filters || variable.filterConditions || variable.conditions;
+    const filters = toSearchArray(rawFilters);
+
+    filters.forEach((f) => {
+      if (f == null) return;
+
+      // Filter condition is itself an array of raw values — e.g. ["1125505001"]
+      if (Array.isArray(f)) {
+        f.forEach((v) => parts.push(String(v)));
+        return;
+      }
+
+      // Filter condition is an object — pull whatever fields exist, safely.
+      if (typeof f === "object") {
+        parts.push(f.column, f.operator);
+        const vals = Array.isArray(f.values)
+          ? f.values
+          : Array.isArray(f.value)
+            ? f.value
+            : f.value != null
+              ? [f.value]
+              : [];
+        vals.forEach((v) => parts.push(String(v)));
+        return;
+      }
+
+      // Filter condition is a raw primitive value.
+      parts.push(String(f));
+    });
+
+    return parts.filter(Boolean).join(" ");
+  } catch {
+    return "";
+  }
+};
