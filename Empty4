@@ -35,3 +35,59 @@ const getCellSearchText = (cell) => {
   }
   return "";
 };
+
+
+
+
+
+
+
+
+const toSearchArray = (val) => {
+  if (Array.isArray(val)) return val;
+  if (val == null) return [];
+  if (typeof val === "object") return Object.values(val);
+  return [val];
+};
+
+const getVariableSearchText = (variable) => {
+  if (!variable) return "";
+  try {
+    const parts = [variable.name, variable.type, variable.table, variable.column];
+
+    const filters = toSearchArray(
+      variable.filters || variable.filterConditions,
+    );
+    filters.forEach((f) => {
+      if (!f) return;
+      parts.push(f.column, f.operator);
+      toSearchArray(f.values || f.value).forEach((v) => parts.push(String(v)));
+    });
+
+    return parts.filter(Boolean).join(" ");
+  } catch {
+    // Never let one malformed cell crash the whole search.
+    return "";
+  }
+};
+
+const getCellSearchText = (cell) => {
+  if (!cell) return "";
+  try {
+    if (cell.type === "TEXT") return cell.value || "";
+    if (cell.type === "FORMULA") {
+      const variables = toSearchArray(cell.variables);
+      const variablesText = variables
+        .map(getVariableSearchText)
+        .filter(Boolean)
+        .join(" ");
+      return [cell.expression || "", variablesText].filter(Boolean).join(" ");
+    }
+    if (cell.type?.startsWith("DB_")) {
+      return `${cell.source?.table || ""}.${cell.source?.column || ""}`;
+    }
+    return "";
+  } catch {
+    return "";
+  }
+};
