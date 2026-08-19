@@ -2974,9 +2974,6 @@ public class TemplateDiffServiceImpl implements TemplateDiffService {
 
 package com.fincore.TemplateConfigurationService.service.impl;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fincore.TemplateConfigurationService.dto.*;
 import com.fincore.TemplateConfigurationService.entity.*;
 import com.fincore.TemplateConfigurationService.enums.TemplateStatus;
@@ -2985,14 +2982,20 @@ import com.fincore.TemplateConfigurationService.exception.TemplateNotFoundExcept
 import com.fincore.TemplateConfigurationService.repository.*;
 import com.fincore.TemplateConfigurationService.service.TemplateService;
 import com.fincore.TemplateConfigurationService.validator.TemplatePayloadValidator;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
+
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.json.JsonMapper;
+
 
 @Slf4j
 @Service
@@ -3004,7 +3007,7 @@ public class TemplateServiceImpl implements TemplateService {
     private final VariantParamDefRepository paramRepository;
     private final FilterRuleRepository filterRuleRepository;
     private final TemplatePayloadValidator payloadValidator;
-    private final ObjectMapper objectMapper;
+    private final JsonMapper jsonMapper;
 
     // ========================================================================
     // SAVE TEMPLATE (CREATE OR UPDATE - FULL PAYLOAD)
@@ -3026,7 +3029,7 @@ public ReportTemplate createOrUpdateTemplate(TemplatePayload payload, String use
     // 1. Serialize template JSON
     String templateJson;
     try {
-        templateJson = objectMapper.writeValueAsString(meta);
+        templateJson = jsonMapper.writeValueAsString(meta);
     } catch (Exception e) {
         throw new BadRequestException("Failed to serialize template json");
     }
@@ -3105,11 +3108,16 @@ public ReportTemplate createOrUpdateTemplate(TemplatePayload payload, String use
 
         variant.setVariantName(dto.getVariantName());
         variant.setDescription(dto.getDescription());
-        variant.setStatus(dto.getStatus());
+//        variant.setStatus(dto.getStatus());
+        if (dto.getStatus() != null && !dto.getStatus().isBlank()) {
+            variant.setStatus(dto.getStatus());
+        } else if (variant.getStatus() == null) {
+            variant.setStatus("ACTIVE");
+        }
         variant.setUpdatedAt(now);
         variant.setUpdatedBy(userId);
 
-        ReportVariant savedVariant = variantRepository.save(variant);
+        ReportVariant savedVariant = variantRepository.saveAndFlush(variant);
         Long variantId = savedVariant.getVariantId();
 
         // 5. Update Params & Rules (Always refresh child lists for the current variant row)
@@ -3223,7 +3231,7 @@ public ReportTemplate createOrUpdateTemplate(TemplatePayload payload, String use
     // ========================================================================
     @Override
     @Transactional(readOnly = true)
-    public TemplateResponse getTemplateWithVariants(String templateId) throws JsonProcessingException {
+    public TemplateResponse getTemplateWithVariants(String templateId) throws JacksonException {
 
         ReportTemplate template = templateRepository.findById(templateId)
                 .orElseThrow(() -> new TemplateNotFoundException(templateId));
@@ -3242,7 +3250,7 @@ public ReportTemplate createOrUpdateTemplate(TemplatePayload payload, String use
                 filterRuleRepository.findByVariantIdIn(variantIds)
                         .stream().collect(Collectors.groupingBy(rule -> rule.getReportVariant().getVariantId()));
 
-        ObjectMapper mapper = new ObjectMapper();
+        JsonMapper mapper = new JsonMapper();
         Map<String, Object> templateJsonMap = mapper.readValue(template.getTemplateJson(), new TypeReference<Map<String, Object>>() {});
 
         return TemplateResponse.builder()
@@ -3331,7 +3339,7 @@ public ReportTemplate createOrUpdateTemplate(TemplatePayload payload, String use
                     .updatedBy(userId)
                     .build();
 
-            variant = variantRepository.save(variant);
+            variant = variantRepository.saveAndFlush(variant);
 
             if (dto.getParams() != null) {
                 for (VariantParamDto p : dto.getParams()) {
@@ -3394,6 +3402,7 @@ public ReportTemplate createOrUpdateTemplate(TemplatePayload payload, String use
     private FilterRuleDto toRuleDto(FilterRule r) {
         return FilterRuleDto.builder()
                 .scopeType(r.getScopeType())
+                .scopeValue(r.getScopeValue())
                 .paramName(r.getParamName())
                 .dbColumn(r.getDbColumn())
                 .operator(r.getOperator())
@@ -3402,7 +3411,7 @@ public ReportTemplate createOrUpdateTemplate(TemplatePayload payload, String use
 
     private Map<String, Object> toJsonMap(String json) {
         try {
-            return objectMapper.readValue(json, new TypeReference<>() {});
+            return jsonMapper.readValue(json, new TypeReference<>() {});
         } catch (Exception e) {
             return Map.of();
         }
