@@ -142,3 +142,20 @@ const getCellSearchText = (cell) => {
   }
 };
 
+
+
+
+
+
+
+
+
+
+PolymorphicTypeValidator ptv = BasicPolymorphicTypeValidator.builder()
+        .allowIfSubType("com.fincore.analyticsservice.dto")
+        .allowIfSubType("java.util")
+        .build();
+
+GenericJacksonJsonRedisSerializer redisSerializer = GenericJacksonJsonRedisSerializer.builder()
+        .polymorphicTypeValidator(ptv)
+        .build();
