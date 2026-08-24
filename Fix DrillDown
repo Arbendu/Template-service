@@ -1,0 +1,236 @@
+// When get data from DB
+
+[
+    {
+        "reportCode": "ysa_report",
+        "displayName": "YSA Report",
+        "views": [
+            {
+                "viewCode": "YSA_BRANCH",
+                "displayName": "Branch Level",
+                "hierarchy": [
+                    "CGL",
+                    "Product"
+                ],
+                "availableMetrics": [
+                    {
+                        "logicalName": "AMOUNT",
+                        "displayName": "AMOUNT"
+                    }
+                ]
+            },
+            {
+                "viewCode": "YSA_CIRCLE",
+                "displayName": "Circle Level",
+                "hierarchy": [
+                    "CGL",
+                    "Product",
+                    "Branch-Circle"
+                ],
+                "availableMetrics": [
+                    {
+                        "logicalName": "AMOUNT",
+                        "displayName": "AMOUNT"
+                    }
+                ]
+            },
+            {
+                "viewCode": "YSA_BANK",
+                "displayName": "Bank Level",
+                "hierarchy": [
+                    "Geography",
+                    "CGL",
+                    "Product",
+                    "Branch-Circle"
+                ],
+                "availableMetrics": [
+                    {
+                        "logicalName": "AMOUNT",
+                        "displayName": "AMOUNT"
+                    }
+                ]
+            }
+        ]
+    },
+    {
+        "reportCode": "pnl_report",
+        "displayName": "PNL Report",
+        "views": [
+            {
+                "viewCode": "PNL_BANK",
+                "displayName": "Bank Level",
+                "hierarchy": [
+                    "Geography",
+                    "CGL",
+                    "Product",
+                    "Branch-Circle"
+                ],
+                "availableMetrics": [
+                    {
+                        "logicalName": "AMOUNT",
+                        "displayName": "AMOUNT"
+                    }
+                ]
+            },
+            {
+                "viewCode": "PNL_CIRCLE",
+                "displayName": "Circle Level",
+                "hierarchy": [
+                    "CGL",
+                    "Product",
+                    "Branch-Circle"
+                ],
+                "availableMetrics": [
+                    {
+                        "logicalName": "AMOUNT",
+                        "displayName": "AMOUNT"
+                    }
+                ]
+            },
+            {
+                "viewCode": "PNL_BRANCH",
+                "displayName": "Branch Level",
+                "hierarchy": [
+                    "CGL",
+                    "Product"
+                ],
+                "availableMetrics": [
+                    {
+                        "logicalName": "AMOUNT",
+                        "displayName": "AMOUNT"
+                    }
+                ]
+            }
+        ]
+    },
+    {
+        "reportCode": "nwsa_report",
+        "displayName": "NWSA Report",
+        "views": [
+            {
+                "viewCode": "NWSA_CIRCLE",
+                "displayName": "Circle Level",
+                "hierarchy": [
+                    "CGL",
+                    "Product",
+                    "Branch-Circle"
+                ],
+                "availableMetrics": [
+                    {
+                        "logicalName": "AMOUNT",
+                        "displayName": "AMOUNT"
+                    }
+                ]
+            },
+            {
+                "viewCode": "NWSA_BANK",
+                "displayName": "Bank Level",
+                "hierarchy": [
+                    "Geography",
+                    "CGL",
+                    "Product",
+                    "Branch-Circle"
+                ],
+                "availableMetrics": [
+                    {
+                        "logicalName": "AMOUNT",
+                        "displayName": "AMOUNT"
+                    }
+                ]
+            },
+            {
+                "viewCode": "NWSA_BRANCH",
+                "displayName": "Branch Level",
+                "hierarchy": [
+                    "CGL",
+                    "Product"
+                ],
+                "availableMetrics": [
+                    {
+                        "logicalName": "AMOUNT",
+                        "displayName": "AMOUNT"
+                    }
+                ]
+            }
+        ]
+    }
+]
+
+
+// logs when get data from db
+
+[AnalyticsService] [omcat-handler-6] c.f.a.service.ReportConfigService        : Fetching Oracle UI configurations for roles: 10
+
+
+
+
+// Error when get data from redis
+
+2026-08-24T14:28:00.479+05:30  INFO 254064 --- [AnalyticsService] [omcat-handler-6] c.f.a.service.ReportConfigService        : Fetching Oracle UI configurations for roles: 10
+2026-08-24T14:28:53.209+05:30 ERROR 254064 --- [AnalyticsService] [omcat-handler-7] c.f.a.exception.GlobalExceptionHandler   : Unhandled Exception occurred: 
+
+org.springframework.http.converter.HttpMessageNotWritableException: Could not write JSON: Cannot cast java.util.LinkedHashMap to com.fincore.analyticsservice.dto.ReportConfigResponse
+	at org.springframework.http.converter.AbstractJacksonHttpMessageConverter.writeInternal(AbstractJacksonHttpMessageConverter.java:444) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.http.converter.AbstractSmartHttpMessageConverter.write(AbstractSmartHttpMessageConverter.java:116) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.web.servlet.mvc.method.annotation.AbstractMessageConverterMethodProcessor.writeWithMessageConverters(AbstractMessageConverterMethodProcessor.java:342) ~[spring-webmvc-7.0.8.jar:7.0.8]
+	at org.springframework.web.servlet.mvc.method.annotation.HttpEntityMethodProcessor.handleReturnValue(HttpEntityMethodProcessor.java:261) ~[spring-webmvc-7.0.8.jar:7.0.8]
+
+	at org.springframework.security.web.ObservationFilterChainDecorator$FilterObservation$SimpleFilterObservation.lambda$wrap$1(ObservationFilterChainDecorator.java:491) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$AroundFilterObservation$SimpleAroundFilterObservation.lambda$wrap$1(ObservationFilterChainDecorator.java:353) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator.lambda$wrapSecured$0(ObservationFilterChainDecorator.java:84) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$VirtualFilterChain.doFilter(ObservationFilterChainDecorator.java:131) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.access.intercept.AuthorizationFilter.doFilter(AuthorizationFilter.java:101) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.wrapFilter(ObservationFilterChainDecorator.java:243) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.doFilter(ObservationFilterChainDecorator.java:230) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$VirtualFilterChain.doFilter(ObservationFilterChainDecorator.java:140) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.access.ExceptionTranslationFilter.doFilter(ExceptionTranslationFilter.java:126) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.access.ExceptionTranslationFilter.doFilter(ExceptionTranslationFilter.java:120) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.wrapFilter(ObservationFilterChainDecorator.java:243) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.doFilter(ObservationFilterChainDecorator.java:230) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$VirtualFilterChain.doFilter(ObservationFilterChainDecorator.java:140) ~[spring-security-web-7.1.0.jar:7.1.0]
+
+3) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$AroundFilterObservation$SimpleAroundFilterObservation.lambda$wrap$0(ObservationFilterChainDecorator.java:336) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$ObservationFilter.doFilter(ObservationFilterChainDecorator.java:227) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.ObservationFilterChainDecorator$VirtualFilterChain.doFilter(ObservationFilterChainDecorator.java:140) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.FilterChainProxy.doFilterInternal(FilterChainProxy.java:237) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.security.web.FilterChainProxy.doFilter(FilterChainProxy.java:195) ~[spring-security-web-7.1.0.jar:7.1.0]
+	at org.springframework.web.filter.CompositeFilter$VirtualFilterChain.doFilter(CompositeFilter.java:113) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.web.filter.ServletRequestPathFilter.doFilter(ServletRequestPathFilter.java:52) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.web.filter.CompositeFilter$VirtualFilterChain.doFilter(CompositeFilter.java:113) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.web.filter.CompositeFilter.doFilter(CompositeFilter.java:74) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.security.config.annotation.web.configuration.WebSecurityConfiguration$CompositeFilterChainProxy.doFilter(WebSecurityConfiguration.java:317) ~[spring-security-config-7.1.0.jar:7.1.0]
+	at org.springframework.web.filter.DelegatingFilterProxy.invokeDelegate(DelegatingFilterProxy.java:355) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.web.filter.DelegatingFilterProxy.doFilter(DelegatingFilterProxy.java:272) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:107) ~[tomcat-embed-core-11.0.22.jar:11.0.22]
+	at org.springframework.web.filter.RequestContextFilter.doFilterInternal(RequestContextFilter.java:100) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:107) ~[tomcat-embed-core-11.0.22.jar:11.0.22]
+	at org.springframework.web.filter.FormContentFilter.doFilterInternal(FormContentFilter.java:93) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:107) ~[tomcat-embed-core-11.0.22.jar:11.0.22]
+	at org.springframework.web.filter.ServerHttpObservationFilter.doFilterInternal(ServerHttpObservationFilter.java:110) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116) ~[spring-web-7.0.8.jar:7.0.8]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:107) ~[tomcat-embed-core-11.0.22.jar:11.0.22]
+	at org.springframework.web.filter.CharacterEncodingFilter.doFilterInternal(CharacterEncodingFilter.java:199) ~[spring-web-7.0.8.jar:7.0.8]
+
+	at java.base/java.lang.VirtualThread.run(VirtualThread.java:329) ~[na:na]
+Caused by: tools.jackson.databind.DatabindException: Cannot cast java.util.LinkedHashMap to com.fincore.analyticsservice.dto.ReportConfigResponse
+ at [No location information] (through reference chain: java.util.ArrayList[0]->java.util.LinkedHashMap["reportCode"])
+	at tools.jackson.databind.DatabindException.wrapWithPath(DatabindException.java:132) ~[jackson-databind-3.1.4.jar:3.1.4]
+	at tools.jackson.databind.ser.std.StdSerializer.wrapAndThrow(StdSerializer.java:275) ~[jackson-databind-3.1.4.jar:3.1.4]
+	at tools.jackson.databind.ser.UnrolledBeanSerializer.serializeNonFiltered(UnrolledBeanSerializer.java:215) ~[jackson-databind-3.1.4.jar:3.1.4]
+	at tools.jackson.databind.ser.UnrolledBeanSerializer.serialize(UnrolledBeanSerializer.java:179) ~[jackson-databind-3.1.4.jar:3.1.4]
+	at tools.jackson.databind.ser.jdk.CollectionSerializer.serializeContentsUsingImpl(CollectionSerializer.java:216) ~[jackson-databind-3.1.4.jar:3.1.4]
+
+	at tools.jackson.databind.ObjectWriter.writeValue(ObjectWriter.java:982) ~[jackson-databind-3.1.4.jar:3.1.4]
+	at org.springframework.http.converter.AbstractJacksonHttpMessageConverter.writeInternal(AbstractJacksonHttpMessageConverter.java:436) ~[spring-web-7.0.8.jar:7.0.8]
+	... 123 common frames omitted
+Caused by: java.lang.ClassCastException: Cannot cast java.util.LinkedHashMap to com.fincore.analyticsservice.dto.ReportConfigResponse
+	at java.base/java.lang.Class.cast(Class.java:4069) ~[na:na]
+	at tools.jackson.databind.ser.BeanPropertyWriter.get(BeanPropertyWriter.java:790) ~[jackson-databind-3.1.4.jar:3.1.4]
+	at tools.jackson.databind.ser.BeanPropertyWriter.serializeAsProperty(BeanPropertyWriter.java:604) ~[jackson-databind-3.1.4.jar:3.1.4]
+	at tools.jackson.databind.ser.UnrolledBeanSerializer.serializeNonFiltered(UnrolledBeanSerializer.java:203) ~[jackson-databind-3.1.4.jar:3.1.4]
+	... 133 common frames omitted
+
+2026-08-24T14:28:53.215+05:30  WARN 254064 --- [AnalyticsService] [omcat-handler-7] .m.m.a.ExceptionHandlerExceptionResolver : Resolved [org.springframework.http.converter.HttpMessageNotWritableException: Could not write JSON: Cannot cast java.util.LinkedHashMap to com.fincore.analyticsservice.dto.ReportConfigResponse]
