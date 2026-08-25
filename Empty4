@@ -159,3 +159,74 @@ PolymorphicTypeValidator ptv = BasicPolymorphicTypeValidator.builder()
 GenericJacksonJsonRedisSerializer redisSerializer = GenericJacksonJsonRedisSerializer.builder()
         .polymorphicTypeValidator(ptv)
         .build();
+
+
+
+
+
+
+
+
+
+
+
+{
+  "meta": {
+    "status": "SUCCESS",
+    "executionTimeMs": 1125,
+    "headCodeCount": 3
+  },
+  "data": [
+    {
+      "headCode": "L012",
+      "meta": {
+        "status": "SUCCESS",
+        "level": "Geography",
+        "rowCount": 1,
+        "executionTimeMs": 374
+      },
+      "data": [
+        {
+          "AMOUNT": 6739905230.00,
+          "hasChildren": true,
+          "name": "Domestic",
+          "id": "geography_Domestic"
+        }
+      ]
+    },
+    {
+      "headCode": "01160",
+      "meta": {
+        "status": "SUCCESS",
+        "level": "Geography",
+        "rowCount": 1,
+        "executionTimeMs": 351
+      },
+      "data": [
+        {
+          "AMOUNT": 4587231900.00,
+          "hasChildren": true,
+          "name": "Domestic",
+          "id": "geography_Domestic"
+        }
+      ]
+    },
+    {
+      "headCode": "10001",
+      "meta": {
+        "status": "SUCCESS",
+        "level": "Geography",
+        "rowCount": 1,
+        "executionTimeMs": 400
+      },
+      "data": [
+        {
+          "AMOUNT": 7823412500.00,
+          "hasChildren": true,
+          "name": "Domestic",
+          "id": "geography_Domestic"
+        }
+      ]
+    }
+  ]
+}
