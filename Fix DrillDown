@@ -7,13 +7,13 @@
   "data": [
     {
       "headCode": "L012",
-      "meta": {
+      "headMeta": {
         "status": "SUCCESS",
         "level": "Geography",
         "rowCount": 1,
         "executionTimeMs": 374
       },
-      "data": [
+      "headData": [
         {
           "AMOUNT": 6739905230.00,
           "hasChildren": true,
@@ -24,13 +24,13 @@
     },
     {
       "headCode": "01160",
-      "meta": {
+      "headMeta": {
         "status": "SUCCESS",
         "level": "Geography",
         "rowCount": 1,
         "executionTimeMs": 351
       },
-      "data": [
+      "headData": [
         {
           "AMOUNT": 4587231900.00,
           "hasChildren": true,
@@ -41,13 +41,13 @@
     },
     {
       "headCode": "10001",
-      "meta": {
+      "headMeta": {
         "status": "SUCCESS",
         "level": "Geography",
         "rowCount": 1,
         "executionTimeMs": 400
       },
-      "data": [
+      "headData": [
         {
           "AMOUNT": 7823412500.00,
           "hasChildren": true,
