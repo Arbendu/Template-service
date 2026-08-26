@@ -435,3 +435,129 @@ public ResponseEntity<?> executeDrillDown(
     DrillDownResponse response = semanticDrillDownService.executeDrillDown(request, roleId);
     return ResponseEntity.ok(response);
 }
+
+
+
+
+
+
+
+
+
+
+
+
+export const fetchAnalyticsData = async (callApi, showSnackBar, payload) => {
+  try {
+    console.log("Drill-down payload: ", payload);
+    const responseData = await callApi(
+      "/AS/analytics/drill-down",
+      payload,
+      "POST",
+    );
+
+    const result = responseData?.data;
+
+    // CHANGED: multi-headcode responses shape "data" differently -
+    // each entry is { headCode, headMeta, headData }, not a flat row with `.name`.
+    // Sorting those with the old `.name` comparator would throw/produce garbage.
+    const isMultiHead = Boolean(responseData?.meta?.headCodeCount);
+
+    if (isMultiHead) {
+      // Sort each head's own rows independently; leave the per-head grouping intact
+      // for the caller to render (see note below on fetchInitialData/fetchChildrenData).
+      return (result || []).map((headEntry) => ({
+        ...headEntry,
+        headData: [...(headEntry.headData || [])].sort((a, b) =>
+          (a.name || "").localeCompare(b.name || ""),
+        ),
+      }));
+    }
+
+    const sortedList = [...(result || [])].sort((a, b) =>
+      (a.name || "").localeCompare(b.name || ""),
+    );
+    return sortedList;
+  } catch (error) {
+    console.error("Error fetching analytics data:", error);
+    showSnackBar("Error: " + error?.title || "Failed to fetch data", "error");
+  }
+};
+
+// Autocomplete API for Heads
+export const fetchHeads = async (callApi, reportName, search) => {
+  if (!search || search.length < 2) return [];
+  try {
+    const response = await callApi(
+      `/AS/analytics/heads/search?reportName=${reportName}&search=${search}`,
+      {},
+      "GET",
+    );
+    return Array.isArray(response) ? response : response?.data || [];
+  } catch (error) {
+    console.error("Error fetching heads:", error);
+    return [];
+  }
+};
+
+const formatDateToDDMMYYYY = (dateString) => {
+  if (!dateString) return "";
+  const [year, month, day] = dateString.split("-");
+  return `${day}-${month}-${year}`;
+};
+
+// Base payload filter builder
+const buildBaseFilters = (appliedFilters) => {
+  const formattedDate = formatDateToDDMMYYYY(appliedFilters.reportDate);
+
+  // CHANGED: pull all selected head codes, not just the first.
+  const headCodes = (appliedFilters.heads || [])
+    .map((h) => h?.headCode)
+    .filter(Boolean);
+
+  const filters = [
+    {
+      logicalField: "ReportDate",
+      operator: "EQUALS",
+      value: formattedDate,
+    },
+    // CHANGED: single head -> legacy "EQUALS" (unchanged, single-head response shape).
+    // Multiple heads -> "IN" with the full list; backend fans this out per head and
+    // returns the multi-head response shape (meta.headCodeCount + per-head entries).
+    headCodes.length > 1
+      ? {
+          logicalField: "HeadCode",
+          operator: "IN",
+          value: headCodes,
+        }
+      : {
+          logicalField: "HeadCode",
+          operator: "EQUALS",
+          value: headCodes[0],
+        },
+  ];
+
+  // Inject Circle or Branch filter if an entity is selected and the view requires it — unchanged
+  if (appliedFilters.entityCode) {
+    const isCircleScope = appliedFilters.viewCode.includes("CIRCLE");
+    const isBranchScope = appliedFilters.viewCode.includes("BRANCH");
+
+    if (isCircleScope) {
+      filters.push({
+        logicalField: "Circle",
+        operator: "EQUALS",
+        value: appliedFilters.entityCode,
+      });
+    } else if (isBranchScope) {
+      filters.push({
+        logicalField: "BranchCode",
+        operator: "EQUALS",
+        value: appliedFilters.entityCode,
+      });
+    }
+  }
+
+  return filters;
+};
+
+// fetchInitialData / fetchChildrenData below are UNCHANGED in this file.
