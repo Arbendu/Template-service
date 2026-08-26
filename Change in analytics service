@@ -114,7 +114,298 @@ public record MultiHeadDrillDownResponse(
 //service/SemanticDrillDownService.java
 
 
+package com.fincore.analyticsservice.service;
 
+import com.fincore.analyticsservice.client.DruidRestClient;
+import com.fincore.analyticsservice.component.DruidQueryBuilder;
+import com.fincore.analyticsservice.dto.*;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.context.annotation.Lazy;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.stereotype.Service;
+import org.springframework.util.CollectionUtils;
+import com.fincore.analyticsservice.mock.MockDruidEngine;
+import java.util.*;
+
+/**
+ * The "Brain" of the Semantic Layer.
+ * This service takes a "Logical" request from the frontend (e.g., "Give me the Total Balance for Branches"),
+ * looks up the physical rules in Oracle, translates the request, enforces RBAC, and executes it.
+ */
+@Slf4j
+@Service
+public class SemanticDrillDownService {
+    private static final Integer ROLE_ADMIN = 10;
+
+    // --- ADDED: constants for multi-headcode batch mode ---
+    private static final String HEAD_CODE_FIELD = "HeadCode";
+    private static final String OPERATOR_IN = "IN";
+    private static final int MAX_HEAD_CODES_PER_REQUEST = 50; // guardrail against abusive/huge batches
+
+    private final DruidRestClient druidRestClient;
+    private final DruidQueryBuilder queryBuilder;
+    private final ReportMetadataProvider metadataProvider;
+    private final MockDruidEngine mockEngine;
+
+    // --- ADDED: self-injection so per-head calls still go through the @Cacheable proxy.
+    // Calling this.executeDrillDown(...) from within this same class would bypass Spring's
+    // caching AOP proxy entirely (a well-known Spring self-invocation limitation).
+    @Lazy
+    @Autowired
+    private SemanticDrillDownService self;
+
+    public SemanticDrillDownService(
+            DruidRestClient druidRestClient,
+            DruidQueryBuilder queryBuilder,
+            ReportMetadataProvider metadataProvider, MockDruidEngine mockEngine) {
+        this.druidRestClient = druidRestClient;
+        this.queryBuilder = queryBuilder;
+        this.metadataProvider = metadataProvider;
+        this.mockEngine = mockEngine;
+    }
+
+    /**
+     * Executes the Drill-Down operation. Cached to ensure identical clicks return instantly.
+     */
+    @Cacheable(value = "drillDownData", key = "T(java.lang.String).valueOf(#request.hashCode())")
+    public DrillDownResponse executeDrillDown(DrillDownRequest request, Integer roleId) {
+        long startTime = System.currentTimeMillis();
+        String logicalTargetDim = request.dimensions().getFirst();
+
+        log.info("Executing DrillDown for view: [{}], logicalDim: [{}]", request.viewCode(), logicalTargetDim);
+
+        // THE ST MOCK INTERCEPTOR
+        // If the mock is enabled in application-st.yml, hijack the request and process in Java
+        if (mockEngine.isMockEnabled()) {
+            log.warn("=================> ROUTING REQUEST TO MOCK DRUID ENGINE FOR ST ENVIRONMENT <=================");
+            return mockEngine.execute(request, request.filters());
+        }
+
+        // 1. Fetch Metadata context for this view from Oracle
+        ViewMetadataContext context = metadataProvider.getViewContext(request.viewCode());
+
+        // 2. Perform RBAC validation (Are they allowed to see this specific view?)
+        validateAccess(context.requiredRoleIds(), roleId);
+
+        // 3. Translate Logical to DimensionConfig (e.g., "Branch" -> "BRANCH_CODE")
+        DimensionConfig targetDimConfig = translateDimension(logicalTargetDim, context.dimensionMap());
+        Map<String, String> resolvedMetricsSql = resolveMetrics(request.metrics(), context.metricMap());
+
+        // 4. Build the SQL Query string
+        Map<String, Object> druidPayload = queryBuilder.buildSqlPayload(
+                context.physicalDruidTable(),
+                logicalTargetDim,
+                targetDimConfig,
+                request.metrics(),
+                resolvedMetricsSql,
+                request.filters(),
+                context.dimensionMap()
+        );
+
+        log.info("Final druid payload to be executed: {}", druidPayload);
+
+        // 5. Execute against Druid
+        List<Map<String, Object>> rawDruidData = druidRestClient.executeQuery(druidPayload);
+
+        if (CollectionUtils.isEmpty(rawDruidData)) {
+            return new DrillDownResponse(new Meta("SUCCESS", logicalTargetDim, 0, System.currentTimeMillis() - startTime), Collections.emptyList());
+        }
+
+        // 6. Determine UI Hierarchy State ([+] button logic)
+        boolean hasChildren = determineIfHasChildren(logicalTargetDim, context.logicalHierarchyOrdered());
+
+        // 7. Format Final UI Response with unique IDs
+        List<Map<String, Object>> formattedData = formatResponseData(rawDruidData, logicalTargetDim, hasChildren);
+
+        long executionTime = System.currentTimeMillis() - startTime;
+        return new DrillDownResponse(new Meta("SUCCESS", logicalTargetDim, formattedData.size(), executionTime), formattedData);
+    }
+
+    // ==========================================================================================
+    // ADDED: Multi-headcode batch support
+    // ==========================================================================================
+
+    /**
+     * True when the request's HeadCode filter uses "IN" (batch mode) instead of
+     * the legacy single-value "EQUALS" operator. The controller uses this to route
+     * to the multi-head path without breaking any existing single-head callers.
+     */
+    public boolean isMultiHeadRequest(DrillDownRequest request) {
+        return request.filters().stream()
+                .anyMatch(f -> HEAD_CODE_FIELD.equalsIgnoreCase(f.logicalField())
+                        && OPERATOR_IN.equalsIgnoreCase(f.operator()));
+    }
+
+    /**
+     * Executes a drill-down for MULTIPLE head codes in one call.
+     * Decomposes the batch into one single-headcode request per code and delegates
+     * to the existing (cached) executeDrillDown() for each, so results are cached
+     * per head code exactly like today - a later single-head or different-batch
+     * request for the same head code + filters is served from cache.
+     * <p>
+     * A failure on one head code does not fail the whole batch; that head comes
+     * back with status "FAILED" and empty data while the others still succeed.
+     */
+    public MultiHeadDrillDownResponse executeMultiHeadDrillDown(DrillDownRequest request, Integer roleId) {
+        long batchStart = System.currentTimeMillis();
+
+        List<String> headCodes = extractHeadCodes(request.filters());
+        List<HeadDrillDownResult> results = new ArrayList<>(headCodes.size());
+
+        for (String headCode : headCodes) {
+            DrillDownRequest singleHeadRequest = withSingleHeadCodeFilter(request, headCode);
+            try {
+                DrillDownResponse singleResponse = self.executeDrillDown(singleHeadRequest, roleId);
+                results.add(new HeadDrillDownResult(headCode, singleResponse.meta(), singleResponse.data()));
+            } catch (Exception ex) {
+                log.error("DrillDown failed for headCode [{}] in batch for view [{}]",
+                        headCode, request.viewCode(), ex);
+                Meta failedMeta = new Meta("FAILED", request.dimensions().getFirst(), 0, 0L);
+                results.add(new HeadDrillDownResult(headCode, failedMeta, Collections.emptyList()));
+            }
+        }
+
+        long totalTime = System.currentTimeMillis() - batchStart;
+        String overallStatus = results.stream().anyMatch(r -> "FAILED".equals(r.headMeta().status()))
+                ? "PARTIAL_SUCCESS"
+                : "SUCCESS";
+
+        return new MultiHeadDrillDownResponse(
+                new MultiHeadMeta(overallStatus, totalTime, headCodes.size()),
+                results
+        );
+    }
+
+    /** Pulls the HeadCode "IN" filter out of the request and validates it. */
+    private List<String> extractHeadCodes(List<FilterDto> filters) {
+        FilterDto headCodeFilter = filters.stream()
+                .filter(f -> HEAD_CODE_FIELD.equalsIgnoreCase(f.logicalField())
+                        && OPERATOR_IN.equalsIgnoreCase(f.operator()))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "A HeadCode filter with operator 'IN' is required for multi-head drill-down."));
+
+        if (!(headCodeFilter.value() instanceof List<?> rawList) || rawList.isEmpty()) {
+            throw new IllegalArgumentException("HeadCode 'IN' filter must supply a non-empty list of head codes.");
+        }
+        if (rawList.size() > MAX_HEAD_CODES_PER_REQUEST) {
+            throw new IllegalArgumentException(
+                    "Too many head codes requested in a single call (max " + MAX_HEAD_CODES_PER_REQUEST + ").");
+        }
+
+        List<String> headCodes = new ArrayList<>(rawList.size());
+        for (Object o : rawList) {
+            String code = String.valueOf(o).trim();
+            if (code.isEmpty()) {
+                throw new IllegalArgumentException("HeadCode list contains a blank value.");
+            }
+            headCodes.add(code);
+        }
+        return headCodes;
+    }
+
+    /**
+     * Returns a copy of the request where the multi-value HeadCode "IN" filter is
+     * replaced by a single-value "EQUALS" filter for one head code - the exact shape
+     * the existing ARRAY_CONTAINS SQL logic in DruidQueryBuilder already handles.
+     * DruidQueryBuilder itself needs zero changes.
+     */
+    private DrillDownRequest withSingleHeadCodeFilter(DrillDownRequest original, String headCode) {
+        List<FilterDto> newFilters = new ArrayList<>(original.filters().size());
+        for (FilterDto f : original.filters()) {
+            if (HEAD_CODE_FIELD.equalsIgnoreCase(f.logicalField()) && OPERATOR_IN.equalsIgnoreCase(f.operator())) {
+                newFilters.add(new FilterDto(f.logicalField(), "EQUALS", headCode));
+            } else {
+                newFilters.add(f);
+            }
+        }
+        return new DrillDownRequest(original.viewCode(), original.dimensions(), original.metrics(), newFilters);
+    }
+
+    // ==========================================================================================
+    // Existing helpers below - unchanged
+    // ==========================================================================================
+
+    /**
+     * Validates if the user's integer role ID is permitted to view this report.
+     * * @param requiredRoleIds A comma-separated string from DB (e.g., "54,56"). Null means public.
+     *
+     * @param roleId The user's actual role ID from JWT.
+     */
+    private void validateAccess(String requiredRoleIds, Integer roleId) {
+
+        // Admin always has access to everything
+        if (ROLE_ADMIN.equals(roleId)) {
+            return;
+        }
+
+        // If DB has no restrictions, allow access
+        // Allow access to all the roles
+        if (requiredRoleIds == null || requiredRoleIds.trim().isEmpty() || "NULL".equalsIgnoreCase(requiredRoleIds.trim())) {
+            return;
+        }
+
+        // Parse comma-separated list and check for match
+        List<String> allowedRoles = Arrays.asList(requiredRoleIds.split(","));
+
+        if (!allowedRoles.contains(String.valueOf(roleId))) {
+            log.warn("Security Alert: User with Role ID [{}] attempted to access restricted view requiring roles [{}]", roleId, requiredRoleIds);
+            throw new AccessDeniedException("Insufficient permissions to execute drill-down for this view.");
+        }
+    }
+
+    private DimensionConfig translateDimension(String logicalName, Map<String, DimensionConfig> dimMap) {
+        DimensionConfig config = dimMap.get(logicalName);
+        if (config == null) {
+            throw new IllegalArgumentException("Logical dimension '" + logicalName + "' is not supported in this view.");
+        }
+        return config;
+    }
+
+    private Map<String, String> resolveMetrics(List<String> logicalMetrics, Map<String, String> metricMap) {
+        Map<String, String> resolved = new HashMap<>();
+        for (String logicalName : logicalMetrics) {
+            String sqlExpression = metricMap.get(logicalName);
+            if (sqlExpression == null || sqlExpression.isBlank()) {
+                throw new IllegalArgumentException("Logical metric '" + logicalName + "' is not supported in this view.");
+            }
+            resolved.put(logicalName, sqlExpression);
+        }
+        return resolved;
+    }
+
+    private boolean determineIfHasChildren(String currentDim, List<String> hierarchy) {
+        int index = hierarchy.indexOf(currentDim);
+        return index != -1 && index < hierarchy.size() - 1;
+    }
+
+    private List<Map<String, Object>> formatResponseData(List<Map<String, Object>> rawData, String logicalDim, boolean hasChildren) {
+        String idPrefix = logicalDim.toLowerCase() + "_";
+        List<Map<String, Object>> result = new ArrayList<>(rawData.size());
+
+        for (Map<String, Object> row : rawData) {
+            Map<String, Object> formattedRow = new LinkedHashMap<>();
+
+            // Safe extraction because the QueryBuilder AS aliased the complex expression back to the simple logicalDim string
+            Object nameObj = row.get(logicalDim);
+            String nameValue = (nameObj != null && !nameObj.toString().isBlank()) ? nameObj.toString() : "Unassigned";
+
+            formattedRow.put("id", idPrefix + nameValue.toLowerCase().replaceAll("[^a-z0-9]", "_"));
+            formattedRow.put("name", nameValue);
+
+            for (Map.Entry<String, Object> entry : row.entrySet()) {
+                if (!entry.getKey().equals(logicalDim)) {
+                    formattedRow.put(entry.getKey(), entry.getValue() == null ? 0.0 : entry.getValue());
+                }
+            }
+            formattedRow.put("hasChildren", hasChildren);
+            result.add(formattedRow);
+        }
+        return result;
+    }
+}
 
 
 
