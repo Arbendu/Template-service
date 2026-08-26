@@ -1,3 +1,40 @@
+
+// NEW payload
+{
+  "viewCode": "YSA_BANK",
+  "dimensions": [
+    "Geography"
+  ],
+  "metrics": [
+    "AMOUNT"
+  ],
+  "filters": [
+    {
+      "logicalField": "ReportDate",
+      "operator": "EQUALS",
+      "value": "11-05-2026"
+    },
+    {
+      "logicalField": "HeadCode",
+      "operator": "IN",
+      "value": [
+        "L012",
+        "01160",
+        "10001"
+      ]
+    }
+  ]
+}
+
+
+
+
+
+
+
+
+
+// NEW response
 {
   "meta": {
     "status": "SUCCESS",
