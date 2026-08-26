@@ -1,4 +1,3 @@
-
 // config/RedisConfig
 
 package com.fincore.analyticsservice.config;
@@ -25,17 +24,19 @@ public class RedisConfig {
     @Bean
     public RedisCacheConfiguration cacheConfiguration() {
 
-        // Only trust our own DTOs + standard collections to be deserialized polymorphically.
-        // Do NOT reuse the app-wide ObjectMapper here - if we activate default typing on that
-        // one instead, every REST response serialized by it starts including "@class" fields.
+        // ------------------------------------------- Added this ----------------------------------------------------------
         PolymorphicTypeValidator ptv = BasicPolymorphicTypeValidator.builder()
                 .allowIfSubType("com.fincore.analyticsservice.dto")
                 .allowIfSubType("java.util")
+                .allowIfSubType("java.lang")
+                .allowIfSubType("java.math")
+                .allowIfSubType("java.time")
                 .build();
 
         ObjectMapper cacheObjectMapper = JsonMapper.builder()
-                .activateDefaultTyping(ptv, DefaultTyping.NON_FINAL)
+                .activateDefaultTyping(ptv, DefaultTyping.NON_FINAL_AND_RECORDS)
                 .build();
+     // ------------------------------------------- End ----------------------------------------------------------
 
         return RedisCacheConfiguration.defaultCacheConfig()
                 .entryTtl(Duration.ofMinutes(30))
