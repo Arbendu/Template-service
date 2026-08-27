@@ -1,0 +1,2510 @@
+// ******************************************* AnalyticsApi *************************************** //
+
+export const fetchAnalyticsData = async (callApi, showSnackBar, payload) => {
+  try {
+    console.log("Drill-down payload: ", payload);
+    const responseData = await callApi(
+      "/AS/analytics/drill-down",
+      payload,
+      "POST",
+    );
+
+    const result = responseData?.data;
+    //console.log("Original Result >>", result);
+    const sortedList = result?.sort((a, b) => a.name.localeCompare(b.name));
+    //console.log("Sorted Result >>", sortedList);
+    return sortedList || [];
+  } catch (error) {
+    console.error("Error fetching analytics data:", error);
+    showSnackBar("Error: " + error?.title || "Failed to fetch data", "error");
+  }
+};
+
+// Autocomplete API for Heads
+export const fetchHeads = async (callApi, reportName, search) => {
+  if (!search || search.length < 2) return [];
+  try {
+    const response = await callApi(
+      `/AS/analytics/heads/search?reportName=${reportName}&search=${search}`,
+      {},
+      "GET",
+    );
+    return Array.isArray(response) ? response : response?.data || [];
+  } catch (error) {
+    console.error("Error fetching heads:", error);
+    return [];
+  }
+};
+
+const formatDateToDDMMYYYY = (dateString) => {
+  if (!dateString) return "";
+  const [year, month, day] = dateString.split("-");
+  return `${day}-${month}-${year}`;
+};
+
+// Base payload filter builder
+const buildBaseFilters = (appliedFilters) => {
+  const formattedDate = formatDateToDDMMYYYY(appliedFilters.reportDate);
+  const filters = [
+    {
+      logicalField: "ReportDate",
+      operator: "EQUALS",
+      value: formattedDate,
+    },
+    {
+      logicalField: "HeadCode",
+      operator: "EQUALS",
+      value: appliedFilters.head?.headCode,
+    },
+  ];
+
+  // Inject Circle or Branch filter if an entity is selected and the view requires it
+  if (appliedFilters.entityCode) {
+    const isCircleScope = appliedFilters.viewCode.includes("CIRCLE");
+    const isBranchScope = appliedFilters.viewCode.includes("BRANCH");
+
+    if (isCircleScope) {
+      filters.push({
+        logicalField: "Circle",
+        operator: "EQUALS",
+        value: appliedFilters.entityCode,
+      });
+    } else if (isBranchScope) {
+      filters.push({
+        logicalField: "BranchCode",
+        operator: "EQUALS",
+        value: appliedFilters.entityCode,
+      });
+    }
+  }
+
+  return filters;
+};
+
+export const fetchInitialData = async (
+  callApi,
+  showSnackBar,
+  appliedFilters,
+  hierarchy,
+  metrics,
+) => {
+  const rootDimension = hierarchy[0];
+  const payload = {
+    viewCode: appliedFilters.viewCode,
+    dimensions: [rootDimension],
+    metrics: metrics.map((m) => m.logicalName),
+    filters: buildBaseFilters(appliedFilters),
+  };
+
+  const apiData = await fetchAnalyticsData(callApi, showSnackBar, payload);
+
+  return (apiData || []).map((row) => ({
+    ...row,
+    level: 0,
+    nodeFilters: [],
+    id: `root_${row.name || row.id}`,
+  }));
+};
+
+export const fetchChildrenData = async (
+  callApi,
+  showSnackBar,
+  parentNode,
+  appliedFilters,
+  hierarchy,
+  metrics,
+) => {
+  const childLevel = parentNode.level + 1;
+  const nextDimension = hierarchy[childLevel];
+
+  const currentFilters = [
+    ...(parentNode.nodeFilters || []),
+    {
+      logicalField: hierarchy[parentNode.level],
+      operator: "EQUALS",
+      value: parentNode.name,
+    },
+  ];
+
+  const payload = {
+    viewCode: appliedFilters.viewCode,
+    dimensions: [nextDimension],
+    metrics: metrics.map((m) => m.logicalName),
+    filters: [...buildBaseFilters(appliedFilters), ...currentFilters],
+  };
+
+  const apiData = await fetchAnalyticsData(callApi, showSnackBar, payload);
+
+  return (apiData || []).map((row) => ({
+    ...row,
+    level: childLevel,
+    nodeFilters: currentFilters,
+    id: `${parentNode.id}_${row.name || row.id}`,
+  }));
+};
+
+
+
+
+
+
+// ************************************************* components/ActualTreeTableRow ************************************************ //
+
+import React, { memo, forwardRef } from "react";
+import { TableRow, TableCell, CircularProgress } from "@mui/material";
+import { formatCurrency } from "../utils/analyticsConstants";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
+import { IconButton, Tooltip } from "@mui/material";
+
+const ActualTreeTableRow = memo(
+  forwardRef(
+    (
+      {
+        node,
+        isExpanded,
+        isLoading,
+        // expandedIds,
+        expandedIdsRef,
+        onToggle,
+        maxVisibleLevel,
+        index,
+        activeMetrics,
+        theme,
+        isFullscreen,
+        hierarchyLength,
+        showSnackBar,
+        ...props
+      },
+      ref,
+    ) => {
+      const isRoot = node.level === 0;
+      const isLastLevel = node.level === hierarchyLength - 1;
+
+      return (
+        <TableRow
+          ref={ref}
+          hover
+          style={{
+            backgroundColor: isExpanded
+              ? theme.palette.purple?.[100] || "inherit"
+              : "inherit",
+            borderLeft: isExpanded
+              ? `4px solid ${theme.palette.primary.main}`
+              : "4px solid transparent",
+            height: "40px",
+            transition:
+              "background-color 0.2s ease-in-out, border-color 0.2s ease-in-out",
+          }}
+          {...props}
+        >
+          {Array.from({ length: maxVisibleLevel + 1 }).map((_, colIndex) => {
+            if (colIndex === node.level) {
+              return (
+                <TableCell
+                  key={colIndex}
+                  style={{
+                    borderRight: `1px solid ${theme.palette.divider}`,
+                    borderBottom: `1px solid ${theme.palette.divider}`,
+                    //minWidth: "260px",
+                    whiteSpace: "nowrap",
+                    padding: "4px 4px",
+                    verticalAlign: "middle",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      // paddingLeft: `${node.level * 10 + 8}px`,
+                      paddingLeft: 4,
+                      paddingRight: "16px",
+                      width: "100%",
+                      boxSizing: "border-box",
+                    }}
+                  >
+                    {node.hasChildren && !isLastLevel ? (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onToggle(node);
+                        }}
+                        disabled={isLoading}
+                        style={{
+                          marginRight: "8px",
+                          padding: 0,
+                          width: "20px",
+                          height: "20px",
+                          border: `1px solid ${isExpanded ? theme.palette.primary.main : theme.palette.divider}`,
+                          borderRadius: "50%",
+                          backgroundColor: "transparent",
+                          cursor: isLoading ? "wait" : "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          color: isExpanded
+                            ? theme.palette.primary.main
+                            : "inherit",
+                          fontSize: "14px",
+                          lineHeight: 1,
+                          transition: "all 0.15s ease",
+                        }}
+                        onMouseOver={(e) =>
+                          (e.currentTarget.style.transform = "scale(1.15)")
+                        }
+                        onMouseOut={(e) =>
+                          (e.currentTarget.style.transform = "scale(1)")
+                        }
+                      >
+                        {isLoading ? (
+                          <CircularProgress
+                            size={12}
+                            color={isExpanded ? "primary.dark" : "inherit"}
+                          />
+                        ) : isExpanded ? (
+                          "-"
+                        ) : (
+                          "+"
+                        )}
+                      </button>
+                    ) : (
+                      <div style={{ width: "28px" }} />
+                    )}
+                    <span
+                      style={{
+                        fontWeight: isExpanded ? 700 : isRoot ? 600 : 400,
+                        color: isExpanded
+                          ? theme.palette.primary.main
+                          : "inherit",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        fontSize: "0.875rem",
+                        fontFamily:
+                          theme.typography.fontFamily ||
+                          "Roboto, Helvetica, Arial, sans-serif",
+                      }}
+                    >
+                      {node.name}
+                    </span>
+
+                    {/* Checks if it's fullscreen, expanded, data is loaded, and targets HeadCode (level 1) */}
+
+                    {isExpanded &&
+                      !isLoading &&
+                      node.hasChildren &&
+                      !isLastLevel && (
+                        <Tooltip
+                          title="Copy Data (Excel Format)"
+                          placement="top"
+                          arrow
+                        >
+                          <IconButton
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation(); // Prevents row toggle when clicking the copy button
+
+                              const rows = [];
+
+                              // 1. Get headers starting exactly from the clicked node's level downward
+                              const allHeaders = Array.from(
+                                document.querySelectorAll("th"),
+                              )
+                                .map((th) => th.innerText.trim())
+                                .filter(Boolean);
+                              const hierarchyHeaders = allHeaders.slice(
+                                node.level,
+                                maxVisibleLevel + 1,
+                              );
+                              const metricHeaders = activeMetrics.map(
+                                (m) => m.displayName || m.logicalName,
+                              );
+                              rows.push(
+                                [...hierarchyHeaders, ...metricHeaders].join(
+                                  "\t",
+                                ),
+                              );
+
+                              // 2. Recursive function to traverse children and build Tab-Separated columns
+                              const traverse = (currentNode) => {
+                                // Create an array of empty strings based on the max visible hierarchy depth
+                                const originalColumns = Array(
+                                  maxVisibleLevel + 1,
+                                ).fill("");
+
+                                // Place the current node's name in its specific column level (creates the diagonal alignment)
+                                originalColumns[currentNode.level] =
+                                  currentNode.name;
+
+                                // Map over active metrics to grab amounts dynamically
+                                const metrics = activeMetrics.map((m) => {
+                                  const value = currentNode[m.logicalName];
+
+                                  // If the value is strictly null or undefined, leave it blank
+                                  if (value === null || value === undefined)
+                                    return "";
+
+                                  // If it is a valid number (including 0), format to 2 dacimal places
+                                  return !isNaN(value)
+                                    ? Number(value).toFixed(2)
+                                    : value;
+                                });
+
+                                // Slice the columns dynamically to match the header offset perfectly
+                                const shiftedColumns = originalColumns.slice(
+                                  node.level,
+                                );
+
+                                // Combine the hierarchy columns and the metric columns, separated by Tabs
+                                const rowString = [
+                                  ...shiftedColumns,
+                                  ...metrics,
+                                ].join("\t");
+                                rows.push(rowString);
+
+                                // If this node has loaded children, recursively run them so they are included in the copy
+                                // if (
+                                //   expandedIds.has(currentNode.id) &&
+                                //   currentNode.children &&
+                                //   currentNode.children.length > 0
+                                // ) {
+                                //   currentNode.children.forEach((child) =>
+                                //     traverse(child),
+                                //   );
+                                // }
+
+                                if (
+                                  expandedIdsRef.current.has(currentNode.id) &&
+                                  currentNode.children &&
+                                  currentNode.children.length > 0
+                                ) {
+                                  currentNode.children.forEach((child) =>
+                                    traverse(child),
+                                  );
+                                }
+                              };
+
+                              // 3. Start the recursive generation from the clicked row
+                              traverse(node);
+
+                              // 4. Join all the generated rows with a Newline character
+                              const combinedData = rows.join("\n");
+
+                              // 5. Send the perfectly formatted block to the clipboard
+                              navigator.clipboard
+                                .writeText(combinedData)
+                                .then(() => {
+                                  showSnackBar(
+                                    "Data copied in Spreadsheet format",
+                                    "success",
+                                  );
+                                })
+                                .catch((err) => {
+                                  console.error("Failed to copy text: ", err);
+                                  showSnackBar("Failed to copy text", "error");
+                                });
+                            }}
+                            sx={{ ml: 2, padding: "2px" }}
+                          >
+                            <ContentCopyIcon
+                              sx={{ fontSize: 16, color: "text.secondary" }}
+                            />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                    {/* {
+                      isExpanded &&
+                      !isLoading &&
+                      node.level === 1 &&
+                      node.children && (
+                        <Tooltip title="Copy all GLCODEs" placement="top" arrow>
+                          <IconButton
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation(); // Prevents row toggle when clicking the copy button
+
+                              // 1. Format the parent (Headcode) row
+                              // We use node.name and node.TotalAmount for the parent
+                              const headcodeRow = `${node.name}\t${node.TotalAmount || ""}`;
+
+                              // 2. Format the children (GLCODEs) rows
+                              const childrenRows = node.children
+                                .map(
+                                  (child) =>
+                                    `${child.name}\t${child.TotalAmount || ""}`,
+                                )
+                                .join("\n");
+
+                              // 3. Combine them with a newline (\n) in between
+                              const combinedData = `${headcodeRow}\n${childrenRows}`;
+
+                              console.log("Copied Data:\n", combinedData);
+
+                              // 4. Send the whole block to the clipboard
+                              navigator.clipboard
+                                .writeText(combinedData)
+                                .then(() => {
+                                  showSnackBar(
+                                    "Text copied successfully",
+                                    "success",
+                                  );
+                                })
+                                .catch((err) => {
+                                  console.error("Failed to copy text: ", err);
+                                  showSnackBar("Failed to copy text", "error");
+                                });
+                            }}
+                            sx={{ ml: 2, padding: "2px" }}
+                          >
+                            <ContentCopyIcon
+                              sx={{ fontSize: 16, color: "text.secondary" }}
+                            />
+                          </IconButton>
+                        </Tooltip>
+                    )} */}
+                  </div>
+                </TableCell>
+              );
+            }
+            return (
+              <TableCell
+                key={colIndex}
+                style={{
+                  borderRight: `1px solid ${theme.palette.divider}`,
+                  borderBottom: `1px solid ${theme.palette.divider}`,
+                  whiteSpace: "nowrap",
+                  padding: 0,
+                }}
+              />
+            );
+          })}
+
+          {activeMetrics.map((metric) => {
+            const value = node[metric.logicalName];
+            return (
+              <TableCell
+                key={metric.logicalName}
+                align="right"
+                style={{
+                  borderRight: `1px solid ${theme.palette.divider}`,
+                  borderBottom: `1px solid ${theme.palette.divider}`,
+                  // width: "160px",
+                  // minWidth: "160px",
+                  // maxWidth: "160px",
+                  //padding: "8px 16px",
+                  color:
+                    value < 0
+                      ? theme.palette.error.main
+                      : theme.palette.success.main,
+                  fontWeight: 500,
+                  whiteSpace: "nowrap",
+                  verticalAlign: "middle",
+                  fontSize: "0.875rem",
+                  fontFamily:
+                    theme.typography.fontFamily ||
+                    "Roboto, Helvetica, Arial, sans-serif",
+                }}
+              >
+                {formatCurrency(value)}
+              </TableCell>
+            );
+          })}
+        </TableRow>
+      );
+    },
+  ),
+  (prevProps, nextProps) => {
+    return (
+      prevProps.isExpanded === nextProps.isExpanded &&
+      prevProps.isLoading === nextProps.isLoading &&
+      prevProps.node === nextProps.node &&
+      prevProps.maxVisibleLevel === nextProps.maxVisibleLevel &&
+      prevProps.index === nextProps.index &&
+      prevProps.theme === nextProps.theme
+      // prevProps.isFullscreen === nextProps.isFullscreen
+    );
+  },
+);
+
+ActualTreeTableRow.displayName = "ActualTreeTableRow";
+export default ActualTreeTableRow;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ********************************************** FilterDialog ********************************************* //
+
+import React, { useState, useEffect, useMemo } from "react";
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  IconButton,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  TextField,
+  Autocomplete,
+  Box,
+  Typography,
+  CircularProgress,
+  FormHelperText,
+} from "@mui/material";
+import CloseIcon from "@mui/icons-material/Close";
+import InfoIcon from "@mui/icons-material/Info";
+import QueryStatsIcon from "@mui/icons-material/QueryStats";
+import { fetchHeads } from "../api/analyticsApi";
+import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
+import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
+import { DatePicker } from "@mui/x-date-pickers/DatePicker";
+import dayjs from "dayjs";
+
+// Ensure 'en-gb' locale logic maps uniformly across the date components
+import "dayjs/locale/en-gb";
+
+export default function FilterDialog({
+  open,
+  onClose,
+  onApply,
+  reportsConfig = [],
+  currentFilters,
+  callApi,
+  user,
+  isApplying,
+}) {
+  // --- USER AUTH MAPPING ---
+  // Verify these keys match exactly what your Redis auth object returns
+  // const isAdmin = user?.role === 10 || user?.roleName === "ADMIN";
+  const userCircleCode = user?.circleCode;
+  const userCircleName = user?.circleName;
+  const userBranchCode = user?.branch;
+  const userBranchName = user?.branchName;
+
+  const [reportCode, setReportCode] = useState("");
+  const [viewCode, setViewCode] = useState("");
+  const [head, setHead] = useState(null);
+  const [reportDate, setReportDate] = useState("");
+
+  // Track the raw string typed by the user to catch incomplete masks like "DD/05/YYYY"
+  const [dateInputValue, setDateInputValue] = useState("");
+  // Unique dynamic key to explicitly force internal text component resets
+  const [datePickerKey, setDatePickerKey] = useState(0);
+
+  // Entity (Circle/Branch) State mapping
+  const [entity, setEntity] = useState(null); // Stores the selected object { code, name }
+  const [entityInputValue, setEntityInputValue] = useState("");
+  const [entityOptions, setEntityOptions] = useState([]);
+  const [isEntityLoading, setIsEntityLoading] = useState(false);
+
+  const [headInputValue, setHeadInputValue] = useState("");
+  const [headOptions, setHeadOptions] = useState([]);
+  const [isHeadsLoading, setIsHeadsLoading] = useState(false);
+
+  const isCircleScope = viewCode.includes("CIRCLE");
+  const isBranchScope = viewCode.includes("BRANCH");
+  const MIN_ALLOWED_DATE = dayjs("2026-03-31").startOf("day");
+
+  const [etlDate, setEtlDate] = useState(null);
+
+  // Sync state when dialog opens
+  useEffect(() => {
+    if (open) {
+      setReportCode(currentFilters?.reportCode || "");
+      setViewCode(currentFilters?.viewCode || "");
+      setHead(currentFilters?.head || null);
+
+      const initialDate = currentFilters?.reportDate || "";
+      setReportDate(initialDate);
+      setDateInputValue(
+        initialDate ? dayjs(initialDate).format("DD/MM/YYYY") : "",
+      );
+
+      // Restore Head
+      if (currentFilters?.head) {
+        setHeadInputValue(
+          `${currentFilters.head.headCode} - ${currentFilters.head.headName}`,
+        );
+        setHeadOptions([currentFilters.head]);
+      } else {
+        setHeadInputValue("");
+        setHeadOptions([]);
+      }
+
+      // Restore Entity
+      if (currentFilters?.entityCode && currentFilters?.entityName) {
+        setEntity({
+          code: currentFilters.entityCode,
+          name: currentFilters.entityName,
+        });
+        setEntityInputValue(
+          `${currentFilters.entityCode} - ${currentFilters.entityName}`,
+        );
+      } else {
+        setEntity(null);
+        setEntityInputValue("");
+        setEntityOptions([]);
+      }
+    }
+  }, [open, currentFilters]);
+
+  // Derived available Scopes directly from Config Views
+  const availableViews = useMemo(() => {
+    if (!reportCode) return [];
+    const report = reportsConfig.find((r) => r.reportCode === reportCode);
+
+    if (!report?.views) return [];
+
+    // Create a shallow copy of the views array and sort it alphabetically by displayName
+    return [...report.views].sort((a, b) =>
+      a.displayName.localeCompare(b.displayName),
+    );
+  }, [reportCode, reportsConfig]);
+
+  // --- ENTITY FETCHING & AUTO-FILL LOGIC ---
+  useEffect(() => {
+    // 1. If not admin, auto-select their default entity and lock it
+    // if (!isAdmin) {
+    //   if (isCircleScope && userCircleCode) {
+    //     setEntity({
+    //       code: userCircleCode,
+    //       name: userCircleName || userCircleCode,
+    //     });
+    //   } else if (isBranchScope && userBranchCode) {
+    //     setEntity({
+    //       code: userBranchCode,
+    //       name: userBranchName || userBranchCode,
+    //     });
+    //   } else {
+    //     setEntity(null);
+    //   }
+    //   return; // Exit early so non-admins don't fetch data
+    // }
+
+    // 2. If Admin, fetch data dynamically on input change
+    const delayDebounceFn = setTimeout(async () => {
+      if (entityInputValue && entityInputValue.length >= 2) {
+        setIsEntityLoading(true);
+        try {
+          let response;
+          let mappedData = [];
+
+          if (isCircleScope) {
+            // Assuming the circle search API endpoint
+            response = await callApi(
+              `/CM/common-master/circle-codes`,
+              {},
+              "GET",
+            );
+            const data = response?.data || [];
+            // Map Circle response to a standard { code, name } format
+            mappedData = data.map((c) => ({
+              code: c.circleCode,
+              name: c.circleName,
+            }));
+          } else if (isBranchScope) {
+            // Branch API endpoint as requested
+            response = await callApi(
+              `/CM/common-master/branches-code-name-only?q=${entityInputValue}&circleCode=`,
+              {},
+              "GET",
+            );
+            const data = response?.data || [];
+            // Branch response is already in { code, name } format, but we ensure mapping
+            mappedData = data.map((b) => ({ code: b.code, name: b.name }));
+          }
+
+          setEntityOptions(mappedData);
+        } catch (error) {
+          console.error("Error fetching entities:", error);
+          setEntityOptions([]);
+        } finally {
+          setIsEntityLoading(false);
+        }
+      } else {
+        setEntityOptions(entity ? [entity] : []);
+      }
+    }, 500);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [
+    entityInputValue,
+    isCircleScope,
+    isBranchScope,
+    callApi,
+    entity,
+    userCircleCode,
+    userCircleName,
+    userBranchCode,
+    userBranchName,
+  ]);
+
+  // --- HEAD CODE FETCHING LOGIC ---
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(async () => {
+      if (headInputValue && headInputValue.length >= 2 && reportCode) {
+        setIsHeadsLoading(true);
+        const data = await fetchHeads(callApi, reportCode, headInputValue);
+        setHeadOptions(data);
+        setIsHeadsLoading(false);
+      } else {
+        setHeadOptions(head ? [head] : []);
+      }
+    }, 500);
+    return () => clearTimeout(delayDebounceFn);
+  }, [headInputValue, reportCode, callApi, head]);
+
+  // --- SYSTEM DATE FETCHING LOGIC ---
+  useEffect(() => {
+    const fetchSystemDate = async () => {
+      if (!open) return;
+      try {
+        const dateRes = await callApi("/PS/file/fincore-date", {}, "GET");
+        const etlRaw = dateRes?.data?.userDate;
+        const etl = etlRaw
+          ? dayjs(etlRaw.split("T")[0]).endOf("day")
+          : dayjs().endOf("day");
+        setEtlDate(etl);
+      } catch (e) {
+        console.error("Date error:", e);
+        setEtlDate(dayjs().endOf("day"));
+      }
+    };
+    fetchSystemDate();
+  }, [open, callApi]);
+
+  const handleReset = () => {
+    setReportCode("");
+    setViewCode("");
+    setHead(null);
+    setHeadInputValue("");
+    setHeadOptions([]);
+
+    setEntity(null);
+    setEntityInputValue("");
+    setEntityOptions([]);
+
+    setReportDate("");
+    setDateInputValue("");
+    // Incrementing the key cleanly forces the DatePicker input UI to completely reset its internal DOM state
+    setDatePickerKey((prev) => prev + 1);
+  };
+
+  const handleApply = () => {
+    if (dateValidation.error) return;
+    onApply({
+      reportCode,
+      viewCode,
+      head,
+      entityCode: entity?.code || "",
+      entityName: entity?.name || "",
+      reportDate,
+    });
+  };
+  const handlePaste = (event) => {
+    event.preventDefault();
+  };
+
+  // Comprehensive validation metrics logic
+  const dateValidation = useMemo(() => {
+    const minDateStr = MIN_ALLOWED_DATE.format("DD/MM/YYYY");
+    const maxLimit = etlDate || dayjs().endOf("day");
+    const maxDateStr = maxLimit.format("DD/MM/YYYY");
+
+    if (!dateInputValue && !reportDate) {
+      return {
+        error: false,
+        text: `Allowed Range: ${minDateStr} - ${maxDateStr}`,
+      };
+    }
+
+    // Explicitly check for alpha-masked formats like "DD/05/YYYY" or "01/MM/2026"
+    const containsMaskCharacters = /[a-zA-Z]/.test(dateInputValue);
+    const selectedDate = dayjs(reportDate);
+
+    if (containsMaskCharacters || !selectedDate.isValid()) {
+      return {
+        error: true,
+        text: "Please enter a valid date.",
+      };
+    }
+
+    if (selectedDate.year() < 2000) {
+      return {
+        error: true,
+        text: `Date cannot be prior to ${minDateStr}`,
+      };
+    }
+
+    if (selectedDate.isBefore(MIN_ALLOWED_DATE, "day")) {
+      return {
+        error: true,
+        text: `Date cannot be prior to ${minDateStr}`,
+      };
+    }
+
+    if (selectedDate.isAfter(maxLimit, "day")) {
+      return {
+        error: true,
+        text: `Future dates beyond ${maxDateStr} are not allowed.`,
+      };
+    }
+
+    return {
+      error: false,
+      text: `Allowed Range: ${minDateStr} - ${maxDateStr}`,
+    };
+  }, [reportDate, dateInputValue, etlDate, MIN_ALLOWED_DATE]);
+
+  const isApplyEnabled = useMemo(() => {
+    if (
+      !reportCode ||
+      !viewCode ||
+      !head?.headCode ||
+      !reportDate ||
+      dateValidation.error
+    ) {
+      return false;
+    }
+    if (isCircleScope || isBranchScope) return !!entity?.code;
+    return true;
+  }, [
+    reportCode,
+    viewCode,
+    head,
+    entity,
+    reportDate,
+    isCircleScope,
+    isBranchScope,
+    dateValidation.error,
+  ]);
+
+  return (
+    <Dialog
+      open={open}
+      onClose={(event, reason) => {
+        // Prevent dialog from closing on backdrop click or ESC key.
+        // Dialog should close only using the Close (X) icon.
+        if (reason === "backdropClick") return;
+        if (reason === "escapeKeyDown") return;
+
+        onClose();
+      }}
+      maxWidth="sm"
+      fullwidth
+    >
+      <DialogTitle
+        sx={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 2,
+        }}
+      >
+        <Typography
+          variant="h6"
+          fontWeight="bold"
+          sx={{ display: "flex", alignItems: "center", gap: 2 }}
+        >
+          <QueryStatsIcon /> Drill Down Filters
+        </Typography>
+        <IconButton onClick={onClose} size="small" disabled={isApplying}>
+          <CloseIcon />
+        </IconButton>
+      </DialogTitle>
+
+      <DialogContent dividers>
+        <Box display="flex" flexDirection="column" gap={3} py={1}>
+          {/* Report Code Selection */}
+          <FormControl size="small" fullWidth>
+            <InputLabel id="dialog-report-label">Select Report *</InputLabel>
+            <Select
+              labelId="dialog-report-label"
+              value={reportCode}
+              label="Select Report *"
+              disabled={isApplying}
+              onChange={(e) => {
+                setReportCode(e.target.value);
+                setViewCode("");
+                setHead(null);
+                setHeadInputValue("");
+                setHeadOptions([]);
+                setEntity(null);
+                setEntityInputValue("");
+                setEntityOptions([]);
+              }}
+            >
+              {reportsConfig.map((report) => (
+                <MenuItem key={report.reportCode} value={report.reportCode}>
+                  {report.displayName}
+                </MenuItem>
+              ))}
+            </Select>
+            <FormHelperText
+              id="scope-helper-text"
+              sx={{
+                fontStyle: "italic",
+                fontSize: "0.75rem",
+                display: "flex",
+                alignItems: "center",
+                gap: "4px",
+                lineHeight: 1.5,
+              }}
+            >
+              <InfoIcon sx={{ fontSize: "0.625rem" }} />
+              Please select a report to initiate drill-down analysis.
+            </FormHelperText>
+          </FormControl>
+
+          {/* Head Code Autocomplete */}
+          <Autocomplete
+            size="small"
+            autoHighlight
+            options={headOptions}
+            sx={{
+              "& .MuiAutocomplete-popupIndicator": {
+                backgroundColor: "transparent",
+              },
+              "& .MuiAutocomplete-popupIndicator:hover": {
+                backgroundColor: "transparent",
+              },
+            }}
+            noOptionsText={
+              headInputValue.length >= 2 && !isHeadsLoading
+                ? "No match found"
+                : "Type at least 2 characters..."
+            }
+            // 1. Explicitly control the input value
+            inputValue={headInputValue}
+            value={head}
+            getOptionLabel={(option) =>
+              option ? `${option.headCode} - ${option.headName}` : ""
+            }
+            onChange={(event, newValue) => setHead(newValue)}
+            onInputChange={(event, newInputValue, reason) => {
+              // 2. Ignore 'reset' events (happens when selecting an option)
+              if (reason === "reset") return;
+
+              // 3. Filter special characters immediately
+              const filteredValue = newInputValue
+                .replace(/[^a-zA-Z0-9 ]/g, "")
+                .replace(/\s{2,}/g, " ");
+
+              // Update state only if the value actually changed to prevent unnecessary renders
+              if (filteredValue !== headInputValue) {
+                setHeadInputValue(filteredValue);
+              }
+            }}
+            loading={isHeadsLoading}
+            disabled={!reportCode || isApplying}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Search Head Code *"
+                variant="outlined"
+                inputProps={{ ...params.inputProps, maxLength: 50 }}
+                InputProps={{
+                  ...params.InputProps,
+                  onPaste: handlePaste,
+                  endAdornment: (
+                    <React.Fragment>
+                      {isHeadsLoading ? (
+                        <CircularProgress color="inherit" size={20} />
+                      ) : null}
+                      {params.InputProps.endAdornment}
+                    </React.Fragment>
+                  ),
+                }}
+                helperText={
+                  <span
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "4px",
+                    }}
+                  >
+                    <InfoIcon sx={{ fontSize: "0.625rem" }} />
+                    <em>Type at least 2 alphanumeric characters to search.</em>
+                  </span>
+                }
+              />
+            )}
+          />
+
+          {/* Scope Selection */}
+          <FormControl
+            size="small"
+            fullWidth
+            disabled={!reportCode || isApplying}
+          >
+            <InputLabel id="dialog-scope-label">Select Scope *</InputLabel>
+            <Select
+              labelId="dialog-scope-label"
+              value={viewCode}
+              label="Select Scope *"
+              onChange={(e) => {
+                setViewCode(e.target.value);
+                setEntity(null); // Clear entity when switching scope
+                setEntityInputValue("");
+                setEntityOptions([]);
+              }}
+            >
+              {availableViews.map((view) => (
+                <MenuItem key={view.viewCode} value={view.viewCode}>
+                  {view.displayName.split("~")[1]}
+                </MenuItem>
+              ))}
+            </Select>
+            <FormHelperText
+              id="scope-helper-text"
+              sx={{
+                fontStyle: "italic",
+                fontSize: "0.75rem",
+                display: "flex",
+                alignItems: "center",
+                gap: "4px",
+                lineHeight: 1.5,
+              }}
+            >
+              <InfoIcon sx={{ fontSize: "0.625rem" }} />
+              Please select a scope.
+            </FormHelperText>
+          </FormControl>
+
+          {/* Conditional Autocomplete for Circle/Branch */}
+          {(isCircleScope || isBranchScope) && (
+            <Autocomplete
+              key={isCircleScope ? "circle" : "branch"}
+              size="small"
+              autoHighlight
+              options={entityOptions}
+              sx={{
+                "& .MuiAutocomplete-popupIndicator": {
+                  backgroundColor: "transparent",
+                },
+                "& .MuiAutocomplete-popupIndicator:hover": {
+                  backgroundColor: "transparent",
+                },
+              }}
+              noOptionsText={
+                entityInputValue.length >= 2 && !isEntityLoading
+                  ? "No match found"
+                  : "Type at least 2 characters..."
+              }
+              // 1. CRITICAL: Bind the input value explicitly to state
+              inputValue={entityInputValue}
+              value={entity}
+              getOptionLabel={(option) =>
+                option ? `${option.code} - ${option.name}` : ""
+              }
+              onChange={(event, newValue) => setEntity(newValue)}
+              onInputChange={(event, newInputValue, reason) => {
+                // 2. Ignore 'reset' events (occurs when selecting an option or clearing)
+                if (reason === "reset") return;
+
+                // 3. Filter out special characters immediately
+                // Allows only letters, numbers, and spaces.
+                // Add '-' or '_' inside the brackets if needed: [^a-zA-Z0-9 _-]
+                const filteredValue = newInputValue
+                  .replace(/[^a-zA-Z0-9 ]/g, "")
+                  .replace(/\s{2,}/g, " ");
+
+                // Update state only if the value differs to prevent render loops
+                if (filteredValue !== entityInputValue) {
+                  setEntityInputValue(filteredValue);
+                }
+              }}
+              loading={isEntityLoading}
+              disabled={isApplying}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label={`Search ${isCircleScope ? "Circle *" : "Branch Code *"}`}
+                  variant="outlined"
+                  // 4. Ensure no conflicting value/onChange props are passed here
+                  inputProps={{
+                    ...params.inputProps,
+                    onPaste: handlePaste,
+                    autoComplete: "off",
+                    maxLength: 50,
+                  }}
+                  InputProps={{
+                    ...params.InputProps,
+                    endAdornment: (
+                      <React.Fragment>
+                        {isEntityLoading ? (
+                          <CircularProgress color="inherit" size={20} />
+                        ) : null}
+                        {params.InputProps.endAdornment}
+                      </React.Fragment>
+                    ),
+                  }}
+                  helperText={
+                    <span
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "4px",
+                      }}
+                    >
+                      <InfoIcon sx={{ fontSize: "0.625rem" }} />
+                      <em>
+                        Type at least 2 alphanumeric characters to search.
+                      </em>
+                    </span>
+                  }
+                />
+              )}
+            />
+          )}
+
+          {/* Report Date Picker */}
+          <LocalizationProvider
+            dateAdapter={AdapterDayjs}
+            adapterLocale="en-gb"
+          >
+            <DatePicker
+              key={`picker-key-${datePickerKey}`}
+              label="Select Date *"
+              format="DD/MM/YYYY"
+              value={reportDate ? dayjs(reportDate) : null}
+              minDate={MIN_ALLOWED_DATE}
+              sx={{
+                "& .MuiIconButton-root": {
+                  backgroundColor: "transparent",
+                },
+                "& .MuiIconButton-root:hover": {
+                  backgroundColor: "transparent",
+                },
+              }}
+              maxDate={etlDate || dayjs().endOf("day")}
+              disabled={!reportCode || isApplying}
+              onInputChange={(e) => {
+                setDateInputValue(e.target.value);
+              }}
+              onChange={(newValue) => {
+                if (newValue && newValue.isValid()) {
+                  let correctedValue = newValue;
+                  if (correctedValue.year() < 100) {
+                    correctedValue = correctedValue.set(
+                      "year",
+                      correctedValue.year() + 2000,
+                    );
+                  }
+                  setReportDate(correctedValue.format("YYYY-MM-DD"));
+                  setDateInputValue(correctedValue.format("DD/MM/YYYY"));
+                } else {
+                  setReportDate("");
+                }
+              }}
+              slotProps={{
+                textField: {
+                  size: "small",
+                  fullWidth: true,
+                  placeholder: "DD/MM/YYYY",
+                  error: dateValidation.error,
+                  helperText: (
+                    <span
+                      style={{
+                        fontStyle: "italic",
+                        fontSize: "0.75rem",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        marginTop: "4px",
+                        color: dateValidation.error ? "#d32f2f" : "inherit",
+                        fontWeight: dateValidation.error ? 600 : "normal",
+                      }}
+                    >
+                      <InfoIcon sx={{ fontSize: "0.625rem" }} />
+                      {dateValidation.text}
+                    </span>
+                  ),
+                },
+                day: {
+                  showDaysOutsideCurrentMonth: true,
+                },
+              }}
+            />
+          </LocalizationProvider>
+        </Box>
+      </DialogContent>
+
+      <DialogActions sx={{ p: 2, px: 3 }}>
+        <Button
+          onClick={handleReset}
+          color="inherit"
+          variant="outlined"
+          disabled={isApplying}
+        >
+          Reset
+        </Button>
+        <Button
+          onClick={handleApply}
+          color="primary"
+          variant="contained"
+          disabled={!isApplyEnabled || isApplying}
+        >
+          {isApplying ? "Applying..." : "Apply"}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ********************************************* HierarchyPath ********************************************* //
+
+import React from "react";
+import { Box, Typography } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
+
+export default function HierarchyPath({
+  activeHierarchyConfig,
+  maxVisibleLevel,
+  isSetupComplete,
+}) {
+  const theme = useTheme();
+  if (!isSetupComplete) return null;
+
+  return (
+    <Box
+      display="flex"
+      alignItems="center"
+      justifyContent="space-between"
+      gap={2}
+      sx={{ width: "100%" }}
+    >
+      {/* Left Side: Path Hierarchy */}
+      <Box
+        display="flex"
+        alignItems="center"
+        gap={0.5}
+        sx={{ overflow: "hidden" }}
+      >
+        <Typography
+          variant="body2"
+          color="text.secondary"
+          sx={{ mr: 1, fontWeight: 500, flexShrink: 0 }}
+        >
+          Path:
+        </Typography>
+        <Box
+          display="flex"
+          alignItems="center"
+          gap={0.5}
+          sx={{ overflowX: "auto" }}
+        >
+          {activeHierarchyConfig.hierarchy.map((item, index) => {
+            const isActive = index <= maxVisibleLevel;
+            return (
+              <Box key={index} display="flex" alignItems="center">
+                <Box display="flex" alignItems="center" gap={1}>
+                  <Box
+                    sx={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: "50%",
+                      bgcolor: isActive ? "primary.main" : "background.paper",
+                      border: "2px solid",
+                      borderColor: isActive ? "primary.main" : "divider",
+                      flexShrink: 0,
+                    }}
+                  />
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      fontWeight: isActive ? 600 : 500,
+                      color: isActive ? "text.primary" : "text.disabled",
+                      textTransform: "capitalize",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {item.replace("_", " ")}
+                  </Typography>
+                </Box>
+                {index < activeHierarchyConfig.hierarchy.length - 1 && (
+                  <Box
+                    sx={{
+                      backgroundColor:
+                        index < maxVisibleLevel
+                          ? theme.palette.primary.main
+                          : theme.palette.divider,
+                      width: 24,
+                      height: 2,
+                      mx: 1,
+                      borderRadius: 1,
+                      flexShrink: 0,
+                    }}
+                  />
+                )}
+              </Box>
+            );
+          })}
+        </Box>
+      </Box>
+
+      {/* Right Side: Legend Text */}
+      <Box sx={{ flexShrink: 0 }}>
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ whiteSpace: "nowrap", fontSize: "0.8rem" }}
+        >
+          <Box component="span" sx={{ color: "success.main", fontWeight: 600 }}>
+            Positive/Green ~ Credit Balances
+          </Box>{" "}
+          & {" "}
+          <Box component="span" sx={{ color: "error.main", fontWeight: 600 }}>
+            Negative/Red ~ Debit Balances
+          </Box>{" "}
+        </Typography>
+      </Box>
+    </Box>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ********************************************** ReportAnalysisHeader ************************************* //
+
+import React from "react";
+import {
+  Box,
+  Paper,
+  Typography,
+  IconButton,
+  Tooltip,
+  Divider,
+} from "@mui/material";
+import AnalyticsIcon from "@mui/icons-material/Analytics";
+import TuneIcon from "@mui/icons-material/Tune";
+import FilterAltOffIcon from "@mui/icons-material/FilterAltOff";
+import AssignmentIcon from "@mui/icons-material/Assignment";
+import AccountBalanceIcon from "@mui/icons-material/AccountBalance";
+import LayersIcon from "@mui/icons-material/Layers";
+import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
+import dayjs from "dayjs";
+import LocationOnIcon from "@mui/icons-material/LocationOn";
+
+export default function ReportAnalysisHeader({
+  activeReport,
+  onOpenFilter,
+  onClearFilters,
+  filtersApplied,
+  appliedFilters,
+}) {
+  // Extract and sanitize filter display values
+  const reportDisplay =
+    activeReport?.displayName ||
+    appliedFilters?.reportName ||
+    appliedFilters?.reportCode ||
+    "Select Filters";
+
+  const headDisplay =
+    appliedFilters?.headCode ||
+    appliedFilters?.head ||
+    appliedFilters?.searchHeadCode ||
+    "None Selected";
+
+  const scopeDisplay =
+    appliedFilters?.scope ||
+    appliedFilters?.selectedViewCode ||
+    appliedFilters?.viewCode ||
+    "None Selected";
+
+  const dateValue = appliedFilters?.reportDate || appliedFilters?.date;
+
+  const regionDisplay = appliedFilters?.entityCode
+    ? `${appliedFilters?.entityCode} - ${appliedFilters?.entityName}`
+    : `${activeReport?.entityCode} - ${activeReport?.entityName}`;
+
+  // Render values smoothly whether objects or raw strings
+  const cleanReport =
+    typeof reportDisplay === "object"
+      ? reportDisplay?.displayName
+      : reportDisplay;
+  const cleanHead =
+    typeof headDisplay === "object"
+      ? `${headDisplay.headCode || ""} - ${headDisplay.headName || ""}`
+      : headDisplay;
+  let cleanScope = scopeDisplay;
+  if (typeof scopeDisplay === "object") {
+    // Fallback just in case an object gets passed
+    cleanScope = scopeDisplay?.displayName || scopeDisplay?.viewCode;
+  } else if (activeReport?.views && appliedFilters?.viewCode) {
+    // Look up the exact view object from the configuration dropdown list
+    const matchedView = activeReport.views.find(
+      (view) => view.viewCode === appliedFilters.viewCode,
+    );
+    // If a match is found, use its human-readable displayName (e.g., "Bank Level")
+    if (matchedView) {
+      cleanScope = matchedView.displayName.split("~")[1];
+    }
+  }
+  const cleanDate = dateValue
+    ? dayjs(dateValue).isValid()
+      ? dayjs(dateValue).format("DD MMM YYYY")
+      : dateValue
+    : "Not Set";
+
+  // Configuration array for flexible, equal-width filtering items
+  const filterItems = [
+    {
+      label: "Report Type",
+      value: cleanReport,
+      icon: <AssignmentIcon sx={{ color: "#475569", fontSize: 17 }} />,
+    },
+    {
+      label: "Head Code",
+      value: cleanHead,
+      icon: <AccountBalanceIcon sx={{ color: "#475569", fontSize: 17 }} />,
+    },
+    {
+      label: "Scope",
+      value: cleanScope,
+      icon: <LayersIcon sx={{ color: "#475569", fontSize: 17 }} />,
+    },
+    {
+      label: appliedFilters?.viewCode?.includes("CIRCLE") ? "Circle" : "Branch",
+      value: regionDisplay,
+      icon: <LocationOnIcon sx={{ color: "#475569", fontSize: 17 }} />,
+    },
+    {
+      label: "Report Date",
+      value: cleanDate,
+      icon: <CalendarMonthIcon sx={{ color: "#475569", fontSize: 17 }} />,
+    },
+  ];
+
+  // Filter out the 4th item (index 3) if scope contains 'BANK'
+  const displayedItems = filterItems.filter((item, index) => {
+    // Assuming the item to hide is always at index 3, or check by label/value
+    if (index === 3 && appliedFilters?.viewCode?.includes("BANK")) {
+      return false; // Exclude this item
+    }
+    return true; // Keep all other items
+  });
+
+  // UI Card Styles - Flexible Equal Distributions
+  const premiumCardStyle = {
+    display: "flex",
+    alignItems: "center",
+    gap: 1.5,
+    p: "12px 18px",
+    borderRadius: "14px",
+    background: "rgba(255, 255, 255, 0.45)",
+    backdropFilter: "blur(8px)",
+    border: "1px solid rgba(255, 255, 255, 0.6)",
+    boxShadow: "0 4px 14px rgba(0,0,0,0.03)",
+    flex: "1 1 0px",
+    minWidth: "150px",
+    maxWidth: "300px",
+    overflow: "hidden",
+  };
+
+  const miniIconWrapper = {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    bgcolor: "rgba(255, 255, 255, 0.5)",
+    p: 1.1,
+    borderRadius: "10px",
+    flexShrink: 0,
+  };
+
+  const topLabelStyle = {
+    display: "block",
+    textTransform: "uppercase",
+    fontSize: "10px",
+    fontWeight: 700,
+    color: "#475569",
+    letterSpacing: "0.5px",
+    lineHeight: 1,
+  };
+
+  const bottomValueStyle = {
+    fontWeight: 600,
+    color: "#0f172a",
+    fontSize: "13.5px",
+    mt: 0.4,
+  };
+
+  return (
+    <Paper
+      elevation={0}
+      sx={{
+        p: "16px 24px",
+        borderRadius: 1,
+        bgcolor: "transparent",
+        display: "flex",
+        justifyContent: "space-between",
+        flexDirection: "row",
+        flexShrink: 0,
+        alignItems: "center",
+        gap: 3,
+      }}
+    >
+      {/* Left Module: Identity */}
+      <Box display="flex" alignItems="center" gap={1.5} sx={{ pl: 0.5 }}>
+        <Box
+          sx={{
+            background: "linear-gradient(135deg, #4f46e5 0%, #3730a3 100%)",
+            borderRadius: "12px",
+            width: 44,
+            height: 44,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            boxShadow: "0 4px 12px rgba(79, 70, 229, 0.2)",
+          }}
+        >
+          <AnalyticsIcon sx={{ color: "#fff", fontSize: 22 }} />
+        </Box>
+        <Box sx={{ overflow: "hidden" }}>
+          <Typography
+            variant="subtitle1"
+            sx={{
+              fontWeight: 700,
+              color: "text.primary",
+              letterSpacing: "-0.3px",
+              lineHeight: 1.1,
+            }}
+          >
+            {cleanReport}
+          </Typography>
+          <Typography
+            variant="caption"
+            sx={{
+              color: "text.secondary",
+              fontWeight: 500,
+              display: "block",
+              mt: 0.1,
+              fontSize: "11px",
+            }}
+          >
+            View detailed matrix
+          </Typography>
+        </Box>
+      </Box>
+
+      {/* Center Module & Dividers: Rendered together ONLY when filters exist */}
+      {filtersApplied && (
+        <>
+          {/* Solid Black Divider after Identity Module */}
+          <Divider
+            orientation="vertical"
+            flexItem
+            sx={{ mx: 0.5, my: 0.5, borderColor: "#000000", opacity: 1 }}
+          />
+
+          <Box
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            gap={2.5}
+            sx={{
+              flexGrow: 1,
+              px: 1,
+              overflowX: "auto",
+              scrollbarWidth: "none",
+              "&::-webkit-scrollbar": { display: "none" },
+            }}
+          >
+            {displayedItems.map((item, index) => (
+              <Tooltip
+                key={index}
+                title={`${item.value}`} // 2. Show label and full value on hover
+                arrow
+                placement="bottom"
+              >
+                <Box key={index} sx={premiumCardStyle}>
+                  <Box sx={miniIconWrapper}>{item.icon}</Box>
+                  <Box sx={{ overflow: "hidden", flexGrow: 1, minWidth: 0 }}>
+                    <Typography variant="caption" sx={topLabelStyle}>
+                      {item.label}
+                    </Typography>
+                    <Typography variant="body2" noWrap sx={bottomValueStyle}>
+                      {item.value}
+                    </Typography>
+                  </Box>
+                </Box>
+              </Tooltip>
+            ))}
+          </Box>
+
+          {/* Solid Black Divider before action area */}
+          <Divider
+            orientation="vertical"
+            flexItem
+            sx={{ mx: 0.5, my: 0.5, borderColor: "#000000", opacity: 1 }}
+          />
+        </>
+      )}
+
+      {/* Right Module: Actions Area */}
+      <Box display="flex" alignItems="center" gap={1.5} sx={{ pr: 0.5 }}>
+        {/* Clear Active Filters Button */}
+        {filtersApplied && (
+          <Tooltip title="Clear Active Filters" arrow placement="bottom">
+            <IconButton
+              onClick={onClearFilters}
+              size="small"
+              sx={{
+                p: 1.3,
+                borderRadius: "12px",
+                border: "1px solid #fee2e2",
+                bgcolor: "#fff5f5",
+                color: "#ef4444",
+                boxShadow: "0 1px 2px rgba(239, 68, 68, 0.05)",
+                transition: "all 0.2s ease",
+                "&:hover": {
+                  bgcolor: "#ef4444",
+                  color: "#ffffff",
+                  borderColor: "#ef4444",
+                },
+              }}
+            >
+              <FilterAltOffIcon sx={{ fontSize: 19 }} />
+            </IconButton>
+          </Tooltip>
+        )}
+
+        {/* Modify Report Criteria Button */}
+        <Tooltip title="Open filter dialog" arrow placement="bottom">
+          <IconButton
+            onClick={onOpenFilter}
+            size="small"
+            sx={{
+              p: 1.3,
+              borderRadius: "12px",
+              border: "1px solid rgba(255, 255, 255, 0.6)",
+              bgcolor: "rgba(255, 255, 255, 0.45)",
+              backdropFilter: "blur(8px)",
+              color: "#475569",
+              boxShadow: "0 2px 6px rgba(0,0,0,0.03)",
+              transition: "all 0.2s ease",
+              "&:hover": {
+                bgcolor: "rgba(255, 255, 255, 0.75)",
+                borderColor: "#4f46e5",
+                color: "#4f46e5",
+              },
+            }}
+          >
+            <TuneIcon sx={{ fontSize: 19 }} />
+          </IconButton>
+        </Tooltip>
+      </Box>
+    </Paper>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+
+// ************************************* analyticsContants ********************************** //
+
+export const formatCurrency = (value) => {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "INR",
+  }).format(value || 0);
+};
+
+export const DEFAULT_CONFIG = { hierarchy: [], availableMetrics: [] };
+
+
+
+
+// ************************************ ReportAnalysisScreen ************************************ //
+import React, {
+  useState,
+  useMemo,
+  useCallback,
+  useEffect,
+  useRef,
+} from "react";
+import { useSelector, useDispatch } from "react-redux";
+import {
+  Box,
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Typography,
+  CircularProgress,
+  IconButton,
+  Button,
+} from "@mui/material";
+import TuneIcon from "@mui/icons-material/Tune";
+import FilterAltOutlinedIcon from "@mui/icons-material/FilterAltOutlined";
+import DatasetIcon from "@mui/icons-material/Dataset";
+import { useTheme } from "@mui/material/styles";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { cacheNode } from "./analyticsCacheSlice";
+
+import {
+  enterComponentFullscreen,
+  exitComponentFullscreen,
+} from "../../store/slices/uiSlice";
+import useApi from "../../hooks/useApi";
+import useCustomSnackbar from "../../utils/useCustomSnackbar";
+
+import ReportAnalysisHeader from "./components/ReportAnalysisHeader";
+import HierarchyPath from "./components/HierarchyPath";
+import ActualTreeTableRow from "./components/ActualTreeTableRow";
+import FilterDialog from "./components/FilterDialog";
+import { fetchInitialData, fetchChildrenData } from "./api/analyticsApi";
+
+import FullscreenIcon from "@mui/icons-material/Fullscreen";
+import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
+import { filter } from "lodash";
+
+const DEFAULT_CONFIG = { hierarchy: [], availableMetrics: [] };
+
+export default function ReportAnalysisScreen() {
+  const { callApi } = useApi();
+  const dispatch = useDispatch();
+  const theme = useTheme();
+  const tableContainerRef = useRef(null);
+  const showSnackBar = useCustomSnackbar();
+
+  const user = useSelector((state) => state.auth.user);
+  const isFullscreen = useSelector(
+    (state) => state.ui?.isComponentFullscreen || false,
+  );
+  const cachedNodes = useSelector((state) => state.analyticsCache?.nodes || {});
+
+  const [reportsConfig, setReportsConfig] = useState([]);
+  const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
+
+  // Master Filter State
+  const [appliedFilters, setAppliedFilters] = useState({
+    reportCode: "",
+    viewCode: "", // Drives both Scope and Hierarchy
+    head: null,
+    entityCode: "",
+    reportDate: "",
+  });
+
+  const [data, setData] = useState([]);
+  const [expandedIds, setExpandedIds] = useState(new Map());
+  const [loadingIds, setLoadingIds] = useState(new Set());
+  const [isInitializing, setIsInitializing] = useState(false);
+
+  // --- DERIVED CONFIGURATION DYNAMICS ---
+  const activeReport = useMemo(() => {
+    return (
+      reportsConfig.find((r) => r.reportCode === appliedFilters.reportCode) ||
+      null
+    );
+  }, [reportsConfig, appliedFilters.reportCode]);
+
+  const expandedIdsRef = useRef(expandedIds);
+  useEffect(() => {
+    expandedIdsRef.current = expandedIds;
+  }, [expandedIds]);
+
+  // Dynamically resolve hierarchy based on the exact selected viewCode
+  const activeHierarchyConfig = useMemo(() => {
+    if (!activeReport || !appliedFilters.viewCode) return DEFAULT_CONFIG;
+    return (
+      activeReport.views.find((v) => v.viewCode === appliedFilters.viewCode) ||
+      DEFAULT_CONFIG
+    );
+  }, [activeReport, appliedFilters.viewCode]);
+
+  const isSetupComplete = !!(
+    appliedFilters.reportCode &&
+    appliedFilters.viewCode &&
+    appliedFilters.head &&
+    appliedFilters.reportDate &&
+    activeHierarchyConfig.hierarchy.length > 0
+  );
+
+  const filtersApplied = !!appliedFilters.reportCode;
+
+  // --- REDUX FULLSCREEN LOGIC ---
+  const toggleFullscreen = useCallback(() => {
+    if (isFullscreen) {
+      dispatch(exitComponentFullscreen());
+      if (window.history.state?.isFullscreenOverlay) window.history.back();
+    } else {
+      dispatch(enterComponentFullscreen());
+      showSnackBar("To exit full screen press 'F9' ", "info");
+      window.history.pushState({ isFullscreenOverlay: true }, "");
+    }
+  }, [isFullscreen, dispatch, showSnackBar]);
+
+  useEffect(() => {
+    const handlePopState = () =>
+      isFullscreen && dispatch(exitComponentFullscreen());
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [isFullscreen, dispatch]);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") {
+        return;
+      }
+      if (e.key === "F9") {
+        if (isFullscreen) {
+          dispatch(exitComponentFullscreen());
+          if (window.history.state?.isFullscreenOverlay) window.history.back();
+        } else {
+          dispatch(enterComponentFullscreen());
+          showSnackBar("To exit full screen press 'F9' ", "info");
+          window.history.pushState({ isFullscreenOverlay: true }, "");
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isFullscreen, dispatch]);
+
+  // --- CONFIG FETCHING ---
+  useEffect(() => {
+    const fetchConfig = async () => {
+      try {
+        const response = await callApi("/AS/analytics/config", {}, "GET");
+        setReportsConfig(
+          Array.isArray(response) ? response : response?.data || [],
+        );
+        console.log("Response: ", response);
+      } catch (error) {
+        showSnackBar("Error fetching configuration", "error");
+      }
+    };
+    if (user) fetchConfig();
+  }, [callApi, user, showSnackBar]);
+
+  // --- DATA FETCHING (Root Level) ---
+
+  const handleApplyFilters = async (newFilters) => {
+    setIsInitializing(true);
+
+    try {
+      // Find the specific hierarchy configuration for the selected report & view
+      const targetReport = reportsConfig.find(
+        (r) => r.reportCode === newFilters.reportCode,
+      );
+      const targetHierarchyConfig =
+        targetReport?.views.find((v) => v.viewCode === newFilters.viewCode) ||
+        DEFAULT_CONFIG;
+
+      const rootData = await fetchInitialData(
+        callApi,
+        showSnackBar,
+        newFilters,
+        targetHierarchyConfig.hierarchy,
+        targetHierarchyConfig.availableMetrics,
+      );
+
+      // If data is empty, DO NOT apply filters or close dialog. Path naturally stays hidden.
+      if (!rootData || rootData.length === 0) {
+        showSnackBar("No data found for the selected combination", "error");
+      } else {
+        showSnackBar("Drill-Down data successfully fetched", "success");
+        // Success: Update main view state, inject data, and close dialog
+        setAppliedFilters(newFilters);
+        setData(rootData);
+        setExpandedIds(new Map());
+        setIsFilterDialogOpen(false);
+      }
+    } catch (error) {
+      console.error("Failed to load initial data", error);
+      showSnackBar("Error fetching data", "error");
+    } finally {
+      setIsInitializing(false);
+    }
+  };
+
+  // --- NODE EXPANSION LOGIC ---
+  const appendChildrenToTree = useCallback((nodes, parentId, newChildren) => {
+    return nodes.map((node) => {
+      if (node.id === parentId) return { ...node, children: newChildren };
+      if (node.children)
+        return {
+          ...node,
+          children: appendChildrenToTree(node.children, parentId, newChildren),
+        };
+      return node;
+    });
+  }, []);
+
+  const handleToggle = useCallback(
+    async (node) => {
+      console.log("Node >>", node);
+      const isExpanded = expandedIds.has(node.id);
+
+      if (isExpanded) {
+        setExpandedIds((prev) => {
+          const next = new Map(prev);
+          next.delete(node.id);
+          const removeDescendants = (currentNode) => {
+            if (currentNode.children) {
+              currentNode.children.forEach((child) => {
+                next.delete(child.id);
+                removeDescendants(child);
+              });
+            }
+          };
+          removeDescendants(node);
+          return next;
+        });
+      } else {
+        if (!node.children && node.hasChildren) {
+          console.log("New Api Call in case of children");
+          const filterHash = `${appliedFilters.viewCode}_${appliedFilters.entityCode}_${appliedFilters.head.headCode}_${appliedFilters.reportDate}`;
+          // const pathHash = (node.nodeFilters || [])
+          //   .map((filter) => `${filter.logicalField}-${filter.value}`)
+          //   .join("_");
+          const cacheKey = `${filterHash}_${node.id}`;
+          const cachedEntry = cachedNodes[cacheKey];
+          const isCacheValid =
+            cachedEntry && Date.now() - cachedEntry.timestamp < 900000;
+
+          if (isCacheValid) {
+            setData((prevData) =>
+              appendChildrenToTree(prevData, node.id, cachedEntry.data),
+            );
+            console.log("Cache is valid, cacheKey: ", cacheKey);
+          } else {
+            console.log("Cache is invalid");
+
+            setLoadingIds((prev) => new Set(prev).add(node.id));
+            try {
+              const children = await fetchChildrenData(
+                callApi,
+                showSnackBar,
+                node,
+                appliedFilters,
+                activeHierarchyConfig.hierarchy,
+                activeHierarchyConfig.availableMetrics,
+              );
+              setData((prevData) =>
+                appendChildrenToTree(prevData, node.id, children),
+              );
+              dispatch(
+                cacheNode({
+                  key: cacheKey,
+                  data: children,
+                  timestamp: Date.now(),
+                }),
+              );
+            } catch (error) {
+              console.error("Failed to fetch children", error);
+            } finally {
+              setLoadingIds((prev) => {
+                const next = new Set(prev);
+                next.delete(node.id);
+                return next;
+              });
+            }
+          }
+        }
+        //console.log("From Cache");
+        setExpandedIds((prev) => {
+          const next = new Map();
+          prev.forEach((level, id) => {
+            if (level < node.level) next.set(id, level);
+          });
+          next.set(node.id, node.level);
+          return next;
+        });
+      }
+    },
+    [
+      expandedIds,
+      appendChildrenToTree,
+      activeHierarchyConfig,
+      appliedFilters,
+      callApi,
+      showSnackBar,
+      cachedNodes,
+      dispatch,
+    ],
+  );
+
+  // --- VIRTUALIZATION ENGINE ---
+  const visibleRows = useMemo(() => {
+    const rows = [];
+    const traverse = (nodes) => {
+      for (const node of nodes) {
+        rows.push(node);
+        if (expandedIds.has(node.id) && node.children) traverse(node.children);
+      }
+    };
+    traverse(data);
+    return rows;
+  }, [data, expandedIds]);
+
+  const maxVisibleLevel = useMemo(() => {
+    if (visibleRows.length === 0) return 0;
+    return Math.max(...visibleRows.map((row) => row.level));
+  }, [visibleRows]);
+
+  const visibleHierarchyLevels = activeHierarchyConfig.hierarchy.slice(
+    0,
+    maxVisibleLevel + 1,
+  );
+
+  const virtualizer = useVirtualizer({
+    count: visibleRows.length,
+    getScrollElement: () => tableContainerRef.current,
+    estimateSize: () => 40,
+    overscan: 5,
+  });
+
+  const virtualItems = virtualizer.getVirtualItems();
+  const totalColumnsCount =
+    visibleHierarchyLevels.length +
+    activeHierarchyConfig.availableMetrics.length;
+  const paddingTop = virtualItems.length > 0 ? virtualItems[0].start : 0;
+  const paddingBottom =
+    virtualItems.length > 0
+      ? virtualizer.getTotalSize() - virtualItems[virtualItems.length - 1].end
+      : 0;
+
+  return (
+    <Box
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 1.5,
+        ...(isFullscreen
+          ? {
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              width: "100vw",
+              height: "100vh",
+              zIndex: 1299,
+              p: 2,
+            }
+          : { height: "calc(100vh - 220px)" }),
+      }}
+    >
+      <ReportAnalysisHeader
+        activeReport={activeReport}
+        isFullscreen={isFullscreen}
+        toggleFullscreen={toggleFullscreen}
+        onOpenFilter={() => setIsFilterDialogOpen(true)}
+        filtersApplied={filtersApplied}
+        appliedFilters={appliedFilters}
+        onClearFilters={() => {
+          setAppliedFilters({
+            reportCode: "",
+            viewCode: "",
+            head: null,
+            entityCode: "",
+            entityName: "",
+            reportDate: "",
+          });
+          setData([]);
+          setExpandedIds(new Map());
+          setLoadingIds(new Map());
+        }}
+      />
+
+      <FilterDialog
+        open={isFilterDialogOpen}
+        onClose={() => setIsFilterDialogOpen(false)}
+        onApply={(filters) => handleApplyFilters(filters)}
+        reportsConfig={reportsConfig}
+        currentFilters={appliedFilters}
+        callApi={callApi}
+        user={user} // Passes Redux authorized entities downward
+        isApplying={isInitializing}
+      />
+
+      <Paper
+        elevation={0}
+        sx={{
+          flexGrow: 1,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          borderRadius: 1,
+          boxShadow: "0 2px 10px rgba(0,0,0,0.03)",
+          border: 1,
+          borderColor: "divider",
+        }}
+      >
+        <Box
+          sx={{
+            borderBottom: 1,
+            borderColor: "divider",
+            px: 2,
+            py: 1.5,
+            minHeight: 44,
+            display: "flex",
+            alignItems: "center",
+          }}
+        >
+          <HierarchyPath
+            activeHierarchyConfig={activeHierarchyConfig}
+            maxVisibleLevel={maxVisibleLevel}
+            isSetupComplete={isSetupComplete}
+          />
+        </Box>
+
+        <TableContainer
+          ref={tableContainerRef}
+          sx={{
+            flexGrow: 1,
+            bgcolor: "background.default",
+            position: "relative",
+            overflow: "auto",
+            willChange: "transform",
+          }}
+        >
+          {/* {!isSetupComplete && (
+            <Box
+              sx={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 10,
+              }}
+            >
+              <DatasetIcon
+                sx={{ fontSize: 64, color: "action.disabled", mb: 1 }}
+              />
+              <Typography variant="h6" color="text.secondary">
+                No Data to Display
+              </Typography>
+              <Typography variant="body2" color="text.disabled">
+                Click the filter icon to select a report combination and scope.
+              </Typography>
+            </Box>
+          )} */}
+          {!isSetupComplete && (
+            <Box
+              sx={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 10,
+                p: 3,
+                textAlign: "center",
+              }}
+            >
+              {/* Funnel Icon Box */}
+              <Box
+                sx={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: 4,
+                  bgcolor: "action.hover", // Light gray/blue background
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  mb: 2,
+                }}
+              >
+                <FilterAltOutlinedIcon
+                  sx={{ fontSize: 32, color: "text.secondary" }}
+                />
+              </Box>
+
+              {/* Text Elements */}
+              <Typography
+                variant="h5"
+                sx={{ color: "primary.main", fontWeight: "bold", mb: 1 }}
+              >
+                No Data to Display
+              </Typography>
+              <Typography color="primary.main" sx={{ maxWidth: 350, mb: 3 }}>
+                Configure the database report, head, hierarchy and report date
+                to render the drill-down matrix.
+              </Typography>
+
+              {/* Action Button */}
+              <Button
+                variant="contained"
+                color="primary"
+                startIcon={<TuneIcon />}
+                onClick={() => setIsFilterDialogOpen(true)}
+                sx={{
+                  borderRadius: 8, // Makes it pill-shaped
+                  textTransform: "none",
+                  fontWeight: 600,
+                  px: 3,
+                }}
+              >
+                Open filter dialog
+              </Button>
+            </Box>
+          )}
+
+          {isInitializing && data.length === 0 ? (
+            <Box
+              sx={{
+                height: "100%",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <CircularProgress size={32} color="primary" sx={{ mb: 1 }} />
+              <Typography variant="body2" color="text.secondary">
+                Executing Query ...
+              </Typography>
+            </Box>
+          ) : isSetupComplete && data.length > 0 ? (
+            <Table
+              stickyHeader
+              size="small"
+              sx={{ minWidth: 1000, tableLayout: "fixed" }}
+            >
+              <TableHead>
+                <TableRow>
+                  {visibleHierarchyLevels.map((levelName) => (
+                    <TableCell
+                      key={levelName}
+                      sx={{
+                        backgroundColor:
+                          theme.palette.purple?.[100] ||
+                          theme.palette.primary.light,
+                        color: "text.primary",
+                        fontWeight: 700,
+                        borderRight: 1,
+                        borderColor: "divider",
+                        borderBottom: 2,
+                        py: 1,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {levelName.replace("_", " ").toUpperCase()}
+                    </TableCell>
+                  ))}
+                  {activeHierarchyConfig.availableMetrics.map((metric) => (
+                    <TableCell
+                      key={metric.logicalName}
+                      align="right"
+                      sx={{
+                        backgroundColor:
+                          theme.palette.purple?.[200] ||
+                          theme.palette.primary.light,
+                        color: "text.primary",
+                        fontWeight: 700,
+                        borderRight: 1,
+                        borderColor: "divider",
+                        borderBottom: 2,
+                        py: 1,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {metric.displayName}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {paddingTop > 0 && (
+                  <TableRow>
+                    <TableCell
+                      colSpan={totalColumnsCount}
+                      style={{
+                        height: `${paddingTop}px`,
+                        padding: 0,
+                        border: "none",
+                      }}
+                    />
+                  </TableRow>
+                )}
+
+                {virtualItems.map((virtualRow) => {
+                  const row = visibleRows[virtualRow.index];
+                  return (
+                    <ActualTreeTableRow
+                      key={row.id}
+                      node={row}
+                      index={virtualRow.index}
+                      isExpanded={expandedIds.has(row.id)}
+                      isLoading={loadingIds.has(row.id)}
+                      onToggle={handleToggle}
+                      maxVisibleLevel={maxVisibleLevel}
+                      activeMetrics={activeHierarchyConfig.availableMetrics}
+                      theme={theme}
+                      ref={virtualizer.measureElement}
+                      data-index={virtualRow.index}
+                      hierarchyLength={activeHierarchyConfig.hierarchy.length}
+                      showSnackBar={showSnackBar}
+                      //expandedIds={expandedIds}
+                      expandedIdsRef={expandedIdsRef}
+                    />
+                  );
+                })}
+
+                {paddingBottom > 0 && (
+                  <TableRow>
+                    <TableCell
+                      col
+                      colSpan={totalColumnsCount}
+                      style={{
+                        height: `${paddingBottom}px`,
+                        padding: 0,
+                        border: "none",
+                      }}
+                    />
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          ) : null}
+        </TableContainer>
+
+        <Box
+          sx={{
+            bgcolor: "background.paper",
+            borderTop: 1,
+            borderColor: "divider",
+            px: 2,
+            py: 1,
+            display: "flex",
+            justifyContent: "flex-end",
+            alignItems: "center",
+            minHeight: 40,
+          }}
+        >
+          {/* <Typography variant="caption" color="text.secondary" fontWeight={500}>
+            Showing {visibleRows.length} rows
+          </Typography> */}
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <IconButton
+              onClick={toggleFullscreen}
+              size="small"
+              sx={{ border: "1px solid", borderColor: "divider", mr: 0.5 }}
+            >
+              {isFullscreen ? (
+                <FullscreenExitIcon fontSize="small" />
+              ) : (
+                <FullscreenIcon fontSize="small" />
+              )}
+            </IconButton>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ userSelect: "none" }}
+            >
+              {isFullscreen
+                ? "Press 'F9' to Exit Full Screen"
+                : "Press 'F9' to Full Screen"}
+            </Typography>
+          </Box>
+        </Box>
+      </Paper>
+    </Box>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ********************************************* analyticsCacheSlice ************************************ //
+
+import { createSlice } from "@reduxjs/toolkit";
+
+const analyticsCacheSlice = createSlice({
+  name: "analyticsCache",
+  initialState: {
+    nodes: {}, // Structure: { [cacheKey]: { data: [], timestamp: 123456789 } }
+  },
+  reducers: {
+    cacheNode: (state, action) => {
+      const { key, data, timestamp } = action.payload;
+      state.nodes[key] = { data, timestamp };
+    },
+    // Optional: Call this on user logout or when manually refreshing reports
+    clearCache: (state) => {
+      state.nodes = {};
+    },
+  },
+});
+
+export const { cacheNode, clearCache } = analyticsCacheSlice.actions;
+export default analyticsCacheSlice.reducer;
