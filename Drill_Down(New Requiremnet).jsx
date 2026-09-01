@@ -219,7 +219,26 @@ Replace the metric-cell block (the activeHeads.flatMap(...) version) back
 
 
 
+const metricHeaders = activeMetrics.map(
+                                (m) => m.displayName || m.logicalName,
+                              );
 
+
+
+
+
+const metrics = activeHeads.flatMap((head) =>
+                                  activeMetrics.map((m) => {
+                                    const value = currentNode.headValues?.get(
+                                      head.headCode,
+                                    )?.[m.logicalName];
+                                    if (value === null || value === undefined)
+                                      return "";
+                                    return !isNaN(value)
+                                      ? Number(value).toFixed(2)
+                                      : value;
+                                  }),
+                                );
 
 
 
