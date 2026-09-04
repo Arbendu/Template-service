@@ -436,3 +436,173 @@ public ReportTemplate createOrUpdateTemplate(TemplatePayload payload, String use
         }
     }
 }
+
+
+
+
+
+
+
+// CacheConfig from another service
+
+package com.tcs.fincore.ReportBuilder.config;
+
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
+import tools.jackson.databind.jsontype.PolymorphicTypeValidator;
+import tools.jackson.databind.DefaultTyping;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.annotation.EnableCaching;
+import org.springframework.cache.interceptor.CacheErrorHandler;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.data.redis.cache.RedisCacheConfiguration;
+import org.springframework.data.redis.cache.RedisCacheManager;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.serializer.GenericJacksonJsonRedisSerializer;
+import org.springframework.data.redis.serializer.RedisSerializationContext;
+import org.springframework.data.redis.serializer.StringRedisSerializer;
+
+import java.time.Duration;
+import java.util.HashMap;
+import java.util.Map;
+
+@Slf4j
+@Configuration
+@EnableCaching
+public class CacheConfig {
+
+    @Bean
+    public CacheManager cacheManager(RedisConnectionFactory connectionFactory) {
+
+        PolymorphicTypeValidator typeValidator = BasicPolymorphicTypeValidator.builder()
+                .allowIfSubType("com.tcs.fincore.ReportBuilder.model.")
+                .allowIfSubType("com.tcs.fincore.ReportBuilder.dto.")
+                .allowIfSubType("com.tcs.fincore.ReportBuilder.batch.model.")
+                .allowIfSubType("java.util.")
+                .allowIfSubType("java.time.")
+                .allowIfSubType("java.lang.")
+                .build();
+
+        // (validator, typing, property name)
+        JsonMapper jsonMapper = JsonMapper.builder()
+                .activateDefaultTypingAsProperty(
+                        typeValidator,
+                        DefaultTyping.NON_FINAL,
+                        "@class"  // property name (default is "@class")
+                )
+                .build();
+
+        GenericJacksonJsonRedisSerializer serializer =
+                new GenericJacksonJsonRedisSerializer(jsonMapper);
+
+        RedisCacheConfiguration defaultConfig = RedisCacheConfiguration.defaultCacheConfig()
+                .entryTtl(Duration.ofMinutes(5))
+                .disableCachingNullValues()
+                .serializeKeysWith(
+                        RedisSerializationContext.SerializationPair.fromSerializer(
+                                new StringRedisSerializer()))
+                .serializeValuesWith(
+                        RedisSerializationContext.SerializationPair.fromSerializer(serializer));
+
+        Map<String, RedisCacheConfiguration> cacheConfigurations = new HashMap<>();
+        cacheConfigurations.put("reportTemplates", defaultConfig.entryTtl(Duration.ofMinutes(5)));
+        cacheConfigurations.put("reportVariants", defaultConfig.entryTtl(Duration.ofMinutes(5)));
+
+        RedisCacheManager cacheManager = RedisCacheManager.builder(connectionFactory)
+                .cacheDefaults(defaultConfig)
+                .withInitialCacheConfigurations(cacheConfigurations)
+                .transactionAware()
+                .build();
+
+        log.info("Redis cache manager initialized with secure type validation. Caches: {}", cacheConfigurations.keySet());
+        return cacheManager;
+    }
+
+    @Bean
+    public CacheErrorHandler errorHandler() {
+        return new CacheErrorHandler() {
+            @Override
+            public void handleCacheGetError(RuntimeException ex, org.springframework.cache.Cache cache, Object key) {
+                log.error("Cache GET error for cache='{}': {}", cache.getName(), ex.getMessage());
+            }
+
+            @Override
+            public void handleCachePutError(RuntimeException ex, org.springframework.cache.Cache cache, Object key, Object value) {
+                log.error("Cache PUT error for cache='{}': {}", cache.getName(), ex.getMessage());
+            }
+
+            @Override
+            public void handleCacheEvictError(RuntimeException ex, org.springframework.cache.Cache cache, Object key) {
+                log.error("Cache EVICT error for cache='{}': {}", cache.getName(), ex.getMessage());
+            }
+
+            @Override
+            public void handleCacheClearError(RuntimeException ex, org.springframework.cache.Cache cache) {
+                log.error("Cache CLEAR error for cache='{}': {}", cache.getName(), ex.getMessage());
+            }
+        };
+    }
+}
+
+
+
+
+
+
+
+
+// ReportMetadataServiceImpl from aanother service
+package com.tcs.fincore.ReportBuilder.service.metadata;
+
+import com.tcs.fincore.ReportBuilder.model.ReportTemplate;
+import com.tcs.fincore.ReportBuilder.model.variant.ReportVariant;
+import com.tcs.fincore.ReportBuilder.repository.ReportTemplateRepository;
+import com.tcs.fincore.ReportBuilder.repository.ReportVariantRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CachePut;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class ReportMetadataServiceImpl implements ReportMetadataService {
+
+    private final ReportTemplateRepository templateRepository;
+    private final ReportVariantRepository variantRepository;
+
+    @Override
+    @Transactional(readOnly = true)
+    @Cacheable(value = "reportTemplates", key = "#templateId", unless = "#result == null")
+    public ReportTemplate getTemplate(String templateId) {
+        log.debug("CACHE MISS - Loading template from DB: {}", templateId);
+        ReportTemplate template = templateRepository.loadActiveTemplate(templateId);
+        if (template != null && template.getReportMeta() != null) {
+            log.debug("Loaded template: {} with {} columns",
+                    template.getReportMeta().getReportName(),
+                    template.getReportData().getColumns().size());
+        }
+        return template;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    @CachePut(value = "reportTemplates", key = "#result.templateMeta.templateId", unless = "#result == null")
+    public ReportTemplate getTemplateByReportId(String reportId) {
+        log.debug("Loading template from DB using reportId: {} and caching by templateId", reportId);
+        // A direct DB fetch by reportId will now hydrate the unified templateId cache
+        return templateRepository.loadActiveTemplateByReportId(reportId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    @Cacheable(value = "reportVariants", key = "#templateId + ':' + #variantCode", unless = "#result == null")
+    public ReportVariant getVariant(String templateId, String variantCode) {
+        return variantRepository.loadActiveVariant(templateId, variantCode);
+    }
+}
