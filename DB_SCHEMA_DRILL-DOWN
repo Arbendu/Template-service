@@ -1,1 +1,281 @@
+------------------------------------------------------------------------------------------
+-- DDL for Table DR_REPORT
+------------------------------------------------------------------------------------------
+
+CREATE TABLE "FINCORE"."DR_REPORT"
+  ( "ID" NUMBER(19,0) GENERATED ALWAYS AS IDENTITY MINVALUE 1 MAXVALUE
+    9999999999999999999999999999 INCREMENT BY 1 START WITH 1 CACHE 20
+    NOORDER  NOCYCLE  NOKEEP  NOSCALE ,
+    "REPORT_CODE" VARCHAR2(50),
+    "DISPLAY_NAME" VARCHAR2(100),
+    "IS_ACTIVE" NUMBER(1,0) DEFAULT 1,
+    "CREATED_BY" VARCHAR2(50) DEFAULT 'SYSTEM',
+    "CREATED_DT" TIMESTAMP (6) DEFAULT SYSTIMESTAMP
+  ) ;
+
+COMMENT ON TABLE "FINCORE"."DR_REPORT" IS 'High-level business reports (e.g., YSA, NWSA).';
+
+------------------------------------------------------------------------------------------
+-- DDL for Index SYS_C0012765
+------------------------------------------------------------------------------------------
+
+CREATE UNIQUE INDEX "FINCORE"."SYS_C0012765" ON
+"FINCORE"."DR_REPORT" ("ID")
+;
+
+------------------------------------------------------------------------------------------
+-- DDL for Index SYS_C0012766
+------------------------------------------------------------------------------------------
+
+CREATE UNIQUE INDEX "FINCORE"."SYS_C0012766" ON
+"FINCORE"."DR_REPORT" ("REPORT_CODE")
+;
+
+------------------------------------------------------------------------------------------
+-- Constraints for Table DR_REPORT
+------------------------------------------------------------------------------------------
+
+ALTER TABLE "FINCORE"."DR_REPORT" MODIFY ("ID" NOT NULL ENABLE);
+ALTER TABLE "FINCORE"."DR_REPORT" MODIFY ("REPORT_CODE" NOT NULL ENABLE);
+ALTER TABLE "FINCORE"."DR_REPORT" MODIFY ("DISPLAY_NAME" NOT NULL ENABLE);
+ALTER TABLE "FINCORE"."DR_REPORT" MODIFY ("IS_ACTIVE" NOT NULL ENABLE);
+ALTER TABLE "FINCORE"."DR_REPORT" MODIFY ("CREATED_BY" NOT NULL ENABLE);
+ALTER TABLE "FINCORE"."DR_REPORT" MODIFY ("CREATED_DT" NOT NULL ENABLE);
+ALTER TABLE "FINCORE"."DR_REPORT" ADD PRIMARY KEY ("ID")
+  USING INDEX ENABLE;
+ALTER TABLE "FINCORE"."DR_REPORT" ADD UNIQUE ("REPORT_CODE");
+
+
+------------------------------------------------------------------------------------------
+-- DDL for Table DR_REPORT_VIEW
+------------------------------------------------------------------------------------------
+
+CREATE TABLE "FINCORE"."DR_REPORT_VIEW"
+  ( "ID" NUMBER(19,0) GENERATED ALWAYS AS IDENTITY MINVALUE 1 MAXVALUE
+    9999999999999999999999999999 INCREMENT BY 1 START WITH 1 CACHE 20
+    NOORDER  NOCYCLE  NOKEEP  NOSCALE ,
+    "REPORT_ID" NUMBER(19,0),
+    "DATASOURCE_ID" NUMBER(19,0),
+    "VIEW_CODE" VARCHAR2(50),
+    "DISPLAY_NAME" VARCHAR2(100),
+    "REQUIRED_ROLE_IDS" VARCHAR2(255),
+    "IS_ACTIVE" NUMBER(1,0) DEFAULT 1,
+    "CREATED_BY" VARCHAR2(50) DEFAULT 'SYSTEM',
+    "CREATED_DT" TIMESTAMP (6) DEFAULT SYSTIMESTAMP
+  ) ;
+
+COMMENT ON COLUMN "FINCORE"."DR_REPORT_VIEW"."VIEW_CODE" IS 'The unique string
+  the frontend sends to initiate a drill-down.';
+COMMENT ON COLUMN "FINCORE"."DR_REPORT_VIEW"."REQUIRED_ROLE_IDS" IS 'Comma-
+  separated list of permitted integer Role IDs (e.g., 54,56). Null or empty
+  means public access. Admin (10) has implicit access.';
+COMMENT ON TABLE "FINCORE"."DR_REPORT_VIEW" IS 'Maps a logical view to a
+  physical Druid datasource. Enforces RBAC.';
+
+------------------------------------------------------------------------------------------
+-- DDL for Index SYS_C0012775
+------------------------------------------------------------------------------------------
+
+CREATE UNIQUE INDEX "FINCORE"."SYS_C0012775" ON
+"FINCORE"."DR_REPORT_VIEW" ("ID")
+;
+
+------------------------------------------------------------------------------------------
+-- DDL for Index SYS_C0012776
+------------------------------------------------------------------------------------------
+
+CREATE UNIQUE INDEX "FINCORE"."SYS_C0012776" ON
+"FINCORE"."DR_REPORT_VIEW" ("VIEW_CODE")
+;
+
+------------------------------------------------------------------------------------------
+-- DDL for Index IDX_DR_VIEW_DS_ID
+------------------------------------------------------------------------------------------
+
+CREATE INDEX "FINCORE"."IDX_DR_VIEW_DS_ID" ON
+"FINCORE"."DR_REPORT_VIEW" ("DATASOURCE_ID")
+;
+
+------------------------------------------------------------------------------------------
+-- DDL for Index IDX_DR_VIEW_REPORT_ID
+------------------------------------------------------------------------------------------
+
+CREATE INDEX "FINCORE"."IDX_DR_VIEW_REPORT_ID" ON
+"FINCORE"."DR_REPORT_VIEW" ("REPORT_ID")
+;
+
+------------------------------------------------------------------------------------------
+-- Constraints for Table DR_REPORT_VIEW
+------------------------------------------------------------------------------------------
+
+ALTER TABLE "FINCORE"."DR_REPORT_VIEW" MODIFY ("ID" NOT NULL ENABLE);
+ALTER TABLE "FINCORE"."DR_REPORT_VIEW" MODIFY ("REPORT_ID" NOT NULL ENABLE);
+ALTER TABLE "FINCORE"."DR_REPORT_VIEW" MODIFY ("DATASOURCE_ID" NOT NULL ENABLE);
+ALTER TABLE "FINCORE"."DR_REPORT_VIEW" MODIFY ("VIEW_CODE" NOT NULL ENABLE);
+ALTER TABLE "FINCORE"."DR_REPORT_VIEW" MODIFY ("DISPLAY_NAME" NOT NULL ENABLE);
+ALTER TABLE "FINCORE"."DR_REPORT_VIEW" MODIFY ("IS_ACTIVE" NOT NULL ENABLE);
+ALTER TABLE "FINCORE"."DR_REPORT_VIEW" MODIFY ("CREATED_BY" NOT NULL ENABLE);
+ALTER TABLE "FINCORE"."DR_REPORT_VIEW" MODIFY ("CREATED_DT" NOT NULL ENABLE);
+ALTER TABLE "FINCORE"."DR_REPORT_VIEW" ADD PRIMARY KEY ("ID")
+  USING INDEX ENABLE;
+ALTER TABLE "FINCORE"."DR_REPORT_VIEW" ADD UNIQUE ("VIEW_CODE");
+ALTER TABLE "FINCORE"."DR_REPORT_VIEW" ADD CONSTRAINT "FK_DR_VIEW_REPORT"
+  FOREIGN KEY ("REPORT_ID") REFERENCES "FINCORE"."DR_REPORT" ("ID") ENABLE;
+ALTER TABLE "FINCORE"."DR_REPORT_VIEW" ADD CONSTRAINT "FK_DR_VIEW_DS"
+  FOREIGN KEY ("DATASOURCE_ID") REFERENCES "FINCORE"."DR_DATASOURCE" ("ID")
+  ENABLE;
+
+
+------------------------------------------------------------------------------------------
+-- DDL for Table DR_VIEW_DIMENSION
+------------------------------------------------------------------------------------------
+
+CREATE TABLE "FINCORE"."DR_VIEW_DIMENSION"
+  ( "ID" NUMBER(19,0) GENERATED ALWAYS AS IDENTITY MINVALUE 1 MAXVALUE
+    9999999999999999999999999999 INCREMENT BY 1 START WITH 1 CACHE 20
+    NOORDER  NOCYCLE  NOKEEP  NOSCALE ,
+    "VIEW_ID" NUMBER(19,0),
+    "LOGICAL_NAME" VARCHAR2(50),
+    "PHYSICAL_COLUMN" VARCHAR2(100),
+    "DRILL_LEVEL" NUMBER(5,0),
+    "CREATED_BY" VARCHAR2(50) DEFAULT 'SYSTEM',
+    "CREATED_DT" TIMESTAMP (6) DEFAULT SYSTIMESTAMP,
+    "IS_EXPRESSION" NUMBER(1,0) DEFAULT 0
+  ) ;
+
+COMMENT ON COLUMN "FINCORE"."DR_VIEW_DIMENSION"."DRILL_LEVEL" IS 'The sequence
+  1, 2, 3... defines the strict hierarchy path.';
+COMMENT ON COLUMN "FINCORE"."DR_VIEW_DIMENSION"."IS_EXPRESSION" IS 'If 1, the
+  physical column is treated as a raw SQL expression. If 0, it is wrapped in
+  standard quotes.';
+COMMENT ON TABLE "FINCORE"."DR_VIEW_DIMENSION" IS 'Translates frontend
+  dimension requests to Druid columns and enforces drill-down order.';
+
+------------------------------------------------------------------------------------------
+-- DDL for Index SYS_C0012786
+------------------------------------------------------------------------------------------
+
+CREATE UNIQUE INDEX "FINCORE"."SYS_C0012786" ON
+"FINCORE"."DR_VIEW_DIMENSION" ("ID")
+;
+
+------------------------------------------------------------------------------------------
+-- DDL for Index UQ_VIEW_LOGICAL_DIM
+------------------------------------------------------------------------------------------
+
+CREATE UNIQUE INDEX "FINCORE"."UQ_VIEW_LOGICAL_DIM" ON
+"FINCORE"."DR_VIEW_DIMENSION" ("VIEW_ID", "LOGICAL_NAME")
+;
+
+------------------------------------------------------------------------------------------
+-- DDL for Index UQ_VIEW_DRILL_LVL
+------------------------------------------------------------------------------------------
+
+CREATE UNIQUE INDEX "FINCORE"."UQ_VIEW_DRILL_LVL" ON
+"FINCORE"."DR_VIEW_DIMENSION" ("VIEW_ID", "DRILL_LEVEL")
+;
+
+------------------------------------------------------------------------------------------
+-- DDL for Index IDX_DR_DIM_VIEW_ID
+------------------------------------------------------------------------------------------
+
+CREATE INDEX "FINCORE"."IDX_DR_DIM_VIEW_ID" ON
+"FINCORE"."DR_VIEW_DIMENSION" ("VIEW_ID")
+;
+
+------------------------------------------------------------------------------------------
+-- Constraints for Table DR_VIEW_DIMENSION
+------------------------------------------------------------------------------------------
+
+ALTER TABLE "FINCORE"."DR_VIEW_DIMENSION" MODIFY ("ID" NOT NULL ENABLE);
+ALTER TABLE "FINCORE"."DR_VIEW_DIMENSION" MODIFY ("VIEW_ID" NOT NULL ENABLE);
+ALTER TABLE "FINCORE"."DR_VIEW_DIMENSION" MODIFY ("LOGICAL_NAME" NOT NULL ENABLE);
+ALTER TABLE "FINCORE"."DR_VIEW_DIMENSION" MODIFY ("PHYSICAL_COLUMN" NOT NULL
+  ENABLE);
+ALTER TABLE "FINCORE"."DR_VIEW_DIMENSION" MODIFY ("DRILL_LEVEL" NOT NULL ENABLE);
+ALTER TABLE "FINCORE"."DR_VIEW_DIMENSION" MODIFY ("CREATED_BY" NOT NULL ENABLE);
+ALTER TABLE "FINCORE"."DR_VIEW_DIMENSION" MODIFY ("CREATED_DT" NOT NULL ENABLE);
+ALTER TABLE "FINCORE"."DR_VIEW_DIMENSION" MODIFY ("IS_EXPRESSION" NOT NULL
+  ENABLE);
+ALTER TABLE "FINCORE"."DR_VIEW_DIMENSION" ADD PRIMARY KEY ("ID")
+  USING INDEX ENABLE;
+ALTER TABLE "FINCORE"."DR_VIEW_DIMENSION" ADD CONSTRAINT "UQ_VIEW_LOGICAL_DIM"
+  UNIQUE ("VIEW_ID", "LOGICAL_NAME") USING INDEX ENABLE;
+ALTER TABLE "FINCORE"."DR_VIEW_DIMENSION" ADD CONSTRAINT "UQ_VIEW_DRILL_LVL"
+  UNIQUE ("VIEW_ID", "DRILL_LEVEL") USING INDEX ENABLE;
+ALTER TABLE "FINCORE"."DR_VIEW_DIMENSION" ADD CONSTRAINT "FK_DR_DIM_VIEW"
+  FOREIGN KEY ("VIEW_ID") REFERENCES "FINCORE"."DR_REPORT_VIEW" ("ID") ENABLE;
+
+
+------------------------------------------------------------------------------------------
+-- DDL for Table DR_VIEW_METRIC
+------------------------------------------------------------------------------------------
+
+CREATE TABLE "FINCORE"."DR_VIEW_METRIC"
+  ( "ID" NUMBER GENERATED BY DEFAULT AS IDENTITY MINVALUE 1 MAXVALUE
+    9999999999999999999999999999 INCREMENT BY 1 START WITH 1 CACHE 20
+    NOORDER  NOCYCLE  NOKEEP  NOSCALE ,
+    "VIEW_ID" NUMBER,
+    "LOGICAL_NAME" VARCHAR2(100),
+    "DISPLAY_NAME" VARCHAR2(150),
+    "SQL_EXPRESSION" VARCHAR2(500)
+  ) ;
+
+COMMENT ON COLUMN "FINCORE"."DR_VIEW_METRIC"."ID" IS 'Primary Key
+  (Auto-Generated)';
+COMMENT ON COLUMN "FINCORE"."DR_VIEW_METRIC"."VIEW_ID" IS 'Foreign key linking
+  to DR_REPORT_VIEW';
+COMMENT ON COLUMN "FINCORE"."DR_VIEW_METRIC"."LOGICAL_NAME" IS 'The exact JSON
+  string sent by the React UI (e.g., TotalAmount)';
+COMMENT ON COLUMN "FINCORE"."DR_VIEW_METRIC"."DISPLAY_NAME" IS 'The human-
+  readable label for the UI (e.g., Total P&L Amount)';
+COMMENT ON COLUMN "FINCORE"."DR_VIEW_METRIC"."SQL_EXPRESSION" IS 'The raw
+  Apache Druid SQL aggregation logic (e.g., ROUND(SUM("AMOUNT"), 4))';
+COMMENT ON TABLE "FINCORE"."DR_VIEW_METRIC" IS 'Stores dynamic SQL metric
+  aggregations for the Semantic Layer.';
+
+------------------------------------------------------------------------------------------
+-- DDL for Index SYS_C0012991
+------------------------------------------------------------------------------------------
+
+CREATE UNIQUE INDEX "FINCORE"."SYS_C0012991" ON
+"FINCORE"."DR_VIEW_METRIC" ("ID")
+;
+
+------------------------------------------------------------------------------------------
+-- DDL for Index UQ_DR_VIEW_METRIC_LOGICAL
+------------------------------------------------------------------------------------------
+
+CREATE UNIQUE INDEX "FINCORE"."UQ_DR_VIEW_METRIC_LOGICAL" ON
+"FINCORE"."DR_VIEW_METRIC" ("VIEW_ID", "LOGICAL_NAME")
+;
+
+------------------------------------------------------------------------------------------
+-- DDL for Index IDX_DR_VIEW_METRIC_VIEW_ID
+------------------------------------------------------------------------------------------
+
+CREATE INDEX "FINCORE"."IDX_DR_VIEW_METRIC_VIEW_ID" ON
+"FINCORE"."DR_VIEW_METRIC" ("VIEW_ID")
+;
+
+------------------------------------------------------------------------------------------
+-- Constraints for Table DR_VIEW_METRIC
+------------------------------------------------------------------------------------------
+
+ALTER TABLE "FINCORE"."DR_VIEW_METRIC" MODIFY ("ID" NOT NULL ENABLE);
+ALTER TABLE "FINCORE"."DR_VIEW_METRIC" MODIFY ("VIEW_ID" NOT NULL ENABLE);
+ALTER TABLE "FINCORE"."DR_VIEW_METRIC" MODIFY ("LOGICAL_NAME" NOT NULL ENABLE);
+ALTER TABLE "FINCORE"."DR_VIEW_METRIC" MODIFY ("DISPLAY_NAME" NOT NULL ENABLE);
+ALTER TABLE "FINCORE"."DR_VIEW_METRIC" MODIFY ("SQL_EXPRESSION" NOT NULL
+  ENABLE);
+ALTER TABLE "FINCORE"."DR_VIEW_METRIC" ADD PRIMARY KEY ("ID")
+  USING INDEX ENABLE;
+ALTER TABLE "FINCORE"."DR_VIEW_METRIC" ADD CONSTRAINT
+  "UQ_DR_VIEW_METRIC_LOGICAL" UNIQUE ("VIEW_ID", "LOGICAL_NAME") USING INDEX
+  ENABLE;
+ALTER TABLE "FINCORE"."DR_VIEW_METRIC" ADD CONSTRAINT "FK_DR_VIEW_METRIC_VIEW"
+  FOREIGN KEY ("VIEW_ID") REFERENCES "FINCORE"."DR_REPORT_VIEW" ("ID")
+  ON DELETE CASCADE ENABLE;
+
+
 
